@@ -6,6 +6,11 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Base envelope for every domain event published through {@link EventPublisher}.
+ * Broker-agnostic: extend this for a concrete event payload rather than depending
+ * on any specific queue technology.
+ */
 @Getter
 @NoArgsConstructor
 public class BaseEvent {

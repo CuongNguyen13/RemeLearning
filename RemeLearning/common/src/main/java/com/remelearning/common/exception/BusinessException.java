@@ -3,6 +3,11 @@ package com.remelearning.common.exception;
 import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
+/**
+ * Base exception for expected, domain-level failures (as opposed to bugs/crashes).
+ * Caught by {@link com.remelearning.common.web.GlobalExceptionHandler} and mapped
+ * straight to the matching HTTP status and {@link ErrorCode}.
+ */
 @Getter
 public class BusinessException extends RuntimeException {
 

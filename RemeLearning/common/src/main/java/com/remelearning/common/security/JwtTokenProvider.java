@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
 
+/** Issues and validates HMAC-signed JWTs shared by all services for authentication. */
 @Component
 @RequiredArgsConstructor
 public class JwtTokenProvider {
@@ -23,6 +24,7 @@ public class JwtTokenProvider {
 		return Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
 	}
 
+	/** Issues a signed token for {@code subject} (typically the user id) carrying {@code claims}. */
 	public String generateToken(String subject, Map<String, Object> claims) {
 		Instant now = Instant.now();
 		return Jwts.builder()
@@ -34,6 +36,7 @@ public class JwtTokenProvider {
 				.compact();
 	}
 
+	/** Verifies the signature/expiry and returns the token's claims; throws if invalid. */
 	public Claims parseClaims(String token) {
 		return Jwts.parser()
 				.verifyWith(signingKey())

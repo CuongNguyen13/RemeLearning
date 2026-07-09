@@ -1,5 +1,6 @@
 package com.remelearning.common.exception;
 
+/** Stable machine-readable codes returned in {@link com.remelearning.common.response.ApiResponse} on failure. */
 public enum ErrorCode {
 
 	VALIDATION_ERROR,
@@ -7,6 +8,7 @@ public enum ErrorCode {
 	UNAUTHORIZED,
 	FORBIDDEN,
 	CONFLICT,
+	/** A downstream service/vendor (LLM, STT, S3, ...) failed or timed out. */
 	EXTERNAL_SERVICE_ERROR,
 	INTERNAL_ERROR
 }

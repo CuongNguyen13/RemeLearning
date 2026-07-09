@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 
+/** Redis-backed {@link CacheClient} implementation; values are JSON-serialized (see {@link RedisConfig}). */
 @Component
 @RequiredArgsConstructor
 public class RedisCacheClient implements CacheClient {

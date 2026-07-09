@@ -11,6 +11,10 @@ import software.amazon.awssdk.services.s3.S3ClientBuilder;
 
 import java.net.URI;
 
+/**
+ * Builds the shared {@link S3Client} bean from {@code reme.s3.*} properties.
+ * {@code endpoint} can point at an S3-compatible service (e.g. MinIO) for local development.
+ */
 @Configuration
 @ConfigurationProperties(prefix = "reme.s3")
 public class S3ClientConfig {

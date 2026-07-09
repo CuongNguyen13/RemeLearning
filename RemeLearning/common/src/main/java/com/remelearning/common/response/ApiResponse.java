@@ -5,6 +5,7 @@ import lombok.Getter;
 
 import java.time.Instant;
 
+/** Standard REST response envelope returned by every service's controllers. */
 @Getter
 @Builder
 public class ApiResponse<T> {
