@@ -1,0 +1,1 @@
+-- Initial schema for vocabulary-service (reme_vocabulary)

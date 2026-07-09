@@ -1,0 +1,1 @@
+-- Initial schema for recommendation-service (reme_recommendation)

@@ -1,0 +1,1 @@
+-- Initial schema for dashboard-service (reme_dashboard)

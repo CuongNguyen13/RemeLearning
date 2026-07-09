@@ -1,0 +1,1 @@
+-- Initial schema for pronunciation-service (reme_pronunciation)

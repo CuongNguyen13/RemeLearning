@@ -1,0 +1,1 @@
+-- Initial schema for user-service (reme_user)

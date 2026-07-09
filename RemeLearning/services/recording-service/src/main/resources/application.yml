@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: recording-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/reme_recording
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8082
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+reme:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+    expiration-minutes: 60
+  s3:
+    region: ${S3_REGION:ap-southeast-1}
+    endpoint: ${S3_ENDPOINT:}
+    access-key: ${S3_ACCESS_KEY:}
+    secret-key: ${S3_SECRET_KEY:}
