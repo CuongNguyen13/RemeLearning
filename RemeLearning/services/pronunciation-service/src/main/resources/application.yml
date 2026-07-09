@@ -5,6 +5,10 @@ spring:
     url: jdbc:postgresql://localhost:5432/reme_pronunciation
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
   flyway:

@@ -13,7 +13,7 @@
 	<artifactId>common</artifactId>
 	<packaging>jar</packaging>
 	<name>common</name>
-	<description>Shared library used by all RemeLearning microservices: error handling, API response envelope, Kafka event wrapper, S3 client, JWT/security utils</description>
+	<description>Shared library used by all RemeLearning microservices: error handling, API response envelope, queue event wrapper, S3 client, cache client, JWT/security utils</description>
 
 	<dependencies>
 		<dependency>
@@ -23,6 +23,14 @@
 		<dependency>
 			<groupId>org.springframework.kafka</groupId>
 			<artifactId>spring-kafka</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
