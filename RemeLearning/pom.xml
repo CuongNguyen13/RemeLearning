@@ -19,6 +19,7 @@
 
 	<modules>
 		<module>common</module>
+		<module>services/bff-service</module>
 		<module>services/user-service</module>
 		<module>services/recording-service</module>
 		<module>services/pronunciation-service</module>
@@ -34,6 +35,7 @@
 		<flyway.version>10.20.1</flyway.version>
 		<jjwt.version>0.12.6</jjwt.version>
 		<aws-sdk.version>2.29.29</aws-sdk.version>
+		<springdoc.version>2.7.0</springdoc.version>
 	</properties>
 
 	<dependencyManagement>
@@ -79,6 +81,16 @@
 				<groupId>software.amazon.awssdk</groupId>
 				<artifactId>s3</artifactId>
 				<version>${aws-sdk.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springdoc</groupId>
+				<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+				<version>${springdoc.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springdoc</groupId>
+				<artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+				<version>${springdoc.version}</version>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>

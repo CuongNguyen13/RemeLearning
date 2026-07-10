@@ -15,4 +15,8 @@ public final class KafkaTopics {
 	public static final String VOCABULARY_ANALYZED = "vocabulary.analyzed";
 	/** Published by recommendation-service once personalized exercises are generated. */
 	public static final String RECOMMENDATION_GENERATED = "recommendation.generated";
+	/** Published by a backend service once it has bundled a transcript with the learner's mistake history. */
+	public static final String LEARNING_GAP_ANALYSIS_REQUESTED = "learning.gap.analysis.requested";
+	/** Published by the AI service once recurring-mistake analysis and study recommendations are ready. */
+	public static final String LEARNING_GAP_ANALYZED = "learning.gap.analyzed";
 }
