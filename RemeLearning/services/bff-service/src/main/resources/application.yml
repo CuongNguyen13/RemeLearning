@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: bff-service
+
+server:
+  port: 8080
+
+reme:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+    expiration-minutes: 60
+  services:
+    user: ${USER_SERVICE_URL:http://localhost:8081}
+    recording: ${RECORDING_SERVICE_URL:http://localhost:8082}
+    pronunciation: ${PRONUNCIATION_SERVICE_URL:http://localhost:8083}
+    grammar: ${GRAMMAR_SERVICE_URL:http://localhost:8084}
+    vocabulary: ${VOCABULARY_SERVICE_URL:http://localhost:8085}
+    recommendation: ${RECOMMENDATION_SERVICE_URL:http://localhost:8086}
+    dashboard: ${DASHBOARD_SERVICE_URL:http://localhost:8087}
