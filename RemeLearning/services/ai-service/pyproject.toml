@@ -12,8 +12,25 @@ dependencies = [
     "aiokafka>=0.11",
     "boto3>=1.35",
     "faster-whisper>=1.0",
-    "pyannote.audio>=3.3",
-    "torch>=2.3",
+    # Pinned exactly: pyannote.audio>=4.0 hardcodes a dependency on the gated
+    # pyannote/speaker-diarization-community-1 model in SpeakerDiarization.__init__,
+    # with no way to opt out via Pipeline.from_pretrained(). 3.4.0 doesn't need it.
+    "pyannote.audio==3.4.0",
+    # torch/torchaudio pinned together: torchaudio removed the old backend-dispatch API
+    # (list_audio_backends, AudioMetaData, top-level info/load) that pyannote.audio 3.x
+    # depends on; anything newer than ~2.2.x breaks pyannote.audio 3.4.0's app/stt/diarization.py.
+    "torch==2.2.2",
+    "torchaudio==2.2.2",
+    # scipy>=1.13 requires numpy>=2, but torch/torchaudio 2.2.2 were built against numpy<2.
+    "numpy<2",
+    "scipy<1.13",
+    # huggingface_hub>=0.26 dropped the use_auth_token kwarg that pyannote.audio 3.4.0 calls
+    # internally (hf_hub_download(use_auth_token=...)).
+    "huggingface_hub<0.26",
+    # speechbrain 1.1.0 registers a lazy-import stub for speechbrain.integrations.k2_fsa that
+    # crashes pytorch_lightning's inspect.stack() walk when the optional `k2` package isn't
+    # installed - unrelated to whether k2 features are actually used. 1.0.3 predates this.
+    "speechbrain==1.0.3",
 ]
 
 [project.optional-dependencies]

@@ -85,8 +85,9 @@ pyannote.audio requires a HuggingFace token with access to `pyannote/speaker-dia
 
 ## Required Python libraries
 
-`pip install -e ".[dev]"` cài tất cả cùng lúc (khai báo trong `pyproject.toml`). Nếu muốn cài
-từng thư viện riêng lẻ (ví dụ để dễ debug thư viện nào lỗi), dùng các lệnh sau, mỗi thư viện một lệnh:
+`pip install -e ".[dev]"` cài tất cả cùng lúc theo đúng version đã pin trong `pyproject.toml`
+(**bắt buộc dùng đúng các version pin dưới đây** — xem lý do ở bảng bên dưới). Nếu muốn cài
+từng thư viện riêng lẻ, dùng các lệnh sau, mỗi thư viện một lệnh, đúng thứ tự:
 
 ```powershell
 pip install fastapi
@@ -97,8 +98,13 @@ pip install pydantic-settings
 pip install aiokafka
 pip install boto3
 pip install faster-whisper
-pip install pyannote.audio
-pip install torch
+pip install "torch==2.2.2"
+pip install "torchaudio==2.2.2"
+pip install "numpy<2"
+pip install "scipy<1.13"
+pip install "huggingface_hub<0.26"
+pip install "speechbrain==1.0.3"
+pip install "pyannote.audio==3.4.0"
 ```
 
 | Library | Purpose |
@@ -110,9 +116,14 @@ pip install torch
 | `pydantic-settings` | Loads config/env vars (`app/config.py`) |
 | `aiokafka` | Async Kafka consumer/producer for the event pipeline (`app/kafka/`) |
 | `boto3` | S3/MinIO client to download uploaded audio/video (`app/storage/s3_client.py`) |
-| `faster-whisper` | Speech-to-text engine (`app/stt/whisper_engine.py`) |
-| `pyannote.audio` | Speaker diarization (`app/stt/diarization.py`) — needs `HF_TOKEN` |
-| `torch` | Backend required by `faster-whisper`/`pyannote.audio` |
+| `faster-whisper` | Speech-to-text engine (`app/stt/whisper_engine.py`) — also decodes video containers (mp4...) |
+| `torch==2.2.2` | Backend required by `faster-whisper`/`pyannote.audio`. **Pin cứng**: bản mới hơn không tương thích `pyannote.audio` 3.x |
+| `torchaudio==2.2.2` | Đọc/ghi audio cho `pyannote.audio`. **Pin cứng**: bản >2.2.x đã xóa API cũ (`list_audio_backends`, `AudioMetaData`, `info`/`load`) mà `pyannote.audio` 3.x gọi trực tiếp |
+| `numpy<2` | `torch`/`torchaudio` 2.2.2 được build với numpy<2, dùng numpy 2.x sẽ lỗi runtime |
+| `scipy<1.13` | scipy≥1.13 yêu cầu numpy≥2 — xung đột với pin numpy<2 ở trên |
+| `huggingface_hub<0.26` | Bản ≥0.26 đã bỏ tham số `use_auth_token` mà `pyannote.audio` 3.4.0 gọi nội bộ khi tải model |
+| `speechbrain==1.0.3` | Dependency của `pyannote.audio`. Bản 1.1.0 có bug lazy-import `k2_fsa` làm crash khi load pipeline (không liên quan tới việc có dùng k2 hay không) |
+| `pyannote.audio==3.4.0` | Speaker diarization (`app/stt/diarization.py`) — needs `HF_TOKEN`. **Pin cứng**: bản ≥4.0 bắt buộc tải thêm model gated `pyannote/speaker-diarization-community-1` (cần được HuggingFace duyệt quyền riêng, không tự cài được) |
 
 Dev-only (chạy test):
 
@@ -133,9 +144,10 @@ nhận diện được package `app`:
 pip install -e . --no-deps
 ```
 
-**Lưu ý:** `torch` và `pyannote.audio` là các package ML nặng và cần bản wheel hỗ trợ phiên bản Python
-đang dùng. Nếu dùng Python quá mới (ví dụ 3.13+/3.14), một số thư viện có thể chưa có wheel sẵn — nên
-dùng Python 3.11 hoặc 3.12 trong virtualenv riêng cho service này để tránh lỗi cài đặt.
+**Lưu ý:** `torch`/`torchaudio`/`pyannote.audio`/`numpy`/`scipy`/`huggingface_hub`/`speechbrain` phải
+đúng version pin ở trên — đây là kết quả sau khi gỡ hàng loạt lỗi tương thích thực tế giữa các bản mới
+nhất của những package này trên Windows. Chạy trên **Python 3.11 hoặc 3.12** trong virtualenv riêng
+(không dùng Python 3.13+/3.14 — một số bản pin ở trên không có wheel cho Python quá mới).
 
 ## Run with docker-compose (Kafka, Redis, MinIO, ai-service)
 

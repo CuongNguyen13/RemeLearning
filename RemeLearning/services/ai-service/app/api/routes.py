@@ -11,6 +11,7 @@ from app.schemas.events import (
     TranscriptionResult,
 )
 from app.storage.s3_client import download_to_tempfile
+from app.stt.audio_convert import convert_to_wav
 from app.stt.diarization import DiarizationEngine
 from app.stt.pipeline import build_transcription_result
 from app.stt.whisper_engine import FasterWhisperEngine
@@ -45,12 +46,14 @@ def health() -> dict:
 def transcribe(event: RecordingUploadedEvent) -> TranscriptionResult:
     """Synchronous STT + diarization, for manual/ad-hoc calls (main pipeline uses Kafka)."""
     audio_path = download_to_tempfile(event.s3_bucket, event.s3_key)
+    wav_path = convert_to_wav(audio_path)
     try:
-        segments = _get_whisper_engine().transcribe(audio_path, event.language_code)
-        turns = _get_diarization_engine().diarize(audio_path)
+        segments = _get_whisper_engine().transcribe(wav_path, event.language_code)
+        turns = _get_diarization_engine().diarize(wav_path)
         return build_transcription_result(segments, turns)
     finally:
         os.remove(audio_path)
+        os.remove(wav_path)
 
 
 @router.post("/api/v1/upload", response_model=TranscriptionResult)
@@ -63,12 +66,14 @@ async def upload(file: UploadFile = File(...), language_code: str = Form("en")) 
         tmp.write(await file.read())
         audio_path = tmp.name
 
+    wav_path = convert_to_wav(audio_path)
     try:
-        segments = _get_whisper_engine().transcribe(audio_path, language_code)
-        turns = _get_diarization_engine().diarize(audio_path)
+        segments = _get_whisper_engine().transcribe(wav_path, language_code)
+        turns = _get_diarization_engine().diarize(wav_path)
         return build_transcription_result(segments, turns)
     finally:
         os.remove(audio_path)
+        os.remove(wav_path)
 
 
 @router.post("/api/v1/analyze", response_model=LearningGapAnalyzedEvent)

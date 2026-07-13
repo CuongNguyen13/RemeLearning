@@ -4,6 +4,7 @@ from app.kafka import topics
 from app.kafka.producer import event_producer
 from app.schemas.events import RecordingUploadedEvent, TranscriptReadyEvent
 from app.storage.s3_client import download_to_tempfile
+from app.stt.audio_convert import convert_to_wav
 from app.stt.diarization import DiarizationEngine
 from app.stt.pipeline import build_transcription_result
 from app.stt.whisper_engine import FasterWhisperEngine
@@ -29,12 +30,14 @@ def _get_diarization_engine() -> DiarizationEngine:
 async def handle_recording_uploaded(payload: dict) -> None:
     event = RecordingUploadedEvent.model_validate(payload)
     audio_path = download_to_tempfile(event.s3_bucket, event.s3_key)
+    wav_path = convert_to_wav(audio_path)
     try:
-        segments = _get_whisper_engine().transcribe(audio_path, event.language_code)
-        turns = _get_diarization_engine().diarize(audio_path)
+        segments = _get_whisper_engine().transcribe(wav_path, event.language_code)
+        turns = _get_diarization_engine().diarize(wav_path)
         result = build_transcription_result(segments, turns)
     finally:
         os.remove(audio_path)
+        os.remove(wav_path)
 
     ready_event = TranscriptReadyEvent(
         recording_id=event.recording_id,

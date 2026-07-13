@@ -37,3 +37,12 @@ reme:
     endpoint: ${S3_ENDPOINT:}
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
+  llm:
+    provider: ${LLM_PROVIDER:gemini}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-2.0-flash}
+
+vocabulary:
+  classifier:
+    mode: ${VOCABULARY_CLASSIFIER_MODE:rule-based} # rule-based | llm

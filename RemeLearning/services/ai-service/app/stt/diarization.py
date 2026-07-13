@@ -10,7 +10,7 @@ class DiarizationEngine:
     def __init__(self) -> None:
         self._pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            token=settings.hf_token or None,
+            use_auth_token=settings.hf_token or None,
         )
         if settings.device != "cpu":
             import torch
