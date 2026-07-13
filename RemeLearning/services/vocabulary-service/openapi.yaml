@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: Vocabulary Service API
+  description: >
+    Vocabulary usage analysis and suggestion. Consumes ai-service's `transcript.ready`
+    and `learning.gap.analyzed` Kafka events, persists them, and exposes read APIs.
+    `learning.gap.analyzed` carries weak points across all categories (grammar/vocabulary/
+    pronunciation) — this service only persists items where `category = "vocabulary"`.
+  version: v1
+servers:
+  - url: http://localhost:8085
+    description: Local dev
+
+tags:
+  - name: Transcripts
+    description: Transcripts persisted from ai-service's transcript.ready event
+  - name: Vocabulary Weak Points
+    description: Recurring/forgotten vocabulary items, classified by word type / phrase type
+
+paths:
+  /api/v1/transcripts/{recordingId}:
+    get:
+      tags: [Transcripts]
+      summary: Get the stored transcript for a recording
+      description: Includes timestamped, speaker-tagged segments, ordered by segment order.
+      operationId: getTranscriptByRecordingId
+      parameters:
+        - name: recordingId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: rec-0001
+      responses:
+        "200":
+          description: Transcript found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseTranscript"
+        "404":
+          description: No transcript stored for this recordingId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/vocabulary/weak-points/{userId}:
+    get:
+      tags: [Vocabulary Weak Points]
+      summary: List a learner's forgotten vocabulary items
+      description: >
+        Sorted by forgetting_score descending. Optionally filtered to a single
+        VocabularyType.
+      operationId: getVocabularyWeakPointsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user-0001
+        - name: type
+          in: query
+          required: false
+          description: Filter to a single vocabulary type
+          schema:
+            $ref: "#/components/schemas/VocabularyType"
+      responses:
+        "200":
+          description: List of weak points (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWeakPointList"
+
+  /api/v1/vocabulary/weak-points/{userId}/grouped:
+    get:
+      tags: [Vocabulary Weak Points]
+      summary: Same as GET /{userId}, grouped by vocabulary type
+      description: Convenience endpoint returning weak points bucketed by word type / phrase type.
+      operationId: getVocabularyWeakPointsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user-0001
+      responses:
+        "200":
+          description: Weak points grouped by VocabularyType
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWeakPointGrouped"
+
+components:
+  schemas:
+    VocabularyType:
+      type: string
+      description: >
+        Single-word part-of-speech (NOUN/VERB/ADJECTIVE/ADVERB) or multi-word unit
+        (PHRASAL_VERB/COLLOCATION/IDIOM). OTHER when the rule-based classifier can't tell.
+      enum:
+        - NOUN
+        - VERB
+        - ADJECTIVE
+        - ADVERB
+        - PHRASAL_VERB
+        - COLLOCATION
+        - IDIOM
+        - OTHER
+
+    TranscriptSegment:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        transcriptId:
+          type: integer
+          format: int64
+        speaker:
+          type: string
+          example: student
+        content:
+          type: string
+          example: I was reluctant to give up so easily.
+        startSeconds:
+          type: number
+          format: double
+          example: 12.4
+        endSeconds:
+          type: number
+          format: double
+          example: 15.9
+        segmentOrder:
+          type: integer
+
+    TranscriptResponse:
+      type: object
+      properties:
+        recordingId:
+          type: string
+          example: rec-0001
+        userId:
+          type: string
+          example: user-0001
+        fullText:
+          type: string
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+
+    VocabularyWeakPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        recordingId:
+          type: string
+          example: rec-0001
+        userId:
+          type: string
+          example: user-0001
+        itemId:
+          type: string
+          example: item-042
+        label:
+          type: string
+          example: "word: reluctant"
+        vocabularyType:
+          $ref: "#/components/schemas/VocabularyType"
+        forgettingScore:
+          type: number
+          format: double
+          example: 2.31
+        recommendation:
+          type: string
+          example: "Ôn lại từ vựng: word: reluctant. Đặt câu mới với từ này và ôn lại theo lịch spaced-repetition."
+        updatedAt:
+          type: string
+          format: date-time
+
+    ApiResponseTranscript:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TranscriptResponse"
+
+    ApiResponseWeakPointList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/VocabularyWeakPoint"
+
+    ApiResponseWeakPointGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyWeakPoint"
+              example:
+                ADJECTIVE:
+                  - itemId: item-042
+                    label: "word: reluctant"
+                    vocabularyType: ADJECTIVE
+                    forgettingScore: 2.31
+                PHRASAL_VERB:
+                  - itemId: item-051
+                    label: "phrase: give up"
+                    vocabularyType: PHRASAL_VERB
+                    forgettingScore: 1.87
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              nullable: true
+            errorCode:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+              example: "Transcript not found for recordingId=rec-0001"
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success:
+          type: boolean
+        errorCode:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time

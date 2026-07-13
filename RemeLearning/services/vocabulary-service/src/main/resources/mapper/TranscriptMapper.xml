@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.vocabulary.mapper.TranscriptMapper">
+
+    <insert id="insertTranscript" parameterType="com.remelearning.vocabulary.domain.Transcript"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO transcripts (recording_id, user_id, full_text, created_at)
+        VALUES (#{recordingId}, #{userId}, #{fullText}, now())
+    </insert>
+
+    <insert id="insertSegment" parameterType="com.remelearning.vocabulary.domain.TranscriptSegment">
+        INSERT INTO transcript_segments (transcript_id, speaker, content, start_seconds, end_seconds, segment_order)
+        VALUES (#{transcriptId}, #{speaker}, #{content}, #{startSeconds}, #{endSeconds}, #{segmentOrder})
+    </insert>
+
+    <select id="findByRecordingId" resultType="com.remelearning.vocabulary.domain.Transcript">
+        SELECT id, recording_id, user_id, full_text, created_at
+        FROM transcripts
+        WHERE recording_id = #{recordingId}
+    </select>
+
+    <select id="findSegmentsByTranscriptId" resultType="com.remelearning.vocabulary.domain.TranscriptSegment">
+        SELECT id, transcript_id, speaker, content, start_seconds, end_seconds, segment_order
+        FROM transcript_segments
+        WHERE transcript_id = #{transcriptId}
+        ORDER BY segment_order ASC
+    </select>
+
+</mapper>
