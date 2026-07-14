@@ -1,1 +1,0 @@
--- Initial schema for grammar-service (reme_grammar)

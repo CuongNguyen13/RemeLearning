@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: english-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/reme_english
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: english-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8085
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+reme:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+    expiration-minutes: 60
+  s3:
+    region: ${S3_REGION:ap-southeast-1}
+    endpoint: ${S3_ENDPOINT:}
+    access-key: ${S3_ACCESS_KEY:}
+    secret-key: ${S3_SECRET_KEY:}
+  llm:
+    provider: ${LLM_PROVIDER:gemini}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-2.0-flash}
+
+vocabulary:
+  classifier:
+    mode: ${VOCABULARY_CLASSIFIER_MODE:rule-based} # rule-based | llm

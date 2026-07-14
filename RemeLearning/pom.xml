@@ -22,9 +22,7 @@
 		<module>services/bff-service</module>
 		<module>services/user-service</module>
 		<module>services/recording-service</module>
-		<module>services/pronunciation-service</module>
-		<module>services/grammar-service</module>
-		<module>services/vocabulary-service</module>
+		<module>services/english-service</module>
 		<module>services/recommendation-service</module>
 		<module>services/dashboard-service</module>
 	</modules>
