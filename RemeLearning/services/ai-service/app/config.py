@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     device: str = "cpu"
     hf_token: str = ""
 
+    vision_enabled: bool = False
+    vision_frame_interval_seconds: float = 10.0
+    gemini_api_key: str = ""
+    gemini_vision_model: str = "gemini-2.0-flash"
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 

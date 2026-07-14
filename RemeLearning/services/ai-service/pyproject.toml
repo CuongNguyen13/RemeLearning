@@ -11,6 +11,10 @@ dependencies = [
     "pydantic-settings>=2.6",
     "aiokafka>=0.11",
     "boto3>=1.35",
+    "httpx>=0.27",
+    # Used by app/stt/audio_convert.py (container -> WAV) and app/vision/frame_extractor.py
+    # (video -> sampled JPEG frames).
+    "av>=12.0",
     "faster-whisper>=1.0",
     # Pinned exactly: pyannote.audio>=4.0 hardcodes a dependency on the gated
     # pyannote/speaker-diarization-community-1 model in SpeakerDiarization.__init__,

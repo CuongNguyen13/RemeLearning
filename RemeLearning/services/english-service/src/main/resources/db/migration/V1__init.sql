@@ -1,6 +1,6 @@
--- Initial schema for english-service (reme_english) - vocabulary domain.
--- Grammar and pronunciation domains have no tables yet; add their own V__ migrations
--- under this same db/migration folder once those modules gain real persistence.
+-- Initial schema for english-service (reme_english) - vocabulary domain, plus the
+-- transcripts/transcript_segments tables shared by all three domains.
+-- See V2__grammar.sql and V3__pronunciation.sql for those domains' weak-point tables.
 
 CREATE TABLE transcripts (
     id BIGSERIAL PRIMARY KEY,
@@ -25,8 +25,8 @@ CREATE TABLE transcript_segments (
 CREATE INDEX idx_transcript_segments_transcript_id ON transcript_segments (transcript_id);
 
 -- Only weak points with category = "vocabulary" from learning.gap.analyzed are stored here;
--- grammar/pronunciation categories belong to their own tables in this same service once
--- those domains are implemented.
+-- grammar/pronunciation categories belong to their own tables (grammar_weak_points,
+-- pronunciation_weak_points, see V2/V3).
 CREATE TABLE vocabulary_weak_points (
     id BIGSERIAL PRIMARY KEY,
     recording_id VARCHAR(100) NOT NULL,

@@ -1,0 +1,308 @@
+openapi: 3.0.3
+info:
+  title: English Service API
+  description: English-skill analysis (vocabulary, grammar, pronunciation) - modular monolith
+  version: v1
+servers:
+  - url: http://localhost:8085
+
+paths:
+  /api/v1/transcripts/{recordingId}:
+    get:
+      tags: [Transcripts]
+      summary: Get the stored transcript for a recording, including timestamped/speaker-tagged segments
+      operationId: getTranscriptByRecordingId
+      parameters:
+        - name: recordingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseTranscriptResponse"
+        "404":
+          description: No transcript stored for this recordingId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/vocabulary/weak-points/{userId}:
+    get:
+      tags: [Vocabulary Weak Points]
+      summary: List a learner's forgotten vocabulary items, optionally filtered by type, sorted by forgetting score desc
+      operationId: getVocabularyWeakPointsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/VocabularyType" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabularyWeakPointList"
+
+  /api/v1/vocabulary/weak-points/{userId}/grouped:
+    get:
+      tags: [Vocabulary Weak Points]
+      summary: Same as GET /{userId}, grouped by vocabulary type
+      operationId: getVocabularyWeakPointsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabularyWeakPointGrouped"
+
+  /api/v1/grammar/weak-points/{userId}:
+    get:
+      tags: [Grammar Weak Points]
+      summary: List a learner's recurring grammar mistakes, optionally filtered by rule type, sorted by forgetting score desc
+      operationId: getGrammarWeakPointsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/GrammarType" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarWeakPointList"
+
+  /api/v1/grammar/weak-points/{userId}/grouped:
+    get:
+      tags: [Grammar Weak Points]
+      summary: Same as GET /{userId}, grouped by grammar rule type
+      operationId: getGrammarWeakPointsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarWeakPointGrouped"
+
+  /api/v1/pronunciation/weak-points/{userId}:
+    get:
+      tags: [Pronunciation Weak Points]
+      summary: List a learner's recurring pronunciation issues, optionally filtered by type, sorted by forgetting score desc
+      operationId: getPronunciationWeakPointsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/PronunciationType" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePronunciationWeakPointList"
+
+  /api/v1/pronunciation/weak-points/{userId}/grouped:
+    get:
+      tags: [Pronunciation Weak Points]
+      summary: Same as GET /{userId}, grouped by pronunciation type
+      operationId: getPronunciationWeakPointsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePronunciationWeakPointGrouped"
+
+components:
+  schemas:
+    VocabularyType:
+      type: string
+      enum: [NOUN, VERB, ADJECTIVE, ADVERB, PHRASAL_VERB, COLLOCATION, IDIOM, OTHER]
+
+    GrammarType:
+      type: string
+      enum: [TENSE, SUBJECT_VERB_AGREEMENT, ARTICLE, PREPOSITION, WORD_ORDER, PLURAL, PUNCTUATION, OTHER]
+
+    PronunciationType:
+      type: string
+      enum: [VOWEL, CONSONANT, STRESS, INTONATION, LINKING, RHYTHM, OTHER]
+
+    TranscriptSegment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        transcriptId: { type: integer, format: int64 }
+        speaker: { type: string }
+        content: { type: string }
+        startSeconds: { type: number, format: double }
+        endSeconds: { type: number, format: double }
+        segmentOrder: { type: integer }
+
+    TranscriptResponse:
+      type: object
+      properties:
+        recordingId: { type: string }
+        userId: { type: string }
+        fullText: { type: string }
+        segments:
+          type: array
+          items: { $ref: "#/components/schemas/TranscriptSegment" }
+
+    VocabularyWeakPoint:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        recordingId: { type: string }
+        userId: { type: string }
+        itemId: { type: string }
+        label: { type: string }
+        vocabularyType: { $ref: "#/components/schemas/VocabularyType" }
+        forgettingScore: { type: number, format: double }
+        recommendation: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    GrammarWeakPoint:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        recordingId: { type: string }
+        userId: { type: string }
+        itemId: { type: string }
+        label: { type: string }
+        grammarType: { $ref: "#/components/schemas/GrammarType" }
+        forgettingScore: { type: number, format: double }
+        recommendation: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    PronunciationWeakPoint:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        recordingId: { type: string }
+        userId: { type: string }
+        itemId: { type: string }
+        label: { type: string }
+        pronunciationType: { $ref: "#/components/schemas/PronunciationType" }
+        forgettingScore: { type: number, format: double }
+        recommendation: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    ApiResponseTranscriptResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/TranscriptResponse" }
+
+    ApiResponseVocabularyWeakPointList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/VocabularyWeakPoint" }
+
+    ApiResponseVocabularyWeakPointGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/VocabularyWeakPoint" }
+
+    ApiResponseGrammarWeakPointList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/GrammarWeakPoint" }
+
+    ApiResponseGrammarWeakPointGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/GrammarWeakPoint" }
+
+    ApiResponsePronunciationWeakPointList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/PronunciationWeakPoint" }
+
+    ApiResponsePronunciationWeakPointGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/PronunciationWeakPoint" }
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }

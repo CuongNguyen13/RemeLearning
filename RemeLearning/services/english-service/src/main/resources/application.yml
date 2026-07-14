@@ -46,3 +46,11 @@ reme:
 vocabulary:
   classifier:
     mode: ${VOCABULARY_CLASSIFIER_MODE:rule-based} # rule-based | llm
+
+grammar:
+  classifier:
+    mode: ${GRAMMAR_CLASSIFIER_MODE:rule-based} # rule-based | llm
+
+pronunciation:
+  classifier:
+    mode: ${PRONUNCIATION_CLASSIFIER_MODE:rule-based} # rule-based | llm
