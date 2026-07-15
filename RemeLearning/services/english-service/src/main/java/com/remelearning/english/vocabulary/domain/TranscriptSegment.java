@@ -18,4 +18,5 @@ public class TranscriptSegment {
 	private double startSeconds;
 	private double endSeconds;
 	private int segmentOrder;
+	private String language;
 }

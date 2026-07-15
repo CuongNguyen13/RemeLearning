@@ -32,3 +32,4 @@ reme:
     endpoint: ${S3_ENDPOINT:}
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
+    user-photo-bucket: ${S3_USER_PHOTO_BUCKET:reme-user-photos}

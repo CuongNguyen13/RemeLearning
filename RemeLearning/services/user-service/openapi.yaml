@@ -115,6 +115,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseError"
 
+  /api/v1/users/{userId}/photo:
+    post:
+      tags: [Users]
+      summary: Upload/replace a user's profile photo; stored in S3, exposed via photoUrl so
+        ai-service can fetch it for face-recognition enrollment
+      operationId: uploadUserPhoto
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseUserResponse"
+        "400":
+          description: file missing/empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+        "404":
+          description: No user stored for this userId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+        "502":
+          description: Upload to S3 failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
 components:
   schemas:
     RegisterRequest:
@@ -145,6 +191,7 @@ components:
         email: { type: string, format: email }
         name: { type: string }
         role: { type: string, enum: [LEARNER, TEACHER, ADMIN] }
+        photoUrl: { type: string, nullable: true, description: S3 URL of the profile photo, if one was uploaded }
         createdAt: { type: string, format: date-time }
 
     AuthResponse:

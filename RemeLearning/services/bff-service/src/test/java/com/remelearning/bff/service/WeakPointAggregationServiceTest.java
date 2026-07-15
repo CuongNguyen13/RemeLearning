@@ -56,12 +56,31 @@ class WeakPointAggregationServiceTest {
 				.verifyComplete();
 	}
 
+	@Test
+	void nextPracticeSetMergesAllCategoriesSortsByForgettingScoreDescAndLimits() {
+		WeakPointDto low = weakPoint("vocabulary", 0.2);
+		WeakPointDto high = weakPoint("grammar", 0.9);
+		WeakPointDto mid = weakPoint("pronunciation", 0.5);
+
+		when(englishServiceClient.getVocabularyWeakPoints("user-1")).thenReturn(Mono.just(List.of(low)));
+		when(englishServiceClient.getGrammarWeakPoints("user-1")).thenReturn(Mono.just(List.of(high)));
+		when(englishServiceClient.getPronunciationWeakPoints("user-1")).thenReturn(Mono.just(List.of(mid)));
+
+		StepVerifier.create(service.getNextPracticeSet("user-1", 2))
+				.assertNext(top -> assertThat(top).containsExactly(high, mid))
+				.verifyComplete();
+	}
+
 	private WeakPointDto weakPoint(String category) {
+		return weakPoint(category, 0.5);
+	}
+
+	private WeakPointDto weakPoint(String category, double forgettingScore) {
 		WeakPointDto dto = new WeakPointDto();
 		dto.setItemId("item-1");
 		dto.setLabel("label");
 		dto.setCategory(category);
-		dto.setForgettingScore(0.5);
+		dto.setForgettingScore(forgettingScore);
 		dto.setRecommendation("Review " + category);
 		return dto;
 	}

@@ -9,13 +9,13 @@
     </insert>
 
     <select id="findByUserId" resultType="com.remelearning.user.domain.User">
-        SELECT id, user_id, email, password_hash, name, role, created_at, updated_at
+        SELECT id, user_id, email, password_hash, name, role, photo_s3_key, photo_url, created_at, updated_at
         FROM users
         WHERE user_id = #{userId}
     </select>
 
     <select id="findByEmail" resultType="com.remelearning.user.domain.User">
-        SELECT id, user_id, email, password_hash, name, role, created_at, updated_at
+        SELECT id, user_id, email, password_hash, name, role, photo_s3_key, photo_url, created_at, updated_at
         FROM users
         WHERE email = #{email}
     </select>
@@ -23,6 +23,12 @@
     <update id="updateName">
         UPDATE users
         SET name = #{name}, updated_at = now()
+        WHERE user_id = #{userId}
+    </update>
+
+    <update id="updatePhoto">
+        UPDATE users
+        SET photo_s3_key = #{photoS3Key}, photo_url = #{photoUrl}, updated_at = now()
         WHERE user_id = #{userId}
     </update>
 

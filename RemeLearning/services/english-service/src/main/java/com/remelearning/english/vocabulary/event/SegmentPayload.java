@@ -9,4 +9,5 @@ public class SegmentPayload {
 	private String text;
 	private double startSeconds;
 	private double endSeconds;
+	private String language;
 }

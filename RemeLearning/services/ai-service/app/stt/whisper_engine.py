@@ -21,3 +21,18 @@ class FasterWhisperEngine(SpeechToTextEngine):
             RawSegment(text=segment.text.strip(), start_seconds=segment.start, end_seconds=segment.end)
             for segment in segments
         ]
+
+    def transcribe_auto(self, audio_path: str, language_code: str | None) -> tuple[list[RawSegment], str]:
+        """Transcribes a single clip and reports which language was used.
+
+        Passing None lets faster-whisper auto-detect the language from the audio itself
+        (`info.language`), instead of forcing a language across the whole clip - used to
+        resolve each diarized speaker turn's language independently.
+        """
+        segments, info = self._model.transcribe(audio_path, language=language_code)
+        raw_segments = [
+            RawSegment(text=segment.text.strip(), start_seconds=segment.start, end_seconds=segment.end)
+            for segment in segments
+        ]
+        detected_language = language_code or info.language
+        return raw_segments, detected_language

@@ -19,6 +19,8 @@ public class User {
 	private String passwordHash;
 	private String name;
 	private String role;
+	private String photoS3Key;
+	private String photoUrl;
 	private Instant createdAt;
 	private Instant updatedAt;
 }

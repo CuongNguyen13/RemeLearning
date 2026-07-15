@@ -46,6 +46,7 @@ public class TranscriptServiceImpl implements TranscriptService {
 					.startSeconds(segment.getStartSeconds())
 					.endSeconds(segment.getEndSeconds())
 					.segmentOrder(order++)
+					.language(segment.getLanguage())
 					.build());
 		}
 	}

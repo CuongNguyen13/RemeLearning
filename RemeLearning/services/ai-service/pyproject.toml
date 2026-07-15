@@ -35,6 +35,23 @@ dependencies = [
     # crashes pytorch_lightning's inspect.stack() walk when the optional `k2` package isn't
     # installed - unrelated to whether k2 features are actually used. 1.0.3 predates this.
     "speechbrain==1.0.3",
+    # Face detection + ArcFace embeddings for app/face/ (speaker identification). Pip-installable
+    # (unlike face_recognition/dlib, no C++ build tools needed); downloads the buffalo_l model
+    # pack on first run, same "pretrained model fetched at runtime" pattern as pyannote/whisper.
+    # 1.0+ ships a pure-Python wheel (py3-none-any) - older 0.7.x is sdist-only on Windows and
+    # needs MSVC Build Tools to compile its thirdparty/face3d cython extension (unrelated to
+    # the detection/recognition path this service actually uses).
+    "insightface>=1.0",
+    "onnxruntime>=1.18",
+    "opencv-python>=4.9",
+    # Acoustic feature extraction (pitch/jitter/shimmer/spectral flatness) for the heuristic
+    # human-vs-synthetic voice classifier in app/voice_auth/.
+    "librosa>=0.10",
+    # Persistence for app/db/ (schema "ai" in a new reme_ai Postgres database) - the Python
+    # equivalent of the Java services' Flyway + MyBatis stack.
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -42,3 +59,9 @@ dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+# migrations/ (Alembic scripts, not an importable package) would otherwise be picked up
+# alongside app/ as a second top-level package, which setuptools' flat-layout auto-discovery
+# refuses to do implicitly.
+include = ["app*"]

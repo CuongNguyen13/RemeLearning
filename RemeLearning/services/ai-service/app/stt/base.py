@@ -22,3 +22,8 @@ class SpeechToTextEngine(ABC):
     @abstractmethod
     def transcribe(self, audio_path: str, language_code: str = "en") -> list[RawSegment]:
         raise NotImplementedError
+
+    @abstractmethod
+    def transcribe_auto(self, audio_path: str, language_code: str | None) -> tuple[list[RawSegment], str]:
+        """Like transcribe, but also reports the language used (auto-detected when language_code is None)."""
+        raise NotImplementedError

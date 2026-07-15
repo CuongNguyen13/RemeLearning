@@ -21,7 +21,7 @@ sequenceDiagram
 
     Kafka->>Consumer: transcript.ready payload<br/>{recording_id, user_id, full_text, segments[]}
     Consumer->>Codec: decode(payload) -> TranscriptReadyEvent
-    Codec-->>Consumer: TranscriptReadyEvent{recordingId, userId, fullText,<br/>segments: SegmentPayload[]{speaker, text, startSeconds, endSeconds}}
+    Codec-->>Consumer: TranscriptReadyEvent{recordingId, userId, fullText,<br/>segments: SegmentPayload[]{speaker, text, startSeconds, endSeconds, language}}
 
     Consumer->>Svc: saveTranscript(event)
     activate Svc
@@ -36,7 +36,7 @@ sequenceDiagram
         Svc->>Mapper: insertTranscript(recordingId, userId, fullText)
         Mapper->>DB: INSERT INTO transcripts
         loop each segment (segmentOrder = incrementing index)
-            Svc->>Mapper: insertSegment(transcriptId, speaker, content, startSeconds, endSeconds, segmentOrder)
+            Svc->>Mapper: insertSegment(transcriptId, speaker, content, startSeconds, endSeconds, segmentOrder, language)
             Mapper->>DB: INSERT INTO transcript_segments
         end
         Note over Svc,DB: @Transactional - all inserts atomic
@@ -57,6 +57,11 @@ sequenceDiagram
 ## Notes
 
 - Idempotency key: `recording_id` — required since Kafka delivers at-least-once.
+- `segments[].language` (added in `V4__transcript_segment_language.sql`) records which language
+  ai-service transcribed that segment in — each diarized speaker turn is auto-detected/transcribed
+  independently, so a recording with speakers using different languages carries one language per
+  segment rather than a single language for the whole transcript. See
+  [../Ai_service/overview.md](../Ai_service/overview.md).
 - `segments[]` may include `speaker == "vision"` entries when ai-service's `VISION_ENABLED=true`
   (Gemini frame-captioning, see [../Ai_service/overview.md](../Ai_service/overview.md)) — persisted
   the same as any other segment, no special-casing needed here.

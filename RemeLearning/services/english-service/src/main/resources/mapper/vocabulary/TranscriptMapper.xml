@@ -9,8 +9,8 @@
     </insert>
 
     <insert id="insertSegment" parameterType="com.remelearning.english.vocabulary.domain.TranscriptSegment">
-        INSERT INTO transcript_segments (transcript_id, speaker, content, start_seconds, end_seconds, segment_order)
-        VALUES (#{transcriptId}, #{speaker}, #{content}, #{startSeconds}, #{endSeconds}, #{segmentOrder})
+        INSERT INTO transcript_segments (transcript_id, speaker, content, start_seconds, end_seconds, segment_order, language)
+        VALUES (#{transcriptId}, #{speaker}, #{content}, #{startSeconds}, #{endSeconds}, #{segmentOrder}, #{language})
     </insert>
 
     <select id="findByRecordingId" resultType="com.remelearning.english.vocabulary.domain.Transcript">
@@ -20,7 +20,7 @@
     </select>
 
     <select id="findSegmentsByTranscriptId" resultType="com.remelearning.english.vocabulary.domain.TranscriptSegment">
-        SELECT id, transcript_id, speaker, content, start_seconds, end_seconds, segment_order
+        SELECT id, transcript_id, speaker, content, start_seconds, end_seconds, segment_order, language
         FROM transcript_segments
         WHERE transcript_id = #{transcriptId}
         ORDER BY segment_order ASC

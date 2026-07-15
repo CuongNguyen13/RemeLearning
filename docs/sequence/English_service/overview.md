@@ -1,14 +1,18 @@
 # english-service — Overview
 
-`english-service` (Java/Spring Boot) is a modular monolith covering three domains — `vocabulary`,
-`grammar`, `pronunciation` (each `com.remelearning.english.<domain>`) — all now built out. Only
-`vocabulary` owns the `TranscriptReadyConsumer`/transcript persistence: the `transcripts`/
-`transcript_segments` tables are a cross-domain concern written once, and `grammar`/`pronunciation`
-read them back via the shared `GET /api/v1/transcripts/{recordingId}` endpoint instead of
-re-ingesting `transcript.ready`. All three domains do have their own `LearningGapAnalyzedConsumer`,
-each filtering `learning.gap.analyzed` to its own `category` and each on its own Kafka `groupId`
-(`english-service`, `english-service-grammar`, `english-service-pronunciation`) — necessary because
-Kafka splits partitions between consumers sharing one `groupId` on the same topic. See
+`english-service` (Java/Spring Boot) is a modular monolith covering three analysis domains —
+`vocabulary`, `grammar`, `pronunciation` (each `com.remelearning.english.<domain>`) — plus a fourth,
+cross-cutting `practice` package for redo-exercises. Only `vocabulary` owns the
+`TranscriptReadyConsumer`/transcript persistence: the `transcripts`/`transcript_segments` tables are
+a cross-domain concern written once, and `grammar`/`pronunciation` read them back via the shared
+`GET /api/v1/transcripts/{recordingId}` endpoint instead of re-ingesting `transcript.ready`. All
+three domains do have their own `LearningGapAnalyzedConsumer`, each filtering `learning.gap.analyzed`
+to its own `category` and each on its own Kafka `groupId` (`english-service`,
+`english-service-grammar`, `english-service-pronunciation`) — necessary because Kafka splits
+partitions between consumers sharing one `groupId` on the same topic. `practice` adds a **fourth**
+consumer of the same topic (`groupId: english-service-practice`, no category filter) to seed mistake
+history, plus the service's first Kafka **producer**, `AnalysisRequestedProducer`
+(`learning.gap.analysis.requested`) — see section 3 below. See
 `RemeLearning/services/english-service/src/main/java/com/remelearning/english/`.
 
 This file covers `english-service`'s own internals only. The Kafka topics it consumes
@@ -21,7 +25,8 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 [english-transcript-ready.md](english-transcript-ready.md),
 [english-learning-gap-analyzed.md](english-learning-gap-analyzed.md) (vocabulary),
 [english-learning-gap-analyzed-grammar.md](english-learning-gap-analyzed-grammar.md),
-[english-learning-gap-analyzed-pronunciation.md](english-learning-gap-analyzed-pronunciation.md).
+[english-learning-gap-analyzed-pronunciation.md](english-learning-gap-analyzed-pronunciation.md),
+[practice-redo.md](practice-redo.md) (mistake-history seeding + redo-exercise grading).
 
 ## 1. Kafka consumers (ingestion)
 
@@ -130,15 +135,51 @@ sequenceDiagram
     WCtrl-->>Caller: 200 (list or map keyed by the domain's type enum)
 ```
 
+## 3. Practice / redo-exercise (`practice` package)
+
+Full detail in [practice-redo.md](practice-redo.md); summary below.
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    background: '#ffffff'
+---
+sequenceDiagram
+    participant Kafka
+    participant Seed as MistakeHistorySeedConsumer (groupId=english-service-practice)
+    participant Caller
+    participant Ctrl as PracticeController
+    participant Svc as PracticeServiceImpl
+    participant DB as reme_english DB (mistake_history, practice_attempts)
+    participant Producer as AnalysisRequestedProducer
+
+    Kafka->>Seed: learning.gap.analyzed (no category filter)
+    Seed->>DB: seed mistake_history (ON CONFLICT DO NOTHING) - first sighting only
+
+    Caller->>Ctrl: POST /api/v1/practice/redo {userId, attempts[]}
+    Ctrl->>Svc: redo(request)
+    Svc->>DB: log each attempt + upsert mistake_history<br/>(occurrence_count++ only if wrong, last_seen_at always refreshed)
+    Svc->>DB: findByUserId(userId) - full current history
+    Svc->>Producer: publish(AnalysisRequestedEvent{recordingId, userId, segments=[], history})
+    Producer->>Kafka: learning.gap.analysis.requested
+    Ctrl-->>Caller: 200 ApiResponse{success:true}
+
+    Note over Kafka: ai-service re-scores and republishes learning.gap.analyzed,<br/>which feeds back into section 1's consumers (including MistakeHistorySeedConsumer,<br/>a no-op there since history already exists) plus recommendation-service/dashboard-service
+```
+
 ## Notes
 
-- Idempotency keys: `recording_id` for transcripts, `(user_id, item_id)` for weak points — both
-  needed because Kafka delivers at-least-once.
+- Idempotency keys: `recording_id` for transcripts, `(user_id, item_id)` for weak points and for
+  `mistake_history` — needed because Kafka delivers at-least-once.
 - `grammar`/`pronunciation` each persist to their own table (`grammar_weak_points`,
   `pronunciation_weak_points`) via their own `LearningGapAnalyzedConsumer`, filtered to their own
   `category` and running on their own Kafka `groupId` so all three domains get every message
   instead of splitting partitions between them.
-- No outbound Kafka event is published by `english-service` today (`vocabulary.analyzed`,
-  `grammar.analyzed`, `pronunciation.analyzed` topic constants exist but have no producer yet).
-- For where these Kafka messages come from (S3 download, Whisper, pyannote diarization,
-  `RuleBasedAnalyzer`), see [../Ai_service/overview.md](../Ai_service/overview.md).
+- `vocabulary.analyzed`/`grammar.analyzed`/`pronunciation.analyzed` topic constants still exist with
+  no producer. `learning.gap.analysis.requested`, however, now has one:
+  `practice.kafka.AnalysisRequestedProducer` (section 3) — the redo-exercise flow is the mechanism
+  by which a learner's mistake history gets bundled and sent back to `ai-service` for re-scoring.
+- For where the *original* `learning.gap.analyzed` messages come from (S3 download, Whisper,
+  pyannote diarization, `RuleBasedAnalyzer`), see [../Ai_service/overview.md](../Ai_service/overview.md).

@@ -151,6 +151,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponsePronunciationWeakPointGrouped"
 
+  /api/v1/practice/redo:
+    post:
+      tags: [Practice]
+      summary: >
+        Submit the graded results of a learner redoing an exercise (vocabulary/grammar/pronunciation
+        items mixed together); grades and logs each attempt, refreshes mistake history, and asks
+        ai-service to recompute forgetting scores so recommendations are re-proposed
+      operationId: redoPractice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PracticeRedoRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVoid"
+
 components:
   schemas:
     VocabularyType:
@@ -306,3 +328,29 @@ components:
         - type: object
           properties:
             data: { nullable: true }
+
+    ApiResponseVoid:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }
+
+    PracticeAttemptRequest:
+      type: object
+      required: [itemId, category, label, correct]
+      properties:
+        itemId: { type: string }
+        category: { type: string, description: "vocabulary, grammar or pronunciation" }
+        label: { type: string }
+        correct: { type: boolean }
+
+    PracticeRedoRequest:
+      type: object
+      required: [userId, attempts]
+      properties:
+        userId: { type: string }
+        attempts:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/PracticeAttemptRequest" }

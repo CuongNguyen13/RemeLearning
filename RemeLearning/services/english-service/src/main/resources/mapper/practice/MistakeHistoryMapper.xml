@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.practice.mapper.MistakeHistoryMapper">
+
+    <insert id="seedIfAbsent" parameterType="com.remelearning.english.practice.domain.MistakeHistoryEntry">
+        INSERT INTO mistake_history
+            (user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at)
+        VALUES
+            (#{userId}, #{itemId}, #{category}, #{label}, #{occurrenceCount}, now(), now())
+        ON CONFLICT (user_id, item_id) DO NOTHING
+    </insert>
+
+    <insert id="recordAttempt">
+        INSERT INTO mistake_history
+            (user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at)
+        VALUES
+            (#{userId}, #{itemId}, #{category}, #{label}, CASE WHEN #{correct} THEN 0 ELSE 1 END, now(), now())
+        ON CONFLICT (user_id, item_id) DO UPDATE SET
+            label = EXCLUDED.label,
+            category = EXCLUDED.category,
+            occurrence_count = mistake_history.occurrence_count + EXCLUDED.occurrence_count,
+            last_seen_at = now(),
+            updated_at = now()
+    </insert>
+
+    <select id="findByUserId" resultType="com.remelearning.english.practice.domain.MistakeHistoryEntry">
+        SELECT id, user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at
+        FROM mistake_history
+        WHERE user_id = #{userId}
+        ORDER BY occurrence_count DESC
+    </select>
+
+</mapper>

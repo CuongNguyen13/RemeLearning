@@ -17,7 +17,8 @@ import org.springframework.context.annotation.ComponentScan;
 @MapperScan({
 		"com.remelearning.english.vocabulary.mapper",
 		"com.remelearning.english.grammar.mapper",
-		"com.remelearning.english.pronunciation.mapper"
+		"com.remelearning.english.pronunciation.mapper",
+		"com.remelearning.english.practice.mapper"
 })
 public class EnglishServiceApplication {
 

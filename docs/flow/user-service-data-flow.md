@@ -47,13 +47,30 @@ flowchart TD
         NotFoundPatch["404 NOT_FOUND"]
     end
 
+    subgraph PhotoInput["Input (photo upload)"]
+        PhotoReq["multipart file<br/>(POST /api/v1/users/{userId}/photo)"]
+    end
+
+    subgraph PhotoFlow["Photo upload"]
+        FindForPhoto["UserMapper.findByUserId(userId)"]
+        NotFoundPhoto["404 NOT_FOUND"]
+        EmptyCheck{"file empty?"}
+        RejectPhoto["400 BAD_REQUEST"]
+        S3Put["S3StorageClient.upload<br/>key: {userId}/photo/{filename}"]
+        S3Fail["502 BAD_GATEWAY"]
+        S3ObjUrl["S3StorageClient.objectUrl -> photoUrl"]
+        UpdatePhotoRow["UserMapper.updatePhoto<br/>SET photo_s3_key, photo_url"]
+    end
+
     subgraph Storage["Storage"]
         DB[("reme_user DB<br/>users table")]
+        S3Bucket[("S3/MinIO<br/>reme.s3.user-photo-bucket")]
     end
 
     subgraph Output["Output"]
         AuthResp["AuthResponse<br/>{token, user: UserResponse}"]
-        UserResp["UserResponse<br/>{userId, email, name, role, createdAt}"]
+        UserResp["UserResponse<br/>{userId, email, name, role, photoUrl, createdAt}"]
+        AiConsumer["ai-service's UserServiceClient.get_user<br/>(GET /api/v1/users/{userId}) - later, separate call"]
     end
 
     RegisterReq --> ValidateReg
@@ -74,6 +91,16 @@ flowchart TD
     PatchProfile --> DB
     DB -->|not found| NotFoundPatch
     DB -->|found| UserResp
+
+    PhotoReq --> FindForPhoto --> DB
+    DB -->|not found| NotFoundPhoto
+    DB -->|found| EmptyCheck
+    EmptyCheck -->|yes| RejectPhoto
+    EmptyCheck -->|no| S3Put --> S3Bucket
+    S3Put -->|upload fails| S3Fail
+    S3Put -->|succeeds| S3ObjUrl --> UpdatePhotoRow --> DB
+    UpdatePhotoRow --> UserResp
+    UserResp -.photoUrl.-> AiConsumer
 ```
 
 ## Data shape at each stage
@@ -86,7 +113,9 @@ flowchart TD
 | JWT | HMAC-signed, `subject = userId`, claims `{email, role}`, expires after `reme.jwt.expiration-minutes` (default 60) | issued by `common`'s `JwtTokenProvider`; nothing validates it yet anywhere in the repo |
 | `AuthResponse` (JSON out) | `{token, user: UserResponse}` | returned by both register and login |
 | `UpdateProfileRequest` (JSON in) | `{name}` | only field mutable today |
-| `UserResponse` (JSON out) | `{userId, email, name, role, createdAt}` | never includes `password`/`passwordHash`; returned by register, login, get-profile, update-profile |
+| `UserResponse` (JSON out) | `{userId, email, name, role, photoUrl, createdAt}` | never includes `password`/`passwordHash`; returned by register, login, get-profile, update-profile, photo-upload |
+| Multipart photo file (JSON in) | binary, any image content type | no content-type/size validation beyond "not empty" |
+| `photo_s3_key`/`photo_url` (DB columns) | `VARCHAR`, nullable | added by `V2__user_photo.sql`; both null until a photo is ever uploaded |
 
 ## Where data comes from / where it can go next
 
@@ -99,3 +128,8 @@ flowchart TD
 - The issued JWT is not yet consumed anywhere: no service (including `user-service` itself) has a
   `SecurityConfig`/filter that validates it on incoming requests. It exists purely so a future
   auth-enforcement pass has something to validate against.
+- **New**: `photoUrl` is consumed by `ai-service`'s `UserServiceClient.get_user` (`GET
+  /api/v1/users/{userId}`) to fetch a reference photo for face-recognition enrollment - see
+  [../sequence/Ai_service/enroll-face.md](../sequence/Ai_service/enroll-face.md) and
+  [ai-service-data-flow.md](ai-service-data-flow.md). This is the first real cross-service consumer
+  of any `user-service` field besides `userId` itself.

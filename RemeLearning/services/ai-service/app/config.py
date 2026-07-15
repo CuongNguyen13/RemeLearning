@@ -19,14 +19,44 @@ class Settings(BaseSettings):
     whisper_model_size: str = "small"
     device: str = "cpu"
     hf_token: str = ""
+    stt_max_concurrent_transcriptions: int = 4
 
     vision_enabled: bool = False
     vision_frame_interval_seconds: float = 10.0
     gemini_api_key: str = ""
     gemini_vision_model: str = "gemini-2.0-flash"
 
+    # Face recognition (app/face/) - identifies which enrolled person is speaking by matching
+    # faces sampled from each diarized speaker turn against photos fetched from user-service.
+    face_recognition_enabled: bool = False
+    face_match_similarity_threshold: float = 0.45
+    face_frames_per_turn: int = 3
+    user_service_base_url: str = "http://localhost:8081"
+
+    # Voice authenticity (app/voice_auth/) - heuristic human-vs-synthetic voice classifier,
+    # useful for recordings of Teams/Meet sessions where a TTS bot may be a participant.
+    voice_authenticity_enabled: bool = False
+
+    # ai-service's own Postgres database (reme_ai), schema "ai" - kept separate from the
+    # default "public" schema per-service convention every Java service uses. Env var names
+    # for the credentials intentionally match the Java services' (DB_USERNAME/DB_PASSWORD) so
+    # both sides share the same docker-compose network/env without translation.
+    ai_db_host: str = "localhost"
+    ai_db_port: int = 5432
+    ai_db_name: str = "reme_ai"
+    ai_db_schema: str = "ai"
+    db_username: str = "postgres"
+    db_password: str = "postgres"
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+
+    @property
+    def ai_database_url(self) -> str:
+        return (
+            f"postgresql+psycopg2://{self.db_username}:{self.db_password}"
+            f"@{self.ai_db_host}:{self.ai_db_port}/{self.ai_db_name}"
+        )
 
 
 settings = Settings()

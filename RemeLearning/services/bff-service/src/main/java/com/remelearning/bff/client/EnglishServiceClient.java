@@ -1,10 +1,12 @@
 package com.remelearning.bff.client;
 
+import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.WeakPointDto;
 import com.remelearning.common.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -40,6 +42,17 @@ public class EnglishServiceClient {
 	/** Fetches a learner's pronunciation weak points and tags each one with category="pronunciation". */
 	public Mono<List<WeakPointDto>> getPronunciationWeakPoints(String userId) {
 		return fetchWeakPoints("/api/v1/pronunciation/weak-points/{userId}", userId, "pronunciation");
+	}
+
+	/** Proxies a graded redo-exercise submission straight through to english-service's practice endpoint. */
+	public Mono<ApiResponse<Void>> redoPractice(PracticeRedoRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/practice/redo")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<Void>>() {})
+				.doOnError(ex -> log.error("Failed to proxy practice redo for userId={}", request.getUserId(), ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.

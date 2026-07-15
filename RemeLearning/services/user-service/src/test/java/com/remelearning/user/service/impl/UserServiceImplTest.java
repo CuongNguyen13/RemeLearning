@@ -2,6 +2,7 @@ package com.remelearning.user.service.impl;
 
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.security.JwtTokenProvider;
+import com.remelearning.common.storage.S3StorageClient;
 import com.remelearning.user.domain.User;
 import com.remelearning.user.dto.AuthResponse;
 import com.remelearning.user.dto.LoginRequest;
@@ -10,8 +11,11 @@ import com.remelearning.user.dto.UpdateProfileRequest;
 import com.remelearning.user.dto.UserResponse;
 import com.remelearning.user.mapper.UserMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -30,10 +35,14 @@ import static org.mockito.Mockito.when;
 
 class UserServiceImplTest {
 
+	private static final String USER_PHOTO_BUCKET = "reme-user-photos-test";
+
 	private final UserMapper userMapper = mock(UserMapper.class);
 	private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
 	private final JwtTokenProvider jwtTokenProvider = mock(JwtTokenProvider.class);
-	private final UserServiceImpl service = new UserServiceImpl(userMapper, passwordEncoder, jwtTokenProvider);
+	private final S3StorageClient s3StorageClient = mock(S3StorageClient.class);
+	private final UserServiceImpl service =
+			new UserServiceImpl(userMapper, passwordEncoder, jwtTokenProvider, s3StorageClient, USER_PHOTO_BUCKET);
 
 	@Test
 	void registerInsertsUserAndIssuesToken() {
@@ -178,5 +187,49 @@ class UserServiceImplTest {
 				.isInstanceOf(BusinessException.class);
 
 		verify(userMapper, never()).updateName(any(), any());
+	}
+
+	@Test
+	void uploadPhotoStoresToS3AndPersistsUrl() {
+		User before = User.builder().userId("user-1").email("learner@test.com").name("Learner One").role("LEARNER").build();
+		User after = User.builder().userId("user-1").email("learner@test.com").name("Learner One").role("LEARNER")
+				.photoUrl("https://s3.example.com/reme-user-photos-test/user-1/photo/face.jpg").build();
+		when(userMapper.findByUserId("user-1")).thenReturn(Optional.of(before), Optional.of(after));
+		when(s3StorageClient.objectUrl(eq(USER_PHOTO_BUCKET), anyString()))
+				.thenReturn("https://s3.example.com/reme-user-photos-test/user-1/photo/face.jpg");
+
+		MultipartFile file = new MockMultipartFile("file", "face.jpg", "image/jpeg", "fake-bytes".getBytes());
+
+		UserResponse response = service.uploadPhoto("user-1", file);
+
+		assertThat(response.photoUrl()).isEqualTo("https://s3.example.com/reme-user-photos-test/user-1/photo/face.jpg");
+		verify(s3StorageClient, times(1))
+				.upload(eq(USER_PHOTO_BUCKET), eq("user-1/photo/face.jpg"), any(InputStream.class), anyLong());
+		verify(userMapper, times(1)).updatePhoto(eq("user-1"), eq("user-1/photo/face.jpg"), anyString());
+	}
+
+	@Test
+	void uploadPhotoThrowsNotFoundWhenUserMissing() {
+		when(userMapper.findByUserId("missing")).thenReturn(Optional.empty());
+
+		MultipartFile file = new MockMultipartFile("file", "face.jpg", "image/jpeg", "fake-bytes".getBytes());
+
+		assertThatThrownBy(() -> service.uploadPhoto("missing", file))
+				.isInstanceOf(BusinessException.class);
+
+		verify(s3StorageClient, never()).upload(anyString(), anyString(), any(InputStream.class), anyLong());
+	}
+
+	@Test
+	void uploadPhotoRejectsEmptyFile() {
+		User user = User.builder().userId("user-1").build();
+		when(userMapper.findByUserId("user-1")).thenReturn(Optional.of(user));
+
+		MultipartFile emptyFile = new MockMultipartFile("file", "face.jpg", "image/jpeg", new byte[0]);
+
+		assertThatThrownBy(() -> service.uploadPhoto("user-1", emptyFile))
+				.isInstanceOf(BusinessException.class);
+
+		verify(s3StorageClient, never()).upload(anyString(), anyString(), any(InputStream.class), anyLong());
 	}
 }

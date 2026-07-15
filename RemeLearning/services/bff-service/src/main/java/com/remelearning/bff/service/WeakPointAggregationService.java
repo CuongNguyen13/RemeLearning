@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,20 @@ public class WeakPointAggregationService {
 					merged.put("pronunciation", tuple.getT3());
 					return merged;
 				});
+	}
+
+	/**
+	 * Builds the next redo-exercise set: merges all three domains' weak points and returns the
+	 * top {@code limit} by forgetting score desc - the items most worth re-testing right now.
+	 */
+	public Mono<List<WeakPointDto>> getNextPracticeSet(String userId, int limit) {
+		return getWeakPoints(userId)
+				.map(byCategory -> byCategory.values().stream()
+						.flatMap(List::stream)
+						.sorted(Comparator.comparing(WeakPointDto::getForgettingScore,
+								Comparator.nullsLast(Comparator.reverseOrder())))
+						.limit(limit)
+						.toList());
 	}
 
 	// Degrades a failed domain call to an empty list rather than failing the whole aggregated response.

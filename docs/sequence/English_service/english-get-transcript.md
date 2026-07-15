@@ -41,6 +41,6 @@ sequenceDiagram
 
 ## Notes
 
-- `segments[]` fields: `id, transcriptId, speaker, content, startSeconds, endSeconds, segmentOrder`.
+- `segments[]` fields: `id, transcriptId, speaker, content, startSeconds, endSeconds, segmentOrder, language`.
 - This data is written by the Kafka consumer `TranscriptReadyConsumer` — see
   [english-transcript-ready.md](english-transcript-ready.md).

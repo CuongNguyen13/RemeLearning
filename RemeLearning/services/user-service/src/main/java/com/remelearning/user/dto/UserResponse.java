@@ -8,5 +8,6 @@ public record UserResponse(
 		String email,
 		String name,
 		String role,
+		String photoUrl,
 		Instant createdAt) {
 }

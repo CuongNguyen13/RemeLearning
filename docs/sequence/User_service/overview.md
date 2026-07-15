@@ -12,7 +12,14 @@ filter, no Spring Security starter anywhere in the repo (only `spring-security-c
 `BCryptPasswordEncoder`). Every endpoint here is unauthenticated at the HTTP layer today.
 
 This file covers `user-service`'s own internals only. Per-endpoint detail lives in
-[register.md](register.md), [login.md](login.md), [get-profile.md](get-profile.md).
+[register.md](register.md), [login.md](login.md), [get-profile.md](get-profile.md),
+[photo-upload.md](photo-upload.md).
+
+`user-service` now also stores a profile photo (`photo_s3_key`/`photo_url` on `users`, via
+`POST /api/v1/users/{userId}/photo`, S3-backed the same way `recording-service` stores its files) -
+added so `ai-service`'s face-recognition feature has a reference image to enroll per userId, sourced
+from this service rather than requiring a caller to supply the image directly (see
+[photo-upload.md](photo-upload.md) and `../Ai_service/enroll-face.md`).
 
 ## 1. Register (write path)
 
@@ -129,6 +136,11 @@ sequenceDiagram
         Ctrl-->>Caller: 200 UserResponse
     end
 ```
+
+## 4. Photo upload (write path)
+
+See [photo-upload.md](photo-upload.md) for the full sequence diagram - uploads to S3 via `common`'s
+`S3StorageClient` (same client `recording-service` uses), then persists `photo_s3_key`/`photo_url`.
 
 ## Notes
 

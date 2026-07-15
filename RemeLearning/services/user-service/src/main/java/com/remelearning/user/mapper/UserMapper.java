@@ -20,4 +20,7 @@ public interface UserMapper {
 
 	/** Updates just the display name for a given userId. */
 	void updateName(@Param("userId") String userId, @Param("name") String name);
+
+	/** Updates the S3 key + public URL of a user's profile photo for a given userId. */
+	void updatePhoto(@Param("userId") String userId, @Param("photoS3Key") String photoS3Key, @Param("photoUrl") String photoUrl);
 }

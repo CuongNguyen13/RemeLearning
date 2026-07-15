@@ -6,11 +6,50 @@ class Segment(BaseModel):
     text: str
     start_seconds: float
     end_seconds: float
+    language: str = "en"
+
+
+class SpeakerIdentity(BaseModel):
+    """Best-guess identity for one diarized speaker label, from app/face/pipeline.py matching
+    faces sampled during that speaker's turns against enrolled reference photos."""
+
+    speaker: str
+    user_id: str
+    name: str
+    similarity: float
+
+
+class SegmentAuthenticity(BaseModel):
+    """Heuristic human-vs-synthetic verdict for one diarized speaker turn, from
+    app/voice_auth/heuristic_analyzer.py. Not a trained model - see that module's docstring."""
+
+    speaker: str
+    start_seconds: float
+    end_seconds: float
+    label: str  # "human" | "synthetic" | "uncertain"
+    confidence: float
 
 
 class TranscriptionResult(BaseModel):
     full_text: str
     segments: list[Segment]
+    # Correlates this response with the ai schema's face_recognition_results/
+    # voice_authenticity_results rows - generated when the caller doesn't already have a
+    # recordingId (e.g. the ad-hoc /api/v1/upload path).
+    recording_id: str | None = None
+    # Populated only when settings.face_recognition_enabled / voice_authenticity_enabled are
+    # true; empty otherwise. Deliberately kept off the Kafka transcript.ready contract (see
+    # docs/flow/ai-service-data-flow.md) so english-service's consumers are unaffected -
+    # these are ai-service-local, REST-response-only enrichments for now.
+    speaker_identities: list[SpeakerIdentity] = []
+    voice_authenticity: list[SegmentAuthenticity] = []
+
+
+class EnrolledFaceResponse(BaseModel):
+    """Public view of an enrolled known face - never includes the raw embedding vector."""
+
+    user_id: str
+    name: str
 
 
 class RecordingUploadedEvent(BaseModel):
@@ -18,7 +57,9 @@ class RecordingUploadedEvent(BaseModel):
     user_id: str
     s3_bucket: str
     s3_key: str
-    language_code: str = "en"
+    # None means "auto-detect per speaker turn" (multi-language recordings); a fixed
+    # code forces that language for every turn, matching the old single-language behavior.
+    language_code: str | None = "en"
 
 
 class TranscriptReadyEvent(BaseModel):
