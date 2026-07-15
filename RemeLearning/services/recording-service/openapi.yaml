@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: Recording Service API
+  description: Lesson recording ingestion (realtime + upload), S3 storage, publishes recording.uploaded
+  version: v1
+servers:
+  - url: http://localhost:8082
+
+paths:
+  /api/v1/recordings:
+    post:
+      tags: [Recordings]
+      summary: Upload a recording file; stores it in S3, persists metadata, and publishes recording.uploaded
+      operationId: uploadRecording
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, userId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                userId:
+                  type: string
+                languageCode:
+                  type: string
+                  default: en
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecordingResponse"
+        "400":
+          description: userId is blank or file is empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/recordings/{recordingId}:
+    get:
+      tags: [Recordings]
+      summary: Get a single recording's metadata by its recordingId
+      operationId: getRecordingByRecordingId
+      parameters:
+        - name: recordingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecordingResponse"
+        "404":
+          description: No recording stored for this recordingId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/recordings/user/{userId}:
+    get:
+      tags: [Recordings]
+      summary: List every recording uploaded by a given user, most recent first
+      operationId: getRecordingsByUserId
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecordingResponseList"
+
+components:
+  schemas:
+    RecordingResponse:
+      type: object
+      properties:
+        recordingId: { type: string }
+        userId: { type: string }
+        status: { type: string, enum: [UPLOADED] }
+        s3Bucket: { type: string }
+        s3Key: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ApiResponseRecordingResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/RecordingResponse" }
+
+    ApiResponseRecordingResponseList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/RecordingResponse" }
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }

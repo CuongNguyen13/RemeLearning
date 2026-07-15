@@ -32,3 +32,4 @@ reme:
     endpoint: ${S3_ENDPOINT:}
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
+    recording-bucket: ${S3_RECORDING_BUCKET:reme-recordings}

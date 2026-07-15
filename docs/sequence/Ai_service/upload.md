@@ -18,6 +18,7 @@ sequenceDiagram
     participant Conv as convert_to_wav (PyAV)
     participant Whisper as FasterWhisperEngine
     participant Diar as DiarizationEngine (pyannote)
+    participant Vision as GeminiVisionEngine
 
     Caller->>AI: POST /api/v1/upload<br/>multipart file + language_code (default "en")
     AI->>FS: write uploaded bytes to NamedTemporaryFile
@@ -32,6 +33,15 @@ sequenceDiagram
     Diar-->>AI: SpeakerTurn[] (speaker label + start/end)
 
     AI->>AI: build_transcription_result<br/>(merge STT + diarization by max time-overlap)
+
+    opt VISION_ENABLED=true
+        AI->>AI: extract_frames(audio_path, VISION_FRAME_INTERVAL_SECONDS)<br/>(PyAV, sampled JPEGs from the original video)
+        AI->>Vision: caption_frames(frames)
+        Vision-->>AI: FrameCaption[] (Gemini generateContent, inline image)
+        AI->>AI: merge_caption_segments<br/>(caption Segment[] with speaker="vision", ordered by timestamp)
+        AI->>FS: remove(frame image files)
+    end
+
     AI->>FS: remove(audio_path), remove(wav_path)
     AI-->>Caller: 200 TranscriptionResult<br/>{full_text, segments: [{speaker, text, start_seconds, end_seconds}]}
 ```
@@ -41,8 +51,12 @@ sequenceDiagram
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
 | 1 | HuggingFace Hub download | ai-service -> huggingface.co | diarization model, requires `HF_TOKEN`; cached after first call, no S3/Kafka involved |
+| 2 | Gemini `generateContent` (vision) | ai-service -> generativelanguage.googleapis.com | only when `VISION_ENABLED=true`; requires `GEMINI_API_KEY`; one call per sampled frame |
 
 ## Notes
 
 - No S3 or Kafka dependency — the only synchronous entry point that works with just a file in hand.
 - Temp files are always cleaned up in a `finally` block, even if transcription/diarization raises.
+- `VISION_ENABLED` (`app/config.py`, default `false`) gates the frame-captioning step
+  (`app/vision/`). When on, sampled-frame JPEGs are always removed after captioning, even if the
+  Gemini call raises.

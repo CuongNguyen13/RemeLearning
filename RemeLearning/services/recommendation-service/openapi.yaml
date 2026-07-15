@@ -1,0 +1,107 @@
+openapi: 3.0.3
+info:
+  title: Recommendation Service API
+  description: Aggregates weaknesses across all English-skill categories (vocabulary, grammar, pronunciation) from learning.gap.analyzed and generates personalized study recommendations
+  version: v1
+servers:
+  - url: http://localhost:8086
+
+paths:
+  /api/v1/recommendations/{userId}:
+    get:
+      tags: [Recommendations]
+      summary: List a learner's recommendations, optionally filtered by category, sorted by forgetting score desc
+      operationId: getRecommendationsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: category
+          in: query
+          required: false
+          description: Optional category filter (vocabulary, grammar, pronunciation) - no filter returns all categories
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecommendationList"
+
+  /api/v1/recommendations/{userId}/grouped:
+    get:
+      tags: [Recommendations]
+      summary: Same as GET /{userId}, grouped by category
+      operationId: getRecommendationsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecommendationGrouped"
+
+components:
+  schemas:
+    Recommendation:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: string }
+        recordingId: { type: string }
+        itemId: { type: string }
+        category: { type: string, description: "vocabulary, grammar, or pronunciation" }
+        label: { type: string }
+        forgettingScore: { type: number, format: double }
+        recommendationText: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    ApiResponseRecommendationList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/Recommendation" }
+
+    ApiResponseRecommendationGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/Recommendation" }
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }
+
+x-kafka-topics:
+  consumes:
+    - topic: learning.gap.analyzed
+      description: Published by ai-service after forgetting-pattern analysis; carries weak points across all categories. Unlike english-service's per-domain consumers, recommendation-service does not filter by category - every weak point becomes a recommendation row.
+  produces:
+    - topic: recommendation.generated
+      description: Published once a learning.gap.analyzed batch has been persisted as recommendations. recommendation-service is the first producer of this topic. Payload {eventId, eventType, occurredAt, recordingId, userId, recommendations[{itemId, category, label, recommendationText, forgettingScore}]}.

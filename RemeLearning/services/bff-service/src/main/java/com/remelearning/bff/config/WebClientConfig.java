@@ -22,19 +22,10 @@ public class WebClientConfig {
 		return WebClient.create(services.getRecording());
 	}
 
+	// vocabulary/grammar/pronunciation were merged into one english-service (port 8085); one client bean, not three
 	@Bean
-	public WebClient pronunciationServiceClient() {
-		return WebClient.create(services.getPronunciation());
-	}
-
-	@Bean
-	public WebClient grammarServiceClient() {
-		return WebClient.create(services.getGrammar());
-	}
-
-	@Bean
-	public WebClient vocabularyServiceClient() {
-		return WebClient.create(services.getVocabulary());
+	public WebClient englishServiceClient() {
+		return WebClient.create(services.getEnglish());
 	}
 
 	@Bean

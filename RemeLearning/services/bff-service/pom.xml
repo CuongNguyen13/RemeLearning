@@ -39,6 +39,12 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
 		</dependency>
+		<dependency>
+			<!-- StepVerifier for testing Mono/Flux-returning service methods; not pulled in transitively -->
+			<groupId>io.projectreactor</groupId>
+			<artifactId>reactor-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>

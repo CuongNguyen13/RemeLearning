@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.dashboard.mapper.WeakPointSnapshotMapper">
+
+    <insert id="upsert" parameterType="com.remelearning.dashboard.domain.WeakPointSnapshot">
+        INSERT INTO weak_points_snapshot
+            (user_id, recording_id, item_id, category, label, forgetting_score, recommendation, updated_at)
+        VALUES
+            (#{userId}, #{recordingId}, #{itemId}, #{category}, #{label}, #{forgettingScore}, #{recommendation}, now())
+        ON CONFLICT (user_id, item_id) DO UPDATE SET
+            recording_id = EXCLUDED.recording_id,
+            category = EXCLUDED.category,
+            label = EXCLUDED.label,
+            forgetting_score = EXCLUDED.forgetting_score,
+            recommendation = EXCLUDED.recommendation,
+            updated_at = now()
+    </insert>
+
+    <select id="selectProgressSummary" resultType="com.remelearning.dashboard.dto.CategoryProgress">
+        SELECT category,
+               COUNT(*) AS weak_point_count,
+               AVG(forgetting_score) AS avg_forgetting_score,
+               MAX(updated_at) AS last_updated
+        FROM weak_points_snapshot
+        WHERE user_id = #{userId}
+        GROUP BY category
+    </select>
+
+</mapper>

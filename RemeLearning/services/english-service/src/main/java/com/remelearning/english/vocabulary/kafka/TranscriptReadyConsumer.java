@@ -1,7 +1,7 @@
 package com.remelearning.english.vocabulary.kafka;
 
 import com.remelearning.common.constants.KafkaTopics;
-import com.remelearning.english.vocabulary.event.EventCodec;
+import com.remelearning.common.event.EventCodec;
 import com.remelearning.english.vocabulary.event.TranscriptReadyEvent;
 import com.remelearning.english.vocabulary.service.TranscriptService;
 import lombok.RequiredArgsConstructor;

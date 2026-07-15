@@ -2,7 +2,7 @@ package com.remelearning.english.pronunciation.service;
 
 import com.remelearning.english.pronunciation.domain.PronunciationType;
 import com.remelearning.english.pronunciation.domain.PronunciationWeakPoint;
-import com.remelearning.english.pronunciation.event.LearningGapAnalyzedEvent;
+import com.remelearning.common.event.LearningGapAnalyzedEvent;
 
 import java.util.List;
 

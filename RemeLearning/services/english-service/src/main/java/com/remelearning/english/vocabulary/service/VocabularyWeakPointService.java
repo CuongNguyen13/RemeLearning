@@ -2,7 +2,7 @@ package com.remelearning.english.vocabulary.service;
 
 import com.remelearning.english.vocabulary.domain.VocabularyType;
 import com.remelearning.english.vocabulary.domain.VocabularyWeakPoint;
-import com.remelearning.english.vocabulary.event.LearningGapAnalyzedEvent;
+import com.remelearning.common.event.LearningGapAnalyzedEvent;
 
 import java.util.List;
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.recording.mapper.RecordingMapper">
+
+    <insert id="insert" parameterType="com.remelearning.recording.domain.Recording"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recordings (recording_id, user_id, s3_bucket, s3_key, language_code,
+                                 original_filename, content_type, status, created_at)
+        VALUES (#{recordingId}, #{userId}, #{s3Bucket}, #{s3Key}, #{languageCode},
+                #{originalFilename}, #{contentType}, #{status}, now())
+    </insert>
+
+    <select id="findByRecordingId" resultType="com.remelearning.recording.domain.Recording">
+        SELECT id, recording_id, user_id, s3_bucket, s3_key, language_code,
+               original_filename, content_type, status, created_at
+        FROM recordings
+        WHERE recording_id = #{recordingId}
+    </select>
+
+    <select id="findByUserId" resultType="com.remelearning.recording.domain.Recording">
+        SELECT id, recording_id, user_id, s3_bucket, s3_key, language_code,
+               original_filename, content_type, status, created_at
+        FROM recordings
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+</mapper>

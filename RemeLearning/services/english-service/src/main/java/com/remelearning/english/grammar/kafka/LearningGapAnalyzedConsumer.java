@@ -1,8 +1,8 @@
 package com.remelearning.english.grammar.kafka;
 
 import com.remelearning.common.constants.KafkaTopics;
-import com.remelearning.english.grammar.event.EventCodec;
-import com.remelearning.english.grammar.event.LearningGapAnalyzedEvent;
+import com.remelearning.common.event.EventCodec;
+import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.english.grammar.service.GrammarWeakPointService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

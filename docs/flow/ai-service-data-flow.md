@@ -25,6 +25,12 @@ flowchart TD
         Merge["build_transcription_result<br/>merge STT + diarization by max time-overlap<br/>-> TranscriptionResult{full_text, segments[]}"]
     end
 
+    subgraph Vision["Vision captioning (optional, VISION_ENABLED=true)"]
+        FrameExtract["extract_frames (PyAV)<br/>-> FrameSample[] (sampled JPEG + timestamp, every VISION_FRAME_INTERVAL_SECONDS)"]
+        GeminiVision["GeminiVisionEngine.caption_frames<br/>Gemini generateContent (inline image)<br/>-> FrameCaption[] (caption + timestamp)"]
+        CaptionMerge["merge_caption_segments<br/>wrap captions as Segment(speaker=\"vision\") + merge into<br/>TranscriptionResult, ordered by timestamp"]
+    end
+
     subgraph Analysis["Forgetting-pattern analysis"]
         SegHist["segments[] + history[]<br/>(mistake stats bundled by caller)"]
         Rule["RuleBasedAnalyzer.analyze<br/>frequency count + Ebbinghaus-style recency decay"]
@@ -47,8 +53,15 @@ flowchart TD
     Whisper --> Merge
     Diarize --> Merge
 
-    Merge --> TranscriptReady
-    Merge --> RestResp1
+    RawFile --> FrameExtract
+    FrameExtract --> GeminiVision
+    Merge --> CaptionMerge
+    GeminiVision --> CaptionMerge
+
+    CaptionMerge --> TranscriptReady
+    CaptionMerge --> RestResp1
+    Merge -.VISION_ENABLED=false, skip Vision subgraph.-> TranscriptReady
+    Merge -.VISION_ENABLED=false, skip Vision subgraph.-> RestResp1
 
     SegHist --> Rule
     Rule --> WeakPoints
@@ -65,6 +78,9 @@ flowchart TD
 | RawSegment[] | `{text, start, end}` | no speaker info yet |
 | SpeakerTurn[] | `{speaker, start, end}` | no text yet |
 | TranscriptionResult | `{full_text, segments: [{speaker, text, start_seconds, end_seconds}]}` | merged by max time-overlap between the two above |
+| FrameSample[] | `{image_path, timestamp_seconds}` | only when `VISION_ENABLED=true`; sampled JPEGs removed after captioning |
+| FrameCaption[] | `{caption, timestamp_seconds}` | Gemini vision caption per sampled frame |
+| TranscriptionResult (with vision) | same shape as above, plus extra `segments` entries with `speaker == "vision"` | ordered by `start_seconds` alongside spoken-word segments |
 | weak_points[] | `{category, item_id, label, forgetting_score, recommendation}` | covers all categories (grammar/vocabulary/pronunciation); only `english-service`'s `vocabulary` domain persists them today |
 
 ## Where data leaves this service

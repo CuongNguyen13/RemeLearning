@@ -1,11 +1,17 @@
-# Kafka consumer: learning.gap.analyzed
+# Kafka consumer: learning.gap.analyzed (vocabulary)
 
-`LearningGapAnalyzedConsumer` listens on the `learning.gap.analyzed` topic (published by
-`ai-service` after forgetting-pattern analysis — see
-[../Ai_service/overview.md](../Ai_service/overview.md) and
+`LearningGapAnalyzedConsumer` (package `vocabulary.kafka`, `groupId: english-service`) listens on
+the `learning.gap.analyzed` topic (published by `ai-service` after forgetting-pattern analysis —
+see [../Ai_service/overview.md](../Ai_service/overview.md) and
 [../Ai_service/analyze.md](../Ai_service/analyze.md)), filters for the `vocabulary` category, and
 persists weak points. See `english-service`'s
 `vocabulary/kafka/LearningGapAnalyzedConsumer.java`.
+
+The `grammar` and `pronunciation` domains have their own consumers on the same topic, each with
+its own `groupId` (`english-service-grammar`, `english-service-pronunciation`) so all three receive
+every message instead of splitting partitions between them — see
+[english-learning-gap-analyzed-grammar.md](english-learning-gap-analyzed-grammar.md) and
+[english-learning-gap-analyzed-pronunciation.md](english-learning-gap-analyzed-pronunciation.md).
 
 ```mermaid
 ---
@@ -32,7 +38,7 @@ sequenceDiagram
     activate Svc
     loop each weak point
         alt category != "vocabulary" (case-insensitive)
-            Svc->>Svc: skip (grammar/pronunciation not persisted yet)
+            Svc->>Svc: skip (handled by grammar's/pronunciation's own consumer instead)
         else category == "vocabulary"
             Svc->>Cls: classify(label)
             opt vocabulary.classifier.mode = llm
@@ -63,9 +69,10 @@ sequenceDiagram
 
 - Idempotency key: `(user_id, item_id)` — re-analyzing the same item across sessions updates its
   score instead of creating a new row.
-- Grammar/pronunciation categories are currently skipped since those domains have no persistence
-  built out yet (`package-info.java` placeholder only) — route them to their own services once
-  they're ready.
+- Grammar/pronunciation categories are skipped here because they're persisted by their own
+  consumer instance in the same JVM (`grammar.kafka.LearningGapAnalyzedConsumer`,
+  `pronunciation.kafka.LearningGapAnalyzedConsumer`), each with its own `groupId` so it still gets
+  a full copy of every message.
 - No downstream event is published (the `vocabulary.analyzed` topic constant exists in
   `KafkaTopics.java` but has no producer yet — defined for future use only).
 - For the producer side (`RuleBasedAnalyzer`) and the full cross-service picture, see

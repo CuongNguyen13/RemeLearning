@@ -29,6 +29,7 @@ sequenceDiagram
     participant S3
     participant Whisper as FasterWhisperEngine
     participant Diar as DiarizationEngine (pyannote)
+    participant Vision as GeminiVisionEngine
     participant Eng as english-service (Java)
 
     Rec->>Kafka: publish recording.uploaded<br/>{recording_id, user_id, s3_bucket, s3_key, language_code}
@@ -40,6 +41,14 @@ sequenceDiagram
     AI->>Diar: diarize(wav_path)
     Diar-->>AI: SpeakerTurn[] (HF_TOKEN-gated pyannote/speaker-diarization-3.1)
     AI->>AI: build_transcription_result<br/>(merge STT + diarization by max time-overlap)
+
+    opt VISION_ENABLED=true
+        AI->>AI: extract_frames(audio_path, VISION_FRAME_INTERVAL_SECONDS)<br/>(PyAV, sampled JPEGs from the original video)
+        AI->>Vision: caption_frames(frames)
+        Vision-->>AI: FrameCaption[] (Gemini generateContent, inline image)
+        AI->>AI: merge_caption_segments<br/>(caption Segment[] with speaker="vision", ordered by timestamp)
+    end
+
     AI->>Kafka: publish transcript.ready<br/>{recording_id, user_id, full_text, segments[]}
     Kafka->>Eng: consume transcript.ready<br/>(handling detailed in english-service's own overview)
 
@@ -70,6 +79,7 @@ sequenceDiagram
     participant S3
     participant Whisper as FasterWhisperEngine
     participant Diar as DiarizationEngine
+    participant Vision as GeminiVisionEngine
 
     alt POST /api/v1/upload (multipart file, no S3 needed)
         Caller->>AI: file + language_code
@@ -84,6 +94,11 @@ sequenceDiagram
     AI->>Diar: diarize(wav_path)
     Diar-->>AI: SpeakerTurn[]
     AI->>AI: build_transcription_result
+
+    opt VISION_ENABLED=true
+        AI->>AI: extract_frames + Vision.caption_frames + merge_caption_segments<br/>(see upload.md/transcribe.md for detail)
+    end
+
     AI-->>Caller: 200 TranscriptionResult<br/>{full_text, segments[]}
 
     Caller->>AI: POST /api/v1/analyze<br/>{recording_id, user_id, segments[], history[]}
@@ -100,6 +115,10 @@ sequenceDiagram
   mapper (`english-service`'s `EventCodec`), not the default camelCase Jackson config.
 - Diarization requires `HF_TOKEN` (HuggingFace token with access to
   `pyannote/speaker-diarization-3.1`) set in `ai-service/.env`.
+- `VISION_ENABLED` (`app/config.py`, default `false`) gates an optional frame-captioning step
+  (`app/vision/`): sampled video frames are captioned by Gemini vision and merged into
+  `segments` as `speaker == "vision"` entries, so recurring-vocabulary analysis can also draw
+  on on-screen text/objects, not just spoken words. Requires `GEMINI_API_KEY`.
 - `english-service` (`vocabulary` domain) is currently the only Java-side consumer of
   `transcript.ready` / `learning.gap.analyzed` — see
   [../English_service/overview.md](../English_service/overview.md) for how it handles them.

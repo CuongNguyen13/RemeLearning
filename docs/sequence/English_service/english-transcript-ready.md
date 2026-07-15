@@ -57,6 +57,9 @@ sequenceDiagram
 ## Notes
 
 - Idempotency key: `recording_id` — required since Kafka delivers at-least-once.
+- `segments[]` may include `speaker == "vision"` entries when ai-service's `VISION_ENABLED=true`
+  (Gemini frame-captioning, see [../Ai_service/overview.md](../Ai_service/overview.md)) — persisted
+  the same as any other segment, no special-casing needed here.
 - No downstream event is published from the english-service side.
 - For the producer side (S3, Whisper, diarization) and the full cross-service picture, see
   [../Ai_service/overview.md](../Ai_service/overview.md).

@@ -1,0 +1,348 @@
+openapi: 3.0.3
+info:
+  title: BFF Service API
+  description: >
+    Backend-for-Frontend - single entry point for the web/mobile client. Composes calls to
+    user-service (auth/profile), recording-service, english-service (vocabulary/grammar/
+    pronunciation), recommendation-service and dashboard-service, and shapes a combined response
+    for the UI so the frontend doesn't call each domain service directly.
+  version: v1
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new account; thin proxy to user-service
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAuth"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email/password; thin proxy to user-service
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAuth"
+
+  /api/v1/users/{userId}:
+    get:
+      tags: [Users]
+      summary: Fetch a user's profile by id; thin proxy to user-service
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseUser"
+    patch:
+      tags: [Users]
+      summary: Update a user's profile (name); thin proxy to user-service
+      operationId: updateUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseUser"
+
+  /api/v1/recordings:
+    post:
+      tags: [Recordings]
+      summary: Upload a recording; streamed straight through to recording-service's multipart upload endpoint without buffering the file in bff-service
+      operationId: uploadRecording
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, userId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                userId:
+                  type: string
+                languageCode:
+                  type: string
+                  default: "en"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecording"
+
+  /api/v1/learners/{userId}/overview:
+    get:
+      tags: [Learners]
+      summary: Composite learner overview - dashboard progress/recommendations + recent recordings, fanned out in parallel to dashboard-service and recording-service
+      operationId: getLearnerOverview
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseLearnerOverview"
+
+  /api/v1/learners/{userId}/weak-points:
+    get:
+      tags: [Learners]
+      summary: All of a learner's weak points, merged from english-service's vocabulary/grammar/pronunciation endpoints, keyed by category
+      operationId: getLearnerWeakPoints
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWeakPointsByCategory"
+
+  /api/v1/learners/{userId}/recommendations:
+    get:
+      tags: [Learners]
+      summary: A learner's recommendations grouped by category; thin proxy to recommendation-service
+      operationId: getLearnerRecommendations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRecommendationsByCategory"
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        userId: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: { type: string }
+        password: { type: string }
+        name: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name: { type: string }
+
+    WeakPoint:
+      type: object
+      description: >
+        Merged shape across english-service's three domain endpoints. category is stamped by
+        bff-service itself (a literal "vocabulary"/"grammar"/"pronunciation") since each domain's
+        own JSON carries a domain-specific type field instead of a shared category.
+      properties:
+        itemId: { type: string }
+        label: { type: string }
+        category: { type: string, enum: [vocabulary, grammar, pronunciation] }
+        forgettingScore: { type: number, format: double }
+        recommendation: { type: string }
+
+    Recording:
+      type: object
+      properties:
+        recordingId: { type: string }
+        userId: { type: string }
+        status: { type: string }
+        s3Bucket: { type: string }
+        s3Key: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Recommendation:
+      type: object
+      properties:
+        itemId: { type: string }
+        category: { type: string }
+        label: { type: string }
+        forgettingScore: { type: number, format: double }
+        recommendationText: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    CategoryProgress:
+      type: object
+      properties:
+        category: { type: string }
+        weakPointCount: { type: integer, format: int64 }
+        avgForgettingScore: { type: number, format: double }
+        lastUpdated: { type: string, format: date-time }
+
+    RecommendationSnapshot:
+      type: object
+      properties:
+        userId: { type: string }
+        itemId: { type: string }
+        category: { type: string }
+        label: { type: string }
+        recommendationText: { type: string }
+        forgettingScore: { type: number, format: double }
+        receivedAt: { type: string, format: date-time }
+
+    LearnerOverview:
+      type: object
+      description: >
+        Composite payload - dashboard-service's progress/recommendations, recording-service's
+        recent recordings, and user-service's profile.
+      properties:
+        userId: { type: string }
+        categoryProgress:
+          type: array
+          items: { $ref: "#/components/schemas/CategoryProgress" }
+        recentRecommendations:
+          type: array
+          items: { $ref: "#/components/schemas/RecommendationSnapshot" }
+        recentRecordings:
+          type: array
+          items: { $ref: "#/components/schemas/Recording" }
+        user:
+          $ref: "#/components/schemas/User"
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseAuth:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/AuthResponse" }
+
+    ApiResponseUser:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/User" }
+
+    ApiResponseRecording:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/Recording" }
+
+    ApiResponseLearnerOverview:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/LearnerOverview" }
+
+    ApiResponseWeakPointsByCategory:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              description: Keyed by "vocabulary" | "grammar" | "pronunciation"
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/WeakPoint" }
+
+    ApiResponseRecommendationsByCategory:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              description: Keyed by "vocabulary" | "grammar" | "pronunciation"
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/Recommendation" }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }

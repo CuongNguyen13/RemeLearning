@@ -2,7 +2,7 @@ package com.remelearning.english.grammar.service;
 
 import com.remelearning.english.grammar.domain.GrammarType;
 import com.remelearning.english.grammar.domain.GrammarWeakPoint;
-import com.remelearning.english.grammar.event.LearningGapAnalyzedEvent;
+import com.remelearning.common.event.LearningGapAnalyzedEvent;
 
 import java.util.List;
 

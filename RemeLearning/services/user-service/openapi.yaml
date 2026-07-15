@@ -1,0 +1,183 @@
+openapi: 3.0.3
+info:
+  title: User Service API
+  description: Authentication (register/login issuing JWTs) and basic user profile CRUD
+  version: v1
+servers:
+  - url: http://localhost:8081
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new learner account and issue a JWT
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAuthResponse"
+        "400":
+          description: Request body failed validation (blank email/password/name, password too short)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate with email + password and issue a fresh JWT
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAuthResponse"
+        "401":
+          description: Unknown email or wrong password (same error either way, on purpose)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/users/{userId}:
+    get:
+      tags: [Users]
+      summary: Get a single user's public profile by their userId
+      operationId: getUserByUserId
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseUserResponse"
+        "404":
+          description: No user stored for this userId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+    patch:
+      tags: [Users]
+      summary: Update a user's display name
+      operationId: updateUserProfile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseUserResponse"
+        "404":
+          description: No user stored for this userId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+components:
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        name: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    UpdateProfileRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    UserResponse:
+      type: object
+      properties:
+        userId: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { type: string, enum: [LEARNER, TEACHER, ADMIN] }
+        createdAt: { type: string, format: date-time }
+
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string, description: Signed JWT (HMAC), subject = userId }
+        user: { $ref: "#/components/schemas/UserResponse" }
+
+    ApiResponseAuthResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/AuthResponse" }
+
+    ApiResponseUserResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/UserResponse" }
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }

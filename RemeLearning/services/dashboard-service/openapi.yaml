@@ -1,0 +1,89 @@
+openapi: 3.0.3
+info:
+  title: Dashboard Service API
+  description: >
+    Cross-domain learner progress dashboard, built purely from Kafka events
+    (learning.gap.analyzed, recommendation.generated) - no REST calls to other services.
+  version: v1
+servers:
+  - url: http://localhost:8087
+
+paths:
+  /api/v1/dashboard/{userId}:
+    get:
+      tags: [Dashboard]
+      summary: >
+        Get a learner's aggregate dashboard: per-category weak-point counts/avg forgetting score
+        (computed at read time via GROUP BY, not a maintained running counter) plus the most
+        recent recommendations
+      operationId: getDashboardSummary
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDashboardSummaryResponse"
+
+components:
+  schemas:
+    CategoryProgress:
+      type: object
+      description: >
+        Per-category rollup over weak_points_snapshot, computed at read time via
+        GROUP BY category (not a maintained running counter).
+      properties:
+        category: { type: string, description: "vocabulary, grammar, or pronunciation" }
+        weakPointCount: { type: integer, format: int64 }
+        avgForgettingScore: { type: number, format: double }
+        lastUpdated: { type: string, format: date-time }
+
+    RecommendationSnapshot:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: string }
+        itemId: { type: string }
+        category: { type: string, description: "vocabulary, grammar, or pronunciation" }
+        label: { type: string }
+        recommendationText: { type: string }
+        forgettingScore: { type: number, format: double }
+        receivedAt: { type: string, format: date-time }
+
+    DashboardSummaryResponse:
+      type: object
+      properties:
+        userId: { type: string }
+        categoryProgress:
+          type: array
+          items: { $ref: "#/components/schemas/CategoryProgress" }
+        recentRecommendations:
+          type: array
+          items: { $ref: "#/components/schemas/RecommendationSnapshot" }
+
+    ApiResponseDashboardSummaryResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DashboardSummaryResponse" }
+
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+        timestamp: { type: string, format: date-time }
+
+    ApiResponseError:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { nullable: true }

@@ -18,9 +18,8 @@ public class DownstreamServicesProperties {
 
 	private String user = "http://localhost:8081";
 	private String recording = "http://localhost:8082";
-	private String pronunciation = "http://localhost:8083";
-	private String grammar = "http://localhost:8084";
-	private String vocabulary = "http://localhost:8085";
+	// vocabulary/grammar/pronunciation were merged into one english-service (port 8085); one field, not three
+	private String english = "http://localhost:8085";
 	private String recommendation = "http://localhost:8086";
 	private String dashboard = "http://localhost:8087";
 }

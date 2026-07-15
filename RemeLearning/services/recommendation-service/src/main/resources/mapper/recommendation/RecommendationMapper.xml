@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.recommendation.mapper.RecommendationMapper">
+
+    <insert id="upsert" parameterType="com.remelearning.recommendation.domain.Recommendation">
+        INSERT INTO recommendations
+            (user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, updated_at)
+        VALUES
+            (#{userId}, #{recordingId}, #{itemId}, #{category}, #{label}, #{forgettingScore}, #{recommendationText}, now())
+        ON CONFLICT (user_id, item_id) DO UPDATE SET
+            recording_id = EXCLUDED.recording_id,
+            category = EXCLUDED.category,
+            label = EXCLUDED.label,
+            forgetting_score = EXCLUDED.forgetting_score,
+            recommendation_text = EXCLUDED.recommendation_text,
+            updated_at = now()
+    </insert>
+
+    <select id="findByUserId" resultType="com.remelearning.recommendation.domain.Recommendation">
+        SELECT id, user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, updated_at
+        FROM recommendations
+        WHERE user_id = #{userId}
+        <if test="category != null">
+            AND category = #{category}
+        </if>
+        ORDER BY forgetting_score DESC
+    </select>
+
+</mapper>

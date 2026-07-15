@@ -1,8 +1,8 @@
 package com.remelearning.english.pronunciation.kafka;
 
 import com.remelearning.common.constants.KafkaTopics;
-import com.remelearning.english.pronunciation.event.EventCodec;
-import com.remelearning.english.pronunciation.event.LearningGapAnalyzedEvent;
+import com.remelearning.common.event.EventCodec;
+import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.english.pronunciation.service.PronunciationWeakPointService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
