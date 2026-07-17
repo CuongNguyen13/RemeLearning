@@ -1,8 +1,10 @@
 spring:
+  config:
+    import: optional:file:./.env[.properties]
   application:
     name: english-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/reme_english
+    url: ${DB_URL:jdbc:postgresql://db.oaltfczuectbznkuywfm.supabase.co:5432/postgres?currentSchema=reme_english&sslmode=require}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
   data:
@@ -19,6 +21,8 @@ spring:
   flyway:
     locations: classpath:db/migration
     baseline-on-migrate: true
+    schemas: ${DB_SCHEMA:reme_english}
+    create-schemas: true
 
 server:
   port: 8085
@@ -32,6 +36,14 @@ reme:
   jwt:
     secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
     expiration-minutes: 60
+  storage:
+    # local (default) reads the dictation audio library from disk and stores generated TTS there;
+    # switch to s3 later without code changes (see common's storage/README.md).
+    provider: ${STORAGE_PROVIDER:local}
+    local:
+      root: ${STORAGE_LOCAL_ROOT:D:/Personal Project/Audio}
+    s3:
+      bucket: ${STORAGE_S3_BUCKET:reme-dictation-audio}
   s3:
     region: ${S3_REGION:ap-southeast-1}
     endpoint: ${S3_ENDPOINT:}
@@ -42,6 +54,13 @@ reme:
     gemini:
       api-key: ${GEMINI_API_KEY:}
       model: ${GEMINI_MODEL:gemini-2.0-flash}
+  tts:
+    # supertonic (default) calls ai-service's on-device Supertonic model; google is the alternative.
+    provider: ${TTS_PROVIDER:supertonic}
+    supertonic:
+      base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+    google:
+      api-key: ${GOOGLE_TTS_API_KEY:}
 
 vocabulary:
   classifier:
@@ -54,3 +73,19 @@ grammar:
 pronunciation:
   classifier:
     mode: ${PRONUNCIATION_CLASSIFIER_MODE:rule-based} # rule-based | llm
+
+dictation:
+  # rule-based (default, no LLM cost) or llm (Gemini) for the miss analysis + practice sentences.
+  analyzer:
+    mode: ${DICTATION_ANALYZER_MODE:rule-based} # rule-based | llm
+  # The fixed audio library (rooted at reme.storage.local.root) is imported into dictation_clips on
+  # startup via common's StorageClient. Turn off to skip the scan (e.g. once already imported).
+  library:
+    import-on-startup: ${DICTATION_IMPORT_ON_STARTUP:true}
+  # Supertonic voice/lang used when synthesizing AI-practice audio.
+  tts:
+    voice: ${DICTATION_TTS_VOICE:F1}
+    lang: ${DICTATION_TTS_LANG:en}
+  ai-practice:
+    # How many of the learner's most-missed words feed a fresh AI-practice batch.
+    miss-window: ${DICTATION_MISS_WINDOW:8}

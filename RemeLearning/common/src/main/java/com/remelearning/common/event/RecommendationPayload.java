@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /** One item inside a published {@link RecommendationGeneratedEvent}. */
 @Data
 @Builder
@@ -16,4 +18,6 @@ public class RecommendationPayload {
 	private String label;
 	private String recommendationText;
 	private double forgettingScore;
+	/** Concrete practice exercises for this weak point, from recommendation-service's ExerciseGenerator. */
+	private List<String> exercises;
 }

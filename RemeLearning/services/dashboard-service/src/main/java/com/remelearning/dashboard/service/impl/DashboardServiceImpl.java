@@ -60,6 +60,7 @@ public class DashboardServiceImpl implements DashboardService {
 					.category(recommendation.getCategory())
 					.label(recommendation.getLabel())
 					.recommendationText(recommendation.getRecommendationText())
+					.exercises(recommendation.getExercises())
 					.forgettingScore(recommendation.getForgettingScore())
 					.build());
 		}

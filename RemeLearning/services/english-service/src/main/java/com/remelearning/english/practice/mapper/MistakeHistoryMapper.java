@@ -4,7 +4,9 @@ import com.remelearning.english.practice.domain.MistakeHistoryEntry;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Mapper
 public interface MistakeHistoryMapper {
@@ -24,4 +26,26 @@ public interface MistakeHistoryMapper {
 			@Param("category") String category, @Param("label") String label, @Param("correct") boolean correct);
 
 	List<MistakeHistoryEntry> findByUserId(@Param("userId") String userId);
+
+	/**
+	 * Locks and reads the row's scoring state BEFORE the current attempt updates it, via
+	 * {@code SELECT ... FOR UPDATE} - required so two concurrent redo() calls for the same
+	 * (userId, itemId) serialize instead of racing on a read-modify-write of scoring state.
+	 * Empty when the item has no history yet (first-ever attempt).
+	 */
+	Optional<MistakeHistoryEntry> findOneForUpdate(@Param("userId") String userId, @Param("itemId") String itemId);
+
+	/**
+	 * Persists the scoring engine's derived state for this item, separately from
+	 * {@link #recordAttempt}'s occurrence-count/recency bookkeeping so the two concerns stay
+	 * independently reviewable.
+	 */
+	void updateScoringState(@Param("userId") String userId, @Param("itemId") String itemId,
+			@Param("easeFactor") double easeFactor, @Param("halfLifeDays") double halfLifeDays,
+			@Param("mastery") double mastery, @Param("leitnerBox") int leitnerBox,
+			@Param("nextReviewAt") Instant nextReviewAt, @Param("lastWeakScore") double lastWeakScore,
+			@Param("labelKey") String labelKey);
+
+	/** Items due for review now or earlier, ordered soonest-first - the Leitner schedule surfaced. */
+	List<MistakeHistoryEntry> findDueForReview(@Param("userId") String userId, @Param("now") Instant now);
 }

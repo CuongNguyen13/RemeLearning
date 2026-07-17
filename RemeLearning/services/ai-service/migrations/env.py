@@ -12,7 +12,7 @@ if config.config_file_name is not None:
 
 # DB URL comes from ai-service's own Settings (env vars), not a static alembic.ini value -
 # keeps one source of truth with app/db/session.py instead of duplicating credentials.
-config.set_main_option("sqlalchemy.url", settings.ai_database_url)
+config.set_main_option("sqlalchemy.url", settings.ai_database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

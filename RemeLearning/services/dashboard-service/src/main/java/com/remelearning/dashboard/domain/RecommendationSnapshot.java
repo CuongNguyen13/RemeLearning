@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * A single personalized study recommendation for a learner, derived from
@@ -22,6 +23,7 @@ public class RecommendationSnapshot {
 	private String category;
 	private String label;
 	private String recommendationText;
+	private List<String> exercises;
 	private double forgettingScore;
 	private Instant receivedAt;
 }

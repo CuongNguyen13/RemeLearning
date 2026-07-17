@@ -5,9 +5,13 @@ import com.remelearning.english.pronunciation.domain.PronunciationType;
 import com.remelearning.english.pronunciation.domain.PronunciationWeakPoint;
 import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.common.event.WeakPointPayload;
+import com.remelearning.common.scoring.ScoreSource;
+import com.remelearning.english.practice.scoring.WeakPointScoreUpdate;
 import com.remelearning.english.pronunciation.mapper.PronunciationWeakPointMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,6 +70,43 @@ class PronunciationWeakPointServiceImplTest {
 		List<PronunciationWeakPoint> actual = service.getWeakPoints("user-1", PronunciationType.STRESS);
 
 		assertThat(actual).isEqualTo(expected);
+	}
+
+	@Test
+	void applyJavaComputedScoreUpsertsWithJavaEngineSourceForPronunciationCategory() {
+		when(classifier.classify("word stress")).thenReturn(PronunciationType.STRESS);
+		Instant nextReviewAt = Instant.now().plusSeconds(3600);
+		WeakPointScoreUpdate update = WeakPointScoreUpdate.builder()
+				.recordingId("practice-abc")
+				.userId("user-1")
+				.itemId("item-1")
+				.category("pronunciation")
+				.label("word stress")
+				.weakScore(0.37)
+				.masteryLevel(0.4)
+				.nextReviewAt(nextReviewAt)
+				.build();
+
+		service.applyJavaComputedScore(update);
+
+		ArgumentCaptor<PronunciationWeakPoint> captor = ArgumentCaptor.forClass(PronunciationWeakPoint.class);
+		verify(mapper).upsert(captor.capture());
+		PronunciationWeakPoint saved = captor.getValue();
+		assertThat(saved.getForgettingScore()).isEqualTo(0.37);
+		assertThat(saved.getMasteryLevel()).isEqualTo(0.4);
+		assertThat(saved.getNextReviewAt()).isEqualTo(nextReviewAt);
+		assertThat(saved.getScoreSource()).isEqualTo(ScoreSource.JAVA_ENGINE);
+		assertThat(saved.getPronunciationType()).isEqualTo(PronunciationType.STRESS);
+	}
+
+	@Test
+	void applyJavaComputedScoreSkipsUpdatesForOtherCategories() {
+		WeakPointScoreUpdate update = WeakPointScoreUpdate.builder()
+				.userId("user-1").itemId("item-1").category("grammar").label("past tense").weakScore(0.5).build();
+
+		service.applyJavaComputedScore(update);
+
+		verify(mapper, never()).upsert(any());
 	}
 
 	private WeakPointPayload weakPoint(String category, String label) {

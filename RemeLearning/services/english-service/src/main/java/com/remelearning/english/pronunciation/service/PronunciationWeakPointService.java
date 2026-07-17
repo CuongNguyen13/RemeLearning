@@ -3,6 +3,7 @@ package com.remelearning.english.pronunciation.service;
 import com.remelearning.english.pronunciation.domain.PronunciationType;
 import com.remelearning.english.pronunciation.domain.PronunciationWeakPoint;
 import com.remelearning.common.event.LearningGapAnalyzedEvent;
+import com.remelearning.english.practice.scoring.WeakPointScoreUpdate;
 
 import java.util.List;
 
@@ -17,4 +18,10 @@ public interface PronunciationWeakPointService {
 	void saveWeakPoints(LearningGapAnalyzedEvent event);
 
 	List<PronunciationWeakPoint> getWeakPoints(String userId, PronunciationType type);
+
+	/**
+	 * Persists a score computed directly by the practice/redo flow's Java scoring engine, bypassing
+	 * the ai-service/Kafka round-trip. No-op for updates whose category isn't "pronunciation".
+	 */
+	void applyJavaComputedScore(WeakPointScoreUpdate update);
 }

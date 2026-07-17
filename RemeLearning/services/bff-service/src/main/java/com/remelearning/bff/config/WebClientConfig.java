@@ -13,28 +13,28 @@ public class WebClientConfig {
 	private final DownstreamServicesProperties services;
 
 	@Bean
-	public WebClient userServiceClient() {
+	public WebClient userServiceWebClient() {
 		return WebClient.create(services.getUser());
 	}
 
 	@Bean
-	public WebClient recordingServiceClient() {
+	public WebClient recordingServiceWebClient() {
 		return WebClient.create(services.getRecording());
 	}
 
 	// vocabulary/grammar/pronunciation were merged into one english-service (port 8085); one client bean, not three
 	@Bean
-	public WebClient englishServiceClient() {
+	public WebClient englishServiceWebClient() {
 		return WebClient.create(services.getEnglish());
 	}
 
 	@Bean
-	public WebClient recommendationServiceClient() {
+	public WebClient recommendationServiceWebClient() {
 		return WebClient.create(services.getRecommendation());
 	}
 
 	@Bean
-	public WebClient dashboardServiceClient() {
+	public WebClient dashboardServiceWebClient() {
 		return WebClient.create(services.getDashboard());
 	}
 }

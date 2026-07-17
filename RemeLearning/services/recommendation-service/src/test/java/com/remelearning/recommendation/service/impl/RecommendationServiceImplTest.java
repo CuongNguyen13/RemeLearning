@@ -6,13 +6,15 @@ import com.remelearning.common.queue.EventPublisher;
 import com.remelearning.recommendation.domain.Recommendation;
 import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.common.event.RecommendationGeneratedEvent;
+import com.remelearning.recommendation.exercise.ExerciseGenerator;
 import com.remelearning.recommendation.mapper.RecommendationMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -23,7 +25,8 @@ class RecommendationServiceImplTest {
 
 	private final RecommendationMapper mapper = mock(RecommendationMapper.class);
 	private final EventPublisher eventPublisher = mock(EventPublisher.class);
-	private final RecommendationServiceImpl service = new RecommendationServiceImpl(mapper, eventPublisher);
+	private final ExerciseGenerator exerciseGenerator = mock(ExerciseGenerator.class);
+	private final RecommendationServiceImpl service = new RecommendationServiceImpl(mapper, eventPublisher, exerciseGenerator);
 
 	@Test
 	void handleLearningGapAnalyzedUpsertsEveryWeakPointAndPublishesOnce() {
@@ -37,11 +40,17 @@ class RecommendationServiceImplTest {
 		event.setUserId("user-1");
 		event.setWeakPoints(List.of(vocabularyItem, grammarItem));
 
+		when(exerciseGenerator.generate(anyString(), anyString(), anyDouble()))
+				.thenReturn(List.of("exercise A", "exercise B"));
+
 		service.handleLearningGapAnalyzed(event);
 
 		// Every weak point is persisted regardless of category - no filtering, unlike
 		// english-service's per-domain services.
-		verify(mapper, times(2)).upsert(any(Recommendation.class));
+		var recommendationCaptor = org.mockito.ArgumentCaptor.forClass(Recommendation.class);
+		verify(mapper, times(2)).upsert(recommendationCaptor.capture());
+		assertThat(recommendationCaptor.getAllValues())
+				.allSatisfy(rec -> assertThat(rec.getExercises()).containsExactly("exercise A", "exercise B"));
 
 		var captor = org.mockito.ArgumentCaptor.forClass(BaseEvent.class);
 		verify(eventPublisher, times(1)).publish(eq(KafkaTopics.RECOMMENDATION_GENERATED), eq("user-1"), captor.capture());
@@ -56,6 +65,12 @@ class RecommendationServiceImplTest {
 				.containsExactlyInAnyOrder(
 						org.assertj.core.groups.Tuple.tuple("item-1", "vocabulary", "reluctant"),
 						org.assertj.core.groups.Tuple.tuple("item-2", "grammar", "Past tense error"));
+		// Same exercises list on both the persisted row and the published payload for a given item -
+		// generate() must be called once per weak point, not once for the DB write and again for the
+		// publish, since the LLM-backed generator is non-deterministic.
+		assertThat(published.getRecommendations())
+				.allSatisfy(payload -> assertThat(payload.getExercises()).containsExactly("exercise A", "exercise B"));
+		verify(exerciseGenerator, times(2)).generate(anyString(), anyString(), anyDouble());
 	}
 
 	@Test

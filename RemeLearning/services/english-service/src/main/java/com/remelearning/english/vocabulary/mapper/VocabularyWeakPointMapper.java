@@ -14,4 +14,7 @@ public interface VocabularyWeakPointMapper {
 
 	/** {@code vocabularyType} is optional (null = no filter); results ordered by forgetting_score desc. */
 	List<VocabularyWeakPoint> findByUserId(@Param("userId") String userId, @Param("vocabularyType") String vocabularyType);
+
+	/** The learner's {@code limit} most-forgotten vocabulary items, ordered by forgetting_score desc. */
+	List<VocabularyWeakPoint> findTopByUserId(@Param("userId") String userId, @Param("limit") int limit);
 }

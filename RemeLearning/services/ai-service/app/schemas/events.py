@@ -70,13 +70,25 @@ class TranscriptReadyEvent(BaseModel):
 
 
 class MistakeHistoryItem(BaseModel):
-    """One recurring mistake item as tracked by backend services (grammar/vocabulary/pronunciation)."""
+    """One recurring mistake item as tracked by backend services (grammar/vocabulary/pronunciation).
+
+    The scoring-state fields below (half_life_days .. incorrect_count) let the ScoringEngineAnalyzer
+    reproduce english-service's Java composite score. They're optional: when a producer doesn't send
+    them, the cold-start defaults here match english-service's WeakPointScoringOrchestratorImpl."""
 
     item_id: str
     category: str  # e.g. "grammar", "vocabulary", "pronunciation"
     label: str  # e.g. "past perfect tense", "word: reluctant"
     occurrence_count: int
     last_seen_days_ago: float
+    # Per-item scoring state (from english-service's mistake_history), cold-start defaults otherwise.
+    half_life_days: float = 7.0
+    ease_factor: float = 2.5
+    mastery: float = 0.3
+    leitner_box: int = 1
+    # Population-level (cross-learner) difficulty counts, from item_difficulty_stats.
+    correct_count: int = 0
+    incorrect_count: int = 0
 
 
 class AnalysisRequestedEvent(BaseModel):

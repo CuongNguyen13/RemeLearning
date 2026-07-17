@@ -27,4 +27,15 @@ public class MistakeHistoryEntry {
 	private int occurrenceCount;
 	private Instant lastSeenAt;
 	private Instant updatedAt;
+
+	// Scoring-engine state (common.scoring.ScoringState projected onto this row) - see
+	// WeakPointScoringOrchestrator for how these are read/derived/persisted around each attempt.
+	private double easeFactor;
+	private double halfLifeDays;
+	private double mastery;
+	private int leitnerBox;
+	private Instant nextReviewAt;
+	private Double lastWeakScore;
+	/** Normalized (trim/collapse-whitespace/lowercase) label, the key used for population-level difficulty stats. */
+	private String labelKey;
 }

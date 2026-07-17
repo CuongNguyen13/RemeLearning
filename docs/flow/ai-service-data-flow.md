@@ -48,7 +48,7 @@ flowchart TD
 
     subgraph Analysis["Forgetting-pattern analysis"]
         SegHist["segments[] + history[]<br/>(from learning.gap.analysis.requested,<br/>published by english-service/practice after a redo-exercise -<br/>see ../sequence/English_service/practice-redo.md)"]
-        Rule["RuleBasedAnalyzer.analyze<br/>frequency count + Ebbinghaus-style recency decay"]
+        Rule["MistakeAnalyzer.analyze (ANALYSIS_SCORER)<br/>rule-based: occurrence x Ebbinghaus | scoring-engine: Java-consistent composite (app/scoring/)"]
         WeakPoints["weak_points[]<br/>{category, item_id, label, forgetting_score, recommendation}"]
     end
 
@@ -119,6 +119,16 @@ flowchart TD
 | FaceMatch (per speaker) | `{user_id, name, similarity}` | best cosine-similarity match across all of a speaker's sampled frames, only kept if >= `FACE_MATCH_SIMILARITY_THRESHOLD`; absent entirely if no enrolled face matches |
 | Per-turn WAV clip (voice-auth) | 16kHz mono PCM, `[turn.start, turn.end)` | same `slice_wav` reused from STT, sliced again independently for `HeuristicVoiceAuthenticityAnalyzer` |
 | SegmentAuthenticity (per turn) | `{speaker, start_seconds, end_seconds, label: human\|synthetic\|uncertain, confidence}` | heuristic, not a trained classifier - see `app/voice_auth/heuristic_analyzer.py`'s docstring for exactly which acoustic features drive the label and its known failure modes (e.g. misclassifying high-quality modern TTS) |
+
+## Text-to-speech stage (`app/tts/`, synchronous REST)
+
+- `POST /api/v1/tts/synthesize` `{text, lang, voice?}` -> `{audio_base64, mime_type, sample_rate}`.
+  Backed by **Supertonic** (`app/tts/supertonic_engine.py`), a 99M-param ONNX model that runs on CPU
+  (no GPU), 44.1kHz WAV output. Pure voice/lang resolution lives in `app/tts/base.py` (ML-free, unit
+  tested); the model loads lazily on first call. Gated by `TTS_ENABLED` (default true).
+- Consumed by **english-service**'s dictation "Luyện nghe với AI" section via
+  `common.ai.tts.supertonic.SupertonicTtsClient` (`reme.tts.provider=supertonic`), which voices
+  Gemini-suggested practice sentences. This replaces the earlier Google Cloud TTS path.
 
 ## Where data leaves this service
 

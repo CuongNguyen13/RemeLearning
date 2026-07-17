@@ -27,13 +27,13 @@ sequenceDiagram
     RecoSvc->>Kafka: publish recommendation.generated<br/>{eventId, eventType, occurredAt,<br/>recordingId, userId, recommendations[]}
     Kafka->>Consumer: recommendation.generated payload
     Consumer->>Mapper: decode(payload) -> RecommendationGeneratedEvent
-    Mapper-->>Consumer: RecommendationGeneratedEvent{recordingId, userId,<br/>recommendations: RecommendationPayload[]{itemId, category, label, recommendationText, forgettingScore}}
+    Mapper-->>Consumer: RecommendationGeneratedEvent{recordingId, userId,<br/>recommendations: RecommendationPayload[]{itemId, category, label, recommendationText, exercises, forgettingScore}}
 
     Consumer->>Svc: recordRecommendations(event)
     activate Svc
     loop each recommendation
-        Svc->>DBMapper: upsert(userId, itemId, category,<br/>label, recommendationText, forgettingScore)
-        DBMapper->>DB: INSERT ... ON CONFLICT (user_id, item_id)<br/>DO UPDATE SET category, label, recommendation_text, forgetting_score, received_at
+        Svc->>DBMapper: upsert(userId, itemId, category,<br/>label, recommendationText, exercises, forgettingScore)
+        DBMapper->>DB: INSERT ... ON CONFLICT (user_id, item_id)<br/>DO UPDATE SET category, label, recommendation_text, exercises, forgetting_score, received_at
     end
     Note over Svc,DB: @Transactional
     deactivate Svc
@@ -45,7 +45,7 @@ sequenceDiagram
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | Kafka consume `recommendation.generated` | Kafka broker -> dashboard-service | published by `recommendation-service`; topic constant already exists in `KafkaTopics.java`, no producer wired up yet as of this writing |
+| 1 | Kafka consume `recommendation.generated` | Kafka broker -> dashboard-service | published by `recommendation-service` after upserting a `learning.gap.analyzed` batch (see [../Recommendation_service/learning-gap-analyzed.md](../Recommendation_service/learning-gap-analyzed.md)) |
 | 2 | Postgres UPSERT | dashboard-service -> `reme_dashboard` DB | writes/updates `recent_recommendations` |
 
 ## Notes

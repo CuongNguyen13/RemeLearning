@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
 
+    # Which MistakeAnalyzer ranks recurring mistakes on the learning.gap.analysis.requested path:
+    # "rule-based" (legacy occurrence_count x forgetting) or "scoring-engine" (the composite formula
+    # matching english-service's Java WeakPointScoringEngine, so both flows produce consistent scores).
+    analysis_scorer: str = "rule-based"
+
     whisper_model_size: str = "small"
     device: str = "cpu"
     hf_token: str = ""
@@ -36,6 +41,14 @@ class Settings(BaseSettings):
     # Voice authenticity (app/voice_auth/) - heuristic human-vs-synthetic voice classifier,
     # useful for recordings of Teams/Meet sessions where a TTS bot may be a participant.
     voice_authenticity_enabled: bool = False
+
+    # Text-to-speech (app/tts/) - on-device Supertonic model (ONNX, CPU, 44.1kHz). Used by
+    # english-service's dictation AI-practice section to voice Gemini-suggested practice sentences.
+    # The model is loaded lazily on the first /api/v1/tts/synthesize call, so leaving this true
+    # costs nothing until TTS is actually requested.
+    tts_enabled: bool = True
+    tts_default_voice: str = "F1"
+    tts_default_lang: str = "en"
 
     # ai-service's own Postgres database (reme_ai), schema "ai" - kept separate from the
     # default "public" schema per-service convention every Java service uses. Env var names

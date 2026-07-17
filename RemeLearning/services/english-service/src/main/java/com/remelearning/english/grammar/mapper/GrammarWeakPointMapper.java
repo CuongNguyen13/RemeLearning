@@ -14,4 +14,7 @@ public interface GrammarWeakPointMapper {
 
 	/** {@code grammarType} is optional (null = no filter); results ordered by forgetting_score desc. */
 	List<GrammarWeakPoint> findByUserId(@Param("userId") String userId, @Param("grammarType") String grammarType);
+
+	/** The learner's {@code limit} most-forgotten grammar rules, ordered by forgetting_score desc. */
+	List<GrammarWeakPoint> findTopByUserId(@Param("userId") String userId, @Param("limit") int limit);
 }

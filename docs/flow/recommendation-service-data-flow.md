@@ -24,7 +24,8 @@ flowchart TD
     subgraph RecFlow["Recommendation ingestion (no category filter)"]
         Decode["EventCodec decode<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
         Loop["for each weak point (vocabulary, grammar, pronunciation - all kept)"]
-        Build["build Recommendation{userId, recordingId, itemId,<br/>category, label, forgettingScore, recommendationText}"]
+        ExerciseGen["ExerciseGenerator.generate(category, label, forgettingScore)<br/>rule-based templates (default) or Gemini (mode=llm, falls back on failure)"]
+        Build["build Recommendation{userId, recordingId, itemId,<br/>category, label, forgettingScore, recommendationText, exercises}"]
         Upsert["upsert keyed on (user_id, item_id)"]
         BuildEvent["build RecommendationGeneratedEvent<br/>{recordingId, userId, recommendations[]}"]
         Publish["publish recommendation.generated"]
@@ -43,7 +44,7 @@ flowchart TD
     end
 
     LGAEvent --> Decode --> Loop
-    Loop --> Build --> Upsert --> T1
+    Loop --> ExerciseGen --> Build --> Upsert --> T1
     Loop --> BuildEvent --> Publish --> RGEvent
 
     T1 --> GetRec
@@ -54,8 +55,9 @@ flowchart TD
 | Stage | Format | Notes |
 |---|---|---|
 | `LearningGapAnalyzedEvent` | `{recordingId, userId, weakPoints: [{itemId, category, label, forgettingScore, recommendation}]}` | decoded from ai-service's snake_case JSON via `EventCodec`; same shape english-service consumes, own copy of the DTO in `recommendation.event` |
-| `recommendations` row | `{id, user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, updated_at}` | upserted on `(user_id, item_id)` — re-analysis updates score in place instead of duplicating; one row per weak point regardless of category |
-| `RecommendationGeneratedEvent` | `{eventId, eventType: "recommendation.generated", occurredAt, recordingId, userId, recommendations: [{itemId, category, label, recommendationText, forgettingScore}]}` | extends `common`'s `BaseEvent`; published once per `learning.gap.analyzed` batch, after all rows in that batch are upserted |
+| `exercises` (per weak point) | `string[]`, 3-5 items | produced by `ExerciseGenerator` from `category`+`label`+`forgettingScore` only (no transcript/history needed) — static per-category templates by default, or Gemini via `common`'s `LlmClient` when `recommendation.exercise-generator.mode=llm`; generated once and reused for both the DB row and the published payload |
+| `recommendations` row | `{id, user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, exercises, updated_at}` | upserted on `(user_id, item_id)` — re-analysis updates score in place instead of duplicating; one row per weak point regardless of category; `exercises` stored as a JSON array string via a small MyBatis `TypeHandler` |
+| `RecommendationGeneratedEvent` | `{eventId, eventType: "recommendation.generated", occurredAt, recordingId, userId, recommendations: [{itemId, category, label, recommendationText, exercises, forgettingScore}]}` | extends `common`'s `BaseEvent`; published once per `learning.gap.analyzed` batch, after all rows in that batch are upserted |
 | REST response (`GET /api/v1/recommendations/{userId}`) | `ApiResponse<List<Recommendation>>` or, for `/grouped`, `ApiResponse<Map<String, List<Recommendation>>>` keyed by `category` | camelCase JSON via the app's default Jackson config (distinct from `EventCodec`'s snake_case mapper used only for decoding Kafka input) |
 
 ## Where data comes from / where it can go next
@@ -63,9 +65,12 @@ flowchart TD
 - `learning.gap.analyzed` is published by `ai-service` — see
   [ai-service-data-flow.md](ai-service-data-flow.md) for how that data was produced (S3 -> Whisper ->
   pyannote -> `RuleBasedAnalyzer`).
-- `recommendation-service` is the first producer of `recommendation.generated` (topic constant
-  already existed in `KafkaTopics.java`, unused until now); no consumer exists for it yet — a future
-  notification or exercise-generation service is expected to pick it up.
+- `recommendation-service` is the first producer of `recommendation.generated`; it's consumed by
+  `dashboard-service` into its own `recent_recommendations` snapshot (see
+  [dashboard-service-data-flow.md](dashboard-service-data-flow.md)).
 - Unlike `english-service`, which discards weak points outside a domain's own category,
   `recommendation-service` keeps all of them — it aggregates across domains instead of specializing
-  in one, and does not run any classifier (no vocabulary/grammar/pronunciation type assignment).
+  in one, and does not run any classifier (no vocabulary/grammar/pronunciation type assignment). It
+  does run one category-agnostic `ExerciseGenerator`, though: the same component turns every weak
+  point, regardless of category, into concrete practice exercises, since it only needs `category` +
+  `label` (+ `forgettingScore`) as input — no per-category branching required.

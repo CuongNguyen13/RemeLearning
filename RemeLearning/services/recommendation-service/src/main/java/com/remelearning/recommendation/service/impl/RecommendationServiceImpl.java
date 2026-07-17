@@ -7,6 +7,7 @@ import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.common.event.RecommendationGeneratedEvent;
 import com.remelearning.common.event.RecommendationPayload;
 import com.remelearning.common.event.WeakPointPayload;
+import com.remelearning.recommendation.exercise.ExerciseGenerator;
 import com.remelearning.recommendation.mapper.RecommendationMapper;
 import com.remelearning.recommendation.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
@@ -25,18 +26,24 @@ public class RecommendationServiceImpl implements RecommendationService {
 
 	private final RecommendationMapper mapper;
 	private final EventPublisher eventPublisher;
+	private final ExerciseGenerator exerciseGenerator;
 
 	// Unlike english-service's per-domain services, no category filtering here: every weak point
 	// carried by the event (vocabulary/grammar/pronunciation) is upserted as its own recommendation
 	// row, keyed on (userId, itemId) so re-analysis updates the score in place. Once all rows are
-	// persisted, a recommendation.generated event is published carrying the full batch.
+	// persisted, a recommendation.generated event is published carrying the full batch. Exercises are
+	// generated once per weak point and reused for both the persisted row and the published payload,
+	// since the LLM-backed generator is non-deterministic - calling it twice could persist a
+	// different list than the one published.
 	@Override
 	@Transactional
 	public void handleLearningGapAnalyzed(LearningGapAnalyzedEvent event) {
 		List<RecommendationPayload> payloads = event.getWeakPoints().stream()
 				.map(weakPoint -> {
-					mapper.upsert(toRecommendation(event, weakPoint));
-					return toPayload(weakPoint);
+					List<String> exercises = exerciseGenerator.generate(
+							weakPoint.getCategory(), weakPoint.getLabel(), weakPoint.getForgettingScore());
+					mapper.upsert(toRecommendation(event, weakPoint, exercises));
+					return toPayload(weakPoint, exercises);
 				})
 				.collect(Collectors.toList());
 
@@ -60,8 +67,8 @@ public class RecommendationServiceImpl implements RecommendationService {
 				.collect(Collectors.groupingBy(Recommendation::getCategory));
 	}
 
-	/** Maps one weak point + its parent event into a persistable Recommendation row. */
-	private Recommendation toRecommendation(LearningGapAnalyzedEvent event, WeakPointPayload weakPoint) {
+	/** Maps one weak point + its parent event + its generated exercises into a persistable Recommendation row. */
+	private Recommendation toRecommendation(LearningGapAnalyzedEvent event, WeakPointPayload weakPoint, List<String> exercises) {
 		return Recommendation.builder()
 				.userId(event.getUserId())
 				.recordingId(event.getRecordingId())
@@ -70,17 +77,19 @@ public class RecommendationServiceImpl implements RecommendationService {
 				.label(weakPoint.getLabel())
 				.forgettingScore(weakPoint.getForgettingScore())
 				.recommendationText(weakPoint.getRecommendation())
+				.exercises(exercises)
 				.build();
 	}
 
-	/** Maps one weak point into the outbound recommendation.generated event's payload shape. */
-	private RecommendationPayload toPayload(WeakPointPayload weakPoint) {
+	/** Maps one weak point + its generated exercises into the outbound recommendation.generated event's payload shape. */
+	private RecommendationPayload toPayload(WeakPointPayload weakPoint, List<String> exercises) {
 		return RecommendationPayload.builder()
 				.itemId(weakPoint.getItemId())
 				.category(weakPoint.getCategory())
 				.label(weakPoint.getLabel())
 				.recommendationText(weakPoint.getRecommendation())
 				.forgettingScore(weakPoint.getForgettingScore())
+				.exercises(exercises)
 				.build();
 	}
 }

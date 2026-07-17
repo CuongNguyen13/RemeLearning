@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.analysis.rule_based_analyzer import RuleBasedAnalyzer
+from app.analysis.factory import create_analyzer
 from app.clients.user_service_client import UserServiceNotFoundError, user_service_client
 from app.config import settings
 from app.db.repository import save_face_recognition_result, save_voice_authenticity_result
@@ -20,8 +20,11 @@ from app.schemas.events import (
     SpeakerIdentity,
     TranscriptionResult,
 )
+from app.schemas.tts import TtsSynthesizeRequest, TtsSynthesizeResponse
 from app.storage.s3_client import download_to_tempfile
 from app.stt.audio_convert import convert_to_wav
+from app.tts.base import TtsSynthesisRequest
+from app.tts.supertonic_engine import SupertonicEngine
 from app.stt.base import SpeakerTurn
 from app.stt.diarization import DiarizationEngine
 from app.stt.pipeline import transcribe_turns_multilingual
@@ -36,13 +39,14 @@ router = APIRouter()
 
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024  # 1 MiB
 
-_analyzer = RuleBasedAnalyzer()
+_analyzer = create_analyzer()
 _whisper_engine: FasterWhisperEngine | None = None
 _diarization_engine: DiarizationEngine | None = None
 _vision_engine: GeminiVisionEngine | None = None
 _face_engine: InsightFaceEngine | None = None
 _face_enrollment: FaceEnrollmentService | None = None
 _voice_auth_analyzer: HeuristicVoiceAuthenticityAnalyzer | None = None
+_tts_engine: SupertonicEngine | None = None
 
 
 def _get_whisper_engine() -> FasterWhisperEngine:
@@ -85,6 +89,13 @@ def _get_voice_auth_analyzer() -> HeuristicVoiceAuthenticityAnalyzer:
     if _voice_auth_analyzer is None:
         _voice_auth_analyzer = HeuristicVoiceAuthenticityAnalyzer()
     return _voice_auth_analyzer
+
+
+def _get_tts_engine() -> SupertonicEngine:
+    global _tts_engine
+    if _tts_engine is None:
+        _tts_engine = SupertonicEngine(settings.tts_default_voice, settings.tts_default_lang)
+    return _tts_engine
 
 
 def _add_vision_captions(result: TranscriptionResult, video_path: str) -> TranscriptionResult:
@@ -230,6 +241,29 @@ def analyze(event: AnalysisRequestedEvent) -> LearningGapAnalyzedEvent:
         recording_id=event.recording_id,
         user_id=event.user_id,
         weak_points=weak_points,
+    )
+
+
+@router.post("/api/v1/tts/synthesize", response_model=TtsSynthesizeResponse)
+def synthesize_tts(request: TtsSynthesizeRequest) -> TtsSynthesizeResponse:
+    """Synthesizes text into speech with the on-device Supertonic model and returns base64-encoded
+    44.1kHz WAV. Used by english-service's dictation "Luyện nghe với AI" section to voice the
+    Gemini-suggested practice sentences a learner then dictates. The model loads lazily on the first
+    call; returns 503 when TTS is disabled so callers can degrade instead of hanging."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=503, detail="TTS is disabled (set TTS_ENABLED=true)")
+
+    result = _get_tts_engine().synthesize(
+        TtsSynthesisRequest(
+            text=request.text,
+            lang=request.lang,
+            voice=request.voice or settings.tts_default_voice,
+        )
+    )
+    return TtsSynthesizeResponse(
+        audio_base64=result.audio_base64,
+        mime_type=result.mime_type,
+        sample_rate=result.sample_rate,
     )
 
 

@@ -23,7 +23,7 @@ public class RecordingServiceClient {
 
 	private final WebClient recordingServiceClient;
 
-	public RecordingServiceClient(@Qualifier("recordingServiceClient") WebClient recordingServiceClient) {
+	public RecordingServiceClient(@Qualifier("recordingServiceWebClient") WebClient recordingServiceClient) {
 		this.recordingServiceClient = recordingServiceClient;
 	}
 

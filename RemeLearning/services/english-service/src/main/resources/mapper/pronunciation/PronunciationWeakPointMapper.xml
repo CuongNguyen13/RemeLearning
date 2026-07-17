@@ -4,20 +4,28 @@
 
     <insert id="upsert" parameterType="com.remelearning.english.pronunciation.domain.PronunciationWeakPoint">
         INSERT INTO pronunciation_weak_points
-            (recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation, updated_at)
+            (recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation,
+             mastery_level, next_review_at, score_source, updated_at)
         VALUES
-            (#{recordingId}, #{userId}, #{itemId}, #{label}, #{pronunciationType}, #{forgettingScore}, #{recommendation}, now())
+            (#{recordingId}, #{userId}, #{itemId}, #{label}, #{pronunciationType}, #{forgettingScore}, #{recommendation},
+             #{masteryLevel}, #{nextReviewAt}, #{scoreSource}, now())
         ON CONFLICT (user_id, item_id) DO UPDATE SET
             recording_id = EXCLUDED.recording_id,
             label = EXCLUDED.label,
             pronunciation_type = EXCLUDED.pronunciation_type,
             forgetting_score = EXCLUDED.forgetting_score,
             recommendation = EXCLUDED.recommendation,
+            mastery_level = EXCLUDED.mastery_level,
+            next_review_at = EXCLUDED.next_review_at,
+            score_source = EXCLUDED.score_source,
             updated_at = now()
+        <!-- One-way ratchet, see VocabularyWeakPointMapper.xml for the full rationale. -->
+        WHERE NOT (pronunciation_weak_points.score_source = 'JAVA_ENGINE' AND EXCLUDED.score_source = 'PYTHON_LEGACY')
     </insert>
 
     <select id="findByUserId" resultType="com.remelearning.english.pronunciation.domain.PronunciationWeakPoint">
-        SELECT id, recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation, updated_at
+        SELECT id, recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation,
+               mastery_level, next_review_at, score_source, updated_at
         FROM pronunciation_weak_points
         WHERE user_id = #{userId}
         <if test="pronunciationType != null">

@@ -4,26 +4,45 @@
 
     <insert id="upsert" parameterType="com.remelearning.english.vocabulary.domain.VocabularyWeakPoint">
         INSERT INTO vocabulary_weak_points
-            (recording_id, user_id, item_id, label, vocabulary_type, forgetting_score, recommendation, updated_at)
+            (recording_id, user_id, item_id, label, vocabulary_type, forgetting_score, recommendation,
+             mastery_level, next_review_at, score_source, updated_at)
         VALUES
-            (#{recordingId}, #{userId}, #{itemId}, #{label}, #{vocabularyType}, #{forgettingScore}, #{recommendation}, now())
+            (#{recordingId}, #{userId}, #{itemId}, #{label}, #{vocabularyType}, #{forgettingScore}, #{recommendation},
+             #{masteryLevel}, #{nextReviewAt}, #{scoreSource}, now())
         ON CONFLICT (user_id, item_id) DO UPDATE SET
             recording_id = EXCLUDED.recording_id,
             label = EXCLUDED.label,
             vocabulary_type = EXCLUDED.vocabulary_type,
             forgetting_score = EXCLUDED.forgetting_score,
             recommendation = EXCLUDED.recommendation,
+            mastery_level = EXCLUDED.mastery_level,
+            next_review_at = EXCLUDED.next_review_at,
+            score_source = EXCLUDED.score_source,
             updated_at = now()
+        <!-- One-way ratchet: a PYTHON_LEGACY write is silently skipped if the row is already
+             JAVA_ENGINE-owned, so the slower/async Kafka-driven recompute can't clobber a fresher
+             score computed directly by the practice/redo flow. Every other combination proceeds. -->
+        WHERE NOT (vocabulary_weak_points.score_source = 'JAVA_ENGINE' AND EXCLUDED.score_source = 'PYTHON_LEGACY')
     </insert>
 
     <select id="findByUserId" resultType="com.remelearning.english.vocabulary.domain.VocabularyWeakPoint">
-        SELECT id, recording_id, user_id, item_id, label, vocabulary_type, forgetting_score, recommendation, updated_at
+        SELECT id, recording_id, user_id, item_id, label, vocabulary_type, forgetting_score, recommendation,
+               mastery_level, next_review_at, score_source, updated_at
         FROM vocabulary_weak_points
         WHERE user_id = #{userId}
         <if test="vocabularyType != null">
             AND vocabulary_type = #{vocabularyType}
         </if>
         ORDER BY forgetting_score DESC
+    </select>
+
+    <select id="findTopByUserId" resultType="com.remelearning.english.vocabulary.domain.VocabularyWeakPoint">
+        SELECT id, recording_id, user_id, item_id, label, vocabulary_type, forgetting_score, recommendation,
+               mastery_level, next_review_at, score_source, updated_at
+        FROM vocabulary_weak_points
+        WHERE user_id = #{userId}
+        ORDER BY forgetting_score DESC
+        LIMIT #{limit}
     </select>
 
 </mapper>

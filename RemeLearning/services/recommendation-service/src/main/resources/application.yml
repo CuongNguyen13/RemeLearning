@@ -1,8 +1,10 @@
 spring:
+  config:
+    import: optional:file:./.env[.properties]
   application:
     name: recommendation-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/reme_recommendation
+    url: ${DB_URL:jdbc:postgresql://db.oaltfczuectbznkuywfm.supabase.co:5432/postgres?currentSchema=reme_recommendation&sslmode=require}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
   data:
@@ -14,6 +16,8 @@ spring:
   flyway:
     locations: classpath:db/migration
     baseline-on-migrate: true
+    schemas: ${DB_SCHEMA:reme_recommendation}
+    create-schemas: true
 
 server:
   port: 8086
@@ -32,3 +36,12 @@ reme:
     endpoint: ${S3_ENDPOINT:}
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
+  llm:
+    provider: ${LLM_PROVIDER:gemini}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-2.0-flash}
+
+recommendation:
+  exercise-generator:
+    mode: ${EXERCISE_GENERATOR_MODE:rule-based}   # rule-based | llm

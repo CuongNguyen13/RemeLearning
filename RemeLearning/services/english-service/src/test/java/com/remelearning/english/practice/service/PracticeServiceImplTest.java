@@ -7,8 +7,10 @@ import com.remelearning.english.practice.domain.PracticeAttempt;
 import com.remelearning.english.practice.dto.PracticeAttemptRequest;
 import com.remelearning.english.practice.dto.PracticeRedoRequest;
 import com.remelearning.english.practice.kafka.AnalysisRequestedProducer;
+import com.remelearning.english.practice.mapper.ItemDifficultyStatsMapper;
 import com.remelearning.english.practice.mapper.MistakeHistoryMapper;
 import com.remelearning.english.practice.mapper.PracticeAttemptMapper;
+import com.remelearning.english.practice.scoring.WeakPointScoringOrchestrator;
 import com.remelearning.english.practice.service.impl.PracticeServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +21,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -28,12 +32,15 @@ class PracticeServiceImplTest {
 
 	private final PracticeAttemptMapper practiceAttemptMapper = mock(PracticeAttemptMapper.class);
 	private final MistakeHistoryMapper mistakeHistoryMapper = mock(MistakeHistoryMapper.class);
+	private final ItemDifficultyStatsMapper itemDifficultyStatsMapper = mock(ItemDifficultyStatsMapper.class);
 	private final AnalysisRequestedProducer analysisRequestedProducer = mock(AnalysisRequestedProducer.class);
-	private final PracticeServiceImpl service =
-			new PracticeServiceImpl(practiceAttemptMapper, mistakeHistoryMapper, analysisRequestedProducer);
+	private final WeakPointScoringOrchestrator weakPointScoringOrchestrator = mock(WeakPointScoringOrchestrator.class);
+	private final PracticeServiceImpl service = new PracticeServiceImpl(
+			practiceAttemptMapper, mistakeHistoryMapper, itemDifficultyStatsMapper, analysisRequestedProducer,
+			weakPointScoringOrchestrator);
 
 	@Test
-	void gradesEachAttemptLogsItAndRefreshesMistakeHistory() {
+	void gradesEachAttemptLogsItAndScoresItAgainstTheJavaEngine() {
 		PracticeRedoRequest request = redoRequest(
 				attempt("item-1", "vocabulary", "reluctant", false),
 				attempt("item-2", "grammar", "past tense", true));
@@ -48,8 +55,38 @@ class PracticeServiceImplTest {
 				.containsExactly(org.assertj.core.groups.Tuple.tuple("item-1", false),
 						org.assertj.core.groups.Tuple.tuple("item-2", true));
 
-		verify(mistakeHistoryMapper).recordAttempt("user-1", "item-1", "vocabulary", "reluctant", false);
-		verify(mistakeHistoryMapper).recordAttempt("user-1", "item-2", "grammar", "past tense", true);
+		verify(weakPointScoringOrchestrator).scoreAttempt(eq("user-1"), anyString(), eq(request.getAttempts().get(0)), eq(false));
+		verify(weakPointScoringOrchestrator).scoreAttempt(eq("user-1"), anyString(), eq(request.getAttempts().get(1)), eq(false));
+	}
+
+	@Test
+	void secondAttemptAtTheSameItemInOneBatchIsFlaggedAsRecurring() {
+		PracticeRedoRequest request = redoRequest(
+				attempt("item-1", "vocabulary", "reluctant", false),
+				attempt("item-1", "vocabulary", "reluctant", false));
+		when(mistakeHistoryMapper.findByUserId("user-1")).thenReturn(List.of());
+
+		service.redo(request);
+
+		verify(weakPointScoringOrchestrator).scoreAttempt(eq("user-1"), anyString(), eq(request.getAttempts().get(0)), eq(false));
+		verify(weakPointScoringOrchestrator).scoreAttempt(eq("user-1"), anyString(), eq(request.getAttempts().get(1)), eq(true));
+	}
+
+	@Test
+	void allAttemptsInOneRedoShareTheSameSyntheticRecordingId() {
+		PracticeRedoRequest request = redoRequest(
+				attempt("item-1", "vocabulary", "reluctant", false),
+				attempt("item-2", "grammar", "past tense", true));
+		when(mistakeHistoryMapper.findByUserId("user-1")).thenReturn(List.of());
+
+		service.redo(request);
+
+		ArgumentCaptor<String> recordingIdCaptor = ArgumentCaptor.forClass(String.class);
+		verify(weakPointScoringOrchestrator, times(2)).scoreAttempt(eq("user-1"), recordingIdCaptor.capture(),
+				org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyBoolean());
+		assertThat(recordingIdCaptor.getAllValues()).hasSize(2);
+		assertThat(recordingIdCaptor.getAllValues().get(0)).isEqualTo(recordingIdCaptor.getAllValues().get(1));
+		assertThat(recordingIdCaptor.getAllValues().get(0)).startsWith("practice-");
 	}
 
 	@Test

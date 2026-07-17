@@ -5,9 +5,13 @@ import com.remelearning.english.grammar.domain.GrammarType;
 import com.remelearning.english.grammar.domain.GrammarWeakPoint;
 import com.remelearning.common.event.LearningGapAnalyzedEvent;
 import com.remelearning.common.event.WeakPointPayload;
+import com.remelearning.common.scoring.ScoreSource;
 import com.remelearning.english.grammar.mapper.GrammarWeakPointMapper;
+import com.remelearning.english.practice.scoring.WeakPointScoreUpdate;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,6 +69,53 @@ class GrammarWeakPointServiceImplTest {
 		List<GrammarWeakPoint> actual = service.getWeakPoints("user-1", GrammarType.TENSE);
 
 		assertThat(actual).isEqualTo(expected);
+	}
+
+	@Test
+	void getTopWeakPointsDelegatesToMapperWithLimit() {
+		List<GrammarWeakPoint> expected = List.of(GrammarWeakPoint.builder().userId("user-1").build());
+		when(mapper.findTopByUserId("user-1", 5)).thenReturn(expected);
+
+		List<GrammarWeakPoint> actual = service.getTopWeakPoints("user-1", 5);
+
+		assertThat(actual).isEqualTo(expected);
+	}
+
+	@Test
+	void applyJavaComputedScoreUpsertsWithJavaEngineSourceForGrammarCategory() {
+		when(classifier.classify("past tense")).thenReturn(GrammarType.TENSE);
+		Instant nextReviewAt = Instant.now().plusSeconds(3600);
+		WeakPointScoreUpdate update = WeakPointScoreUpdate.builder()
+				.recordingId("practice-abc")
+				.userId("user-1")
+				.itemId("item-1")
+				.category("grammar")
+				.label("past tense")
+				.weakScore(0.42)
+				.masteryLevel(0.6)
+				.nextReviewAt(nextReviewAt)
+				.build();
+
+		service.applyJavaComputedScore(update);
+
+		ArgumentCaptor<GrammarWeakPoint> captor = ArgumentCaptor.forClass(GrammarWeakPoint.class);
+		verify(mapper).upsert(captor.capture());
+		GrammarWeakPoint saved = captor.getValue();
+		assertThat(saved.getForgettingScore()).isEqualTo(0.42);
+		assertThat(saved.getMasteryLevel()).isEqualTo(0.6);
+		assertThat(saved.getNextReviewAt()).isEqualTo(nextReviewAt);
+		assertThat(saved.getScoreSource()).isEqualTo(ScoreSource.JAVA_ENGINE);
+		assertThat(saved.getGrammarType()).isEqualTo(GrammarType.TENSE);
+	}
+
+	@Test
+	void applyJavaComputedScoreSkipsUpdatesForOtherCategories() {
+		WeakPointScoreUpdate update = WeakPointScoreUpdate.builder()
+				.userId("user-1").itemId("item-1").category("vocabulary").label("reluctant").weakScore(0.5).build();
+
+		service.applyJavaComputedScore(update);
+
+		verify(mapper, never()).upsert(any());
 	}
 
 	private WeakPointPayload weakPoint(String category, String label) {

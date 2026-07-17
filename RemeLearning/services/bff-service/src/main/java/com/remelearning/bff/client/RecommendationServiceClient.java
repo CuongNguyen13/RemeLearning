@@ -19,7 +19,7 @@ public class RecommendationServiceClient {
 
 	private final WebClient recommendationServiceClient;
 
-	public RecommendationServiceClient(@Qualifier("recommendationServiceClient") WebClient recommendationServiceClient) {
+	public RecommendationServiceClient(@Qualifier("recommendationServiceWebClient") WebClient recommendationServiceClient) {
 		this.recommendationServiceClient = recommendationServiceClient;
 	}
 

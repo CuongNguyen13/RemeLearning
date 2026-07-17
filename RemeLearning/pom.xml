@@ -34,6 +34,9 @@
 		<jjwt.version>0.12.6</jjwt.version>
 		<aws-sdk.version>2.29.29</aws-sdk.version>
 		<springdoc.version>2.7.0</springdoc.version>
+		<google-api-client.version>2.7.0</google-api-client.version>
+		<google-api-services-drive.version>v3-rev20240914-2.0.0</google-api-services-drive.version>
+		<google-auth-library.version>1.23.0</google-auth-library.version>
 	</properties>
 
 	<dependencyManagement>

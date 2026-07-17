@@ -4,19 +4,33 @@
 
     <insert id="upsert" parameterType="com.remelearning.dashboard.domain.RecommendationSnapshot">
         INSERT INTO recent_recommendations
-            (user_id, item_id, category, label, recommendation_text, forgetting_score, received_at)
+            (user_id, item_id, category, label, recommendation_text, exercises, forgetting_score, received_at)
         VALUES
-            (#{userId}, #{itemId}, #{category}, #{label}, #{recommendationText}, #{forgettingScore}, now())
+            (#{userId}, #{itemId}, #{category}, #{label}, #{recommendationText},
+             #{exercises, typeHandler=com.remelearning.dashboard.mapper.StringListJsonTypeHandler}, #{forgettingScore}, now())
         ON CONFLICT (user_id, item_id) DO UPDATE SET
             category = EXCLUDED.category,
             label = EXCLUDED.label,
             recommendation_text = EXCLUDED.recommendation_text,
+            exercises = EXCLUDED.exercises,
             forgetting_score = EXCLUDED.forgetting_score,
             received_at = now()
     </insert>
 
-    <select id="findRecentByUserId" resultType="com.remelearning.dashboard.domain.RecommendationSnapshot">
-        SELECT id, user_id, item_id, category, label, recommendation_text, forgetting_score, received_at
+    <resultMap id="recommendationSnapshotResultMap" type="com.remelearning.dashboard.domain.RecommendationSnapshot">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="item_id" property="itemId"/>
+        <result column="category" property="category"/>
+        <result column="label" property="label"/>
+        <result column="recommendation_text" property="recommendationText"/>
+        <result column="exercises" property="exercises" typeHandler="com.remelearning.dashboard.mapper.StringListJsonTypeHandler"/>
+        <result column="forgetting_score" property="forgettingScore"/>
+        <result column="received_at" property="receivedAt"/>
+    </resultMap>
+
+    <select id="findRecentByUserId" resultMap="recommendationSnapshotResultMap">
+        SELECT id, user_id, item_id, category, label, recommendation_text, exercises, forgetting_score, received_at
         FROM recent_recommendations
         WHERE user_id = #{userId}
         ORDER BY received_at DESC

@@ -30,4 +30,33 @@
         ORDER BY occurrence_count DESC
     </select>
 
+    <select id="findOneForUpdate" resultType="com.remelearning.english.practice.domain.MistakeHistoryEntry">
+        SELECT id, user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at,
+               ease_factor, half_life_days, mastery, leitner_box, next_review_at, last_weak_score, label_key
+        FROM mistake_history
+        WHERE user_id = #{userId} AND item_id = #{itemId}
+        FOR UPDATE
+    </select>
+
+    <update id="updateScoringState">
+        UPDATE mistake_history
+        SET ease_factor = #{easeFactor},
+            half_life_days = #{halfLifeDays},
+            mastery = #{mastery},
+            leitner_box = #{leitnerBox},
+            next_review_at = #{nextReviewAt},
+            last_weak_score = #{lastWeakScore},
+            label_key = #{labelKey},
+            updated_at = now()
+        WHERE user_id = #{userId} AND item_id = #{itemId}
+    </update>
+
+    <select id="findDueForReview" resultType="com.remelearning.english.practice.domain.MistakeHistoryEntry">
+        SELECT id, user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at,
+               ease_factor, half_life_days, mastery, leitner_box, next_review_at, last_weak_score, label_key
+        FROM mistake_history
+        WHERE user_id = #{userId} AND next_review_at IS NOT NULL AND next_review_at &lt;= #{now}
+        ORDER BY next_review_at ASC
+    </select>
+
 </mapper>

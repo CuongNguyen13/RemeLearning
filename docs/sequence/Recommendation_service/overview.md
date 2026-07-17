@@ -30,6 +30,7 @@ sequenceDiagram
     participant Kafka
     participant Consumer as LearningGapAnalyzedConsumer (groupId=recommendation-service)
     participant Svc as RecommendationServiceImpl
+    participant Gen as ExerciseGenerator (rule-based | Gemini)
     participant Mapper as RecommendationMapper (MyBatis)
     participant DB as reme_recommendation DB
     participant Publisher as KafkaEventPublisher
@@ -38,7 +39,9 @@ sequenceDiagram
     Consumer->>Svc: handleLearningGapAnalyzed(event)
     activate Svc
     loop each weak point (no category filter)
-        Svc->>Mapper: upsert(userId, itemId, category, label,<br/>forgettingScore, recommendationText)
+        Svc->>Gen: generate(category, label, forgettingScore)
+        Gen-->>Svc: exercises: string[]
+        Svc->>Mapper: upsert(userId, itemId, category, label,<br/>forgettingScore, recommendationText, exercises)
         Mapper->>DB: INSERT ... ON CONFLICT (user_id, item_id) DO UPDATE
     end
     Svc->>Publisher: publish(recommendation.generated, userId, RecommendationGeneratedEvent)
@@ -85,8 +88,12 @@ sequenceDiagram
   `english-service`/`english-service-grammar`/`english-service-pronunciation` groups, so all
   consumers get a full copy of every `learning.gap.analyzed` message instead of Kafka splitting
   partitions between them.
-- `recommendation.generated` (topic constant already existed in `common`'s `KafkaTopics.java`) has no
-  consumer yet — defined for a future service (e.g. a notification or exercise-generation service) to
-  pick up.
+- `recommendation.generated` is consumed by `dashboard-service` into its own `recent_recommendations`
+  snapshot (see [../Dashboard_service/recommendation-generated.md](../Dashboard_service/recommendation-generated.md)).
+- `exercises` (concrete practice exercises per weak point) is produced in-process by
+  `ExerciseGenerator` before the upsert — rule-based per-category templates by default, or Gemini
+  (via `common`'s `LlmClient`) when `recommendation.exercise-generator.mode=llm`, with fallback to the
+  templates on any LLM failure. Generated once per weak point and reused for both the DB row and the
+  published payload.
 - For the producer side of `learning.gap.analyzed` (`RuleBasedAnalyzer`) and the full cross-service
   picture, see [../Ai_service/overview.md](../Ai_service/overview.md).

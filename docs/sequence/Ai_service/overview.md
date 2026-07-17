@@ -113,9 +113,18 @@ sequenceDiagram
     Caller->>AI: POST /api/v1/analyze<br/>{recording_id, user_id, segments[], history[]}
     AI->>AI: RuleBasedAnalyzer.analyze(segments, history)
     AI-->>Caller: 200 LearningGapAnalyzedEvent<br/>{recording_id, user_id, weak_points[]}
+
+    Caller->>AI: POST /api/v1/tts/synthesize<br/>{text, lang, voice?}
+    AI->>AI: SupertonicEngine.synthesize (ONNX/CPU, lazy-loaded, 44.1kHz WAV)
+    AI-->>Caller: 200 {audio_base64, mime_type, sample_rate}
 ```
 
 ## Notes
+
+- **TTS** (`POST /api/v1/tts/synthesize`, `app/tts/`) is a synchronous REST stage backed by
+  Supertonic (99M-param ONNX, CPU, no GPU). Called by english-service's dictation AI-practice section
+  via `SupertonicTtsClient` to voice Gemini-suggested practice sentences. Gated by `TTS_ENABLED`
+  (default true); the model loads lazily on the first request.
 
 - `KAFKA_ENABLED` (`app/config.py`) defaults to `false`; with it `false`, only the REST endpoints run
   and the two consumer tasks in `app/main.py`'s lifespan never start.

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.practice.mapper.ItemDifficultyStatsMapper">
+
+    <select id="find" resultType="com.remelearning.common.scoring.PopulationStats">
+        SELECT correct_count AS correctCount, incorrect_count AS incorrectCount
+        FROM item_difficulty_stats
+        WHERE category = #{category} AND label_key = #{labelKey}
+    </select>
+
+    <insert id="upsertIncrement">
+        INSERT INTO item_difficulty_stats (category, label_key, correct_count, incorrect_count, updated_at)
+        VALUES (#{category}, #{labelKey}, #{correctDelta}, #{incorrectDelta}, now())
+        ON CONFLICT (category, label_key) DO UPDATE SET
+            correct_count = item_difficulty_stats.correct_count + EXCLUDED.correct_count,
+            incorrect_count = item_difficulty_stats.incorrect_count + EXCLUDED.incorrect_count,
+            updated_at = now()
+    </insert>
+
+</mapper>

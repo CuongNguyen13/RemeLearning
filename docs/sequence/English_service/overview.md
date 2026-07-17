@@ -2,7 +2,11 @@
 
 `english-service` (Java/Spring Boot) is a modular monolith covering three analysis domains —
 `vocabulary`, `grammar`, `pronunciation` (each `com.remelearning.english.<domain>`) — plus a fourth,
-cross-cutting `practice` package for redo-exercises. Only `vocabulary` owns the
+cross-cutting `practice` package for redo-exercises, and a fifth, `dictation`, for listen-and-type
+practice generated from a learner's most-forgotten vocabulary/grammar items (see
+[dictation-practice.md](dictation-practice.md)) - unlike the other four, it is pull-based (triggered
+by the FE, no Kafka consumer of its own) and reuses `vocabulary`/`grammar`'s weak-point services
+in-process rather than adding a new inter-service call. Only `vocabulary` owns the
 `TranscriptReadyConsumer`/transcript persistence: the `transcripts`/`transcript_segments` tables are
 a cross-domain concern written once, and `grammar`/`pronunciation` read them back via the shared
 `GET /api/v1/transcripts/{recordingId}` endpoint instead of re-ingesting `transcript.ready`. All
@@ -26,7 +30,8 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 [english-learning-gap-analyzed.md](english-learning-gap-analyzed.md) (vocabulary),
 [english-learning-gap-analyzed-grammar.md](english-learning-gap-analyzed-grammar.md),
 [english-learning-gap-analyzed-pronunciation.md](english-learning-gap-analyzed-pronunciation.md),
-[practice-redo.md](practice-redo.md) (mistake-history seeding + redo-exercise grading).
+[practice-redo.md](practice-redo.md) (mistake-history seeding + redo-exercise grading),
+[dictation-practice.md](dictation-practice.md) (session generation + transcript grading).
 
 ## 1. Kafka consumers (ingestion)
 
@@ -161,12 +166,63 @@ sequenceDiagram
     Caller->>Ctrl: POST /api/v1/practice/redo {userId, attempts[]}
     Ctrl->>Svc: redo(request)
     Svc->>DB: log each attempt + upsert mistake_history<br/>(occurrence_count++ only if wrong, last_seen_at always refreshed)
+    Svc->>DB: score each attempt directly via common.scoring.WeakPointScoringEngine<br/>(BKT mastery + Rasch difficulty + adaptive-Ebbinghaus half-life + Leitner),<br/>upsert straight into the owning domain's weak-point table (scoreSource=JAVA_ENGINE)
     Svc->>DB: findByUserId(userId) - full current history
     Svc->>Producer: publish(AnalysisRequestedEvent{recordingId, userId, segments=[], history})
     Producer->>Kafka: learning.gap.analysis.requested
     Ctrl-->>Caller: 200 ApiResponse{success:true}
 
-    Note over Kafka: ai-service re-scores and republishes learning.gap.analyzed,<br/>which feeds back into section 1's consumers (including MistakeHistorySeedConsumer,<br/>a no-op there since history already exists) plus recommendation-service/dashboard-service
+    Note over Kafka: ai-service re-scores (still the older single-formula Ebbinghaus calc)<br/>and republishes learning.gap.analyzed, which feeds back into section 1's consumers<br/>(including MistakeHistorySeedConsumer, a no-op there) plus recommendation-service/dashboard-service.<br/>A score_source guard stops this slower write from clobbering the fresher Java-direct one.
+```
+
+A `GET /api/v1/practice/review-queue/{userId}` endpoint also exists, reading items due for review
+(`next_review_at <= now`) straight from `mistake_history`, sorted soonest-first — see
+[practice-redo.md](practice-redo.md) section 3.
+
+## 4. Dictation practice (`dictation` package)
+
+Full detail in [dictation-practice.md](dictation-practice.md); summary below.
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    background: '#ffffff'
+---
+sequenceDiagram
+    participant Caller
+    participant Ctrl as DictationController
+    participant Svc as DictationServiceImpl
+    participant WSvc as Vocabulary/GrammarWeakPointService (in-process)
+    participant Gen as SentenceGenerator (rule-based / LLM)
+    participant Tts as GoogleCloudTtsClient
+    participant S3 as S3StorageClient
+    participant DB as reme_english DB (dictation_exercises, dictation_exercise_audio, dictation_attempts)
+
+    Caller->>Ctrl: POST /api/v1/dictation/sessions/{userId} {category?, accents[], count}
+    Ctrl->>Svc: startSession(userId, request)
+    Svc->>WSvc: getTopWeakPoints(userId, count) - vocabulary and/or grammar
+    WSvc-->>Svc: top-N most-forgotten items
+    loop each item
+        Svc->>Gen: generate(category, label, forgettingScore) -> one sentence
+        Svc->>DB: insert dictation_exercises row
+        loop each requested accent
+            Svc->>Tts: synthesize(sentence, accent voice)
+            Svc->>S3: upload audio, get playable URL
+            Svc->>DB: insert dictation_exercise_audio row
+        end
+    end
+    Svc-->>Ctrl: exercises (no sentence text - audio URLs only)
+    Ctrl-->>Caller: 200 ApiResponse{data: DictationExerciseDto[]}
+
+    Caller->>Ctrl: POST /api/v1/dictation/attempts {userId, exerciseId, userTranscript}
+    Ctrl->>Svc: submitAttempt(request)
+    Svc->>DB: findExerciseById(exerciseId)
+    Svc->>Svc: DictationScorer.score(sentenceText, userTranscript) - word-level WER/diff
+    Svc->>DB: insert dictation_attempts row
+    Svc-->>Ctrl: DictationAttemptResultDto{referenceText, accuracy, wer, diff[]}
+    Ctrl-->>Caller: 200 ApiResponse{data: DictationAttemptResultDto}
 ```
 
 ## Notes
@@ -183,3 +239,6 @@ sequenceDiagram
   by which a learner's mistake history gets bundled and sent back to `ai-service` for re-scoring.
 - For where the *original* `learning.gap.analyzed` messages come from (S3 download, Whisper,
   pyannote diarization, `RuleBasedAnalyzer`), see [../Ai_service/overview.md](../Ai_service/overview.md).
+- `dictation` is the only one of the five packages with no Kafka consumer of its own - it reads
+  `vocabulary`/`grammar`'s weak-point tables via their existing service interfaces in-process
+  instead, and is triggered synchronously by the FE (through bff-service) rather than by an event.

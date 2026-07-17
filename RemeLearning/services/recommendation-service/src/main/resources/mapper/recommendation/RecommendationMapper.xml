@@ -4,20 +4,35 @@
 
     <insert id="upsert" parameterType="com.remelearning.recommendation.domain.Recommendation">
         INSERT INTO recommendations
-            (user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, updated_at)
+            (user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, exercises, updated_at)
         VALUES
-            (#{userId}, #{recordingId}, #{itemId}, #{category}, #{label}, #{forgettingScore}, #{recommendationText}, now())
+            (#{userId}, #{recordingId}, #{itemId}, #{category}, #{label}, #{forgettingScore}, #{recommendationText},
+             #{exercises, typeHandler=com.remelearning.recommendation.mapper.StringListJsonTypeHandler}, now())
         ON CONFLICT (user_id, item_id) DO UPDATE SET
             recording_id = EXCLUDED.recording_id,
             category = EXCLUDED.category,
             label = EXCLUDED.label,
             forgetting_score = EXCLUDED.forgetting_score,
             recommendation_text = EXCLUDED.recommendation_text,
+            exercises = EXCLUDED.exercises,
             updated_at = now()
     </insert>
 
-    <select id="findByUserId" resultType="com.remelearning.recommendation.domain.Recommendation">
-        SELECT id, user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, updated_at
+    <resultMap id="recommendationResultMap" type="com.remelearning.recommendation.domain.Recommendation">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="recording_id" property="recordingId"/>
+        <result column="item_id" property="itemId"/>
+        <result column="category" property="category"/>
+        <result column="label" property="label"/>
+        <result column="forgetting_score" property="forgettingScore"/>
+        <result column="recommendation_text" property="recommendationText"/>
+        <result column="exercises" property="exercises" typeHandler="com.remelearning.recommendation.mapper.StringListJsonTypeHandler"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="findByUserId" resultMap="recommendationResultMap">
+        SELECT id, user_id, recording_id, item_id, category, label, forgetting_score, recommendation_text, exercises, updated_at
         FROM recommendations
         WHERE user_id = #{userId}
         <if test="category != null">

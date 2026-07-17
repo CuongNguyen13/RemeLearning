@@ -48,6 +48,7 @@ sequenceDiagram
   `VocabularyType`/`GrammarType`/`PronunciationType` — recommendation-service aggregates across
   domains rather than classifying within one.
 - `Recommendation` fields: `id, userId, recordingId, itemId, category, label, forgettingScore,
-  recommendationText, updatedAt`.
+  recommendationText, exercises, updatedAt`. `exercises` is a `string[]` produced by
+  `ExerciseGenerator` (see [learning-gap-analyzed.md](learning-gap-analyzed.md)).
 - No validation/exception path beyond a normal DB query — no matching data simply returns an empty
   list, not a 404.

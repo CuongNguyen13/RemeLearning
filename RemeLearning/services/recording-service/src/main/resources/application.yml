@@ -1,8 +1,10 @@
 spring:
+  config:
+    import: optional:file:./.env[.properties]
   application:
     name: recording-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/reme_recording
+    url: ${DB_URL:jdbc:postgresql://db.oaltfczuectbznkuywfm.supabase.co:5432/postgres?currentSchema=reme_recording&sslmode=require}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
   data:
@@ -14,6 +16,12 @@ spring:
   flyway:
     locations: classpath:db/migration
     baseline-on-migrate: true
+    schemas: ${DB_SCHEMA:reme_recording}
+    create-schemas: true
+  servlet:
+    multipart:
+      max-file-size: ${RECORDING_MAX_FILE_SIZE:500MB}
+      max-request-size: ${RECORDING_MAX_REQUEST_SIZE:500MB}
 
 server:
   port: 8082

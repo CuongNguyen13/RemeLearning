@@ -61,6 +61,11 @@ components:
         label: { type: string }
         forgettingScore: { type: number, format: double }
         recommendationText: { type: string }
+        exercises:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: "Concrete practice exercises for this weak point, from ExerciseGenerator (rule-based templates by default, or Gemini when recommendation.exercise-generator.mode=llm)"
         updatedAt: { type: string, format: date-time }
 
     ApiResponseRecommendationList:
@@ -104,4 +109,4 @@ x-kafka-topics:
       description: Published by ai-service after forgetting-pattern analysis; carries weak points across all categories. Unlike english-service's per-domain consumers, recommendation-service does not filter by category - every weak point becomes a recommendation row.
   produces:
     - topic: recommendation.generated
-      description: Published once a learning.gap.analyzed batch has been persisted as recommendations. recommendation-service is the first producer of this topic. Payload {eventId, eventType, occurredAt, recordingId, userId, recommendations[{itemId, category, label, recommendationText, forgettingScore}]}.
+      description: Published once a learning.gap.analyzed batch has been persisted as recommendations. recommendation-service is the first producer of this topic. Payload {eventId, eventType, occurredAt, recordingId, userId, recommendations[{itemId, category, label, recommendationText, exercises[], forgettingScore}]}. exercises is produced by ExerciseGenerator (rule-based per-category templates by default; Gemini-backed when recommendation.exercise-generator.mode=llm, falling back to the rule-based templates on any LLM failure).

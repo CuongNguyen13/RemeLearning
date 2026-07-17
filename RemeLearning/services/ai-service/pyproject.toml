@@ -52,6 +52,9 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
     "alembic>=1.13",
+    # On-device text-to-speech (app/tts/) for dictation AI-practice audio. 99M-param ONNX model,
+    # runs on CPU (no GPU), 44.1kHz output - reuses the onnxruntime already pulled in by insightface.
+    "supertonic>=0.1",
 ]
 
 [project.optional-dependencies]

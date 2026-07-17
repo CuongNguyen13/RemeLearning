@@ -1,4 +1,9 @@
-.claude/skills/code-standards/SKILL.md
+.claude/
+RemeLearning/.env
 CLAUDE.md
 TECHSTACK.md
 API-PURPOSE.md
+Business.md
+HUONG_DAN_CAI_DAT.md
+start-all.bat
+stop-all.bat

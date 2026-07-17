@@ -16,7 +16,7 @@ public class DashboardServiceClient {
 
 	private final WebClient dashboardServiceClient;
 
-	public DashboardServiceClient(@Qualifier("dashboardServiceClient") WebClient dashboardServiceClient) {
+	public DashboardServiceClient(@Qualifier("dashboardServiceWebClient") WebClient dashboardServiceClient) {
 		this.dashboardServiceClient = dashboardServiceClient;
 	}
 

@@ -172,6 +172,168 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseRecommendationsByCategory"
 
+  /api/v1/learners/{userId}/dictation/facets:
+    get:
+      tags: [Learners]
+      summary: The dictation library's filter facets (skill/level/topic/exam-type); thin proxy to english-service
+      operationId: getDictationFacets
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationFacets"
+
+  /api/v1/learners/{userId}/dictation/clips:
+    get:
+      tags: [Learners]
+      summary: Browse library clips filtered by skill/level/topic/exam-type; thin proxy to english-service
+      operationId: listDictationClips
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: skill, in: query, required: false, schema: { type: string } }
+        - { name: level, in: query, required: false, schema: { type: string } }
+        - { name: topic, in: query, required: false, schema: { type: string } }
+        - { name: examType, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationClipList"
+
+  /api/v1/learners/{userId}/dictation/clips/{clipId}/audio:
+    get:
+      tags: [Learners]
+      summary: Stream one library clip's audio; relays english-service's audio response
+      operationId: getDictationClipAudio
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: clipId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200":
+          description: Audio stream
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/wav: { schema: { type: string, format: binary } }
+
+  /api/v1/learners/{userId}/dictation/sessions:
+    post:
+      tags: [Learners]
+      summary: >
+        Start a dictation session: a batch of library clips matching the requested facets;
+        thin proxy to english-service
+      operationId: startDictationSession
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartDictationSessionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationClipList"
+
+  /api/v1/learners/{userId}/dictation/attempts:
+    post:
+      tags: [Learners]
+      summary: Grade a learner's typed transcript for one dictation exercise; thin proxy to english-service
+      operationId: submitDictationAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DictationAttemptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationAttemptResult"
+
+  /api/v1/learners/{userId}/dictation/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past dictation attempts, newest first; thin proxy to english-service
+      operationId: getDictationHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationHistoryEntryList"
+
+  /api/v1/learners/{userId}/dictation/ai-practice:
+    get:
+      tags: [Learners]
+      summary: A learner's AI-practice items (Gemini + Supertonic); thin proxy to english-service
+      operationId: getAiPractice
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationPracticeItemList"
+
+  /api/v1/learners/{userId}/dictation/ai-practice/generate:
+    post:
+      tags: [Learners]
+      summary: Generate/synthesize AI-practice audio from a learner's most-missed words; thin proxy to english-service
+      operationId: generateAiPractice
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationPracticeItemList"
+
+  /api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/audio:
+    get:
+      tags: [Learners]
+      summary: Stream one AI-practice item's synthesized audio; relays english-service's audio response
+      operationId: getAiPracticeAudio
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: practiceItemId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200":
+          description: Audio stream (wav)
+          content:
+            audio/wav: { schema: { type: string, format: binary } }
+
 components:
   schemas:
     User:
@@ -346,3 +508,122 @@ components:
         - type: object
           properties:
             data: { nullable: true }
+
+    DictationFacets:
+      type: object
+      properties:
+        skills: { type: array, items: { type: string } }
+        levels: { type: array, items: { type: string } }
+        topics: { type: array, items: { type: string } }
+        examTypes: { type: array, items: { type: string } }
+
+    DictationClip:
+      type: object
+      description: One library clip; omits the script so the answer isn't leaked before grading.
+      properties:
+        clipId: { type: integer, format: int64 }
+        code: { type: string }
+        title: { type: string }
+        skill: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        examType: { type: string }
+        audioUrl: { type: string }
+
+    StartDictationSessionRequest:
+      type: object
+      description: All facets optional; a null facet is unfiltered on that dimension.
+      properties:
+        skill: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        count: { type: integer, minimum: 1, default: 5 }
+
+    DictationAttemptRequest:
+      type: object
+      required: [userTranscript]
+      description: Exactly one of clipId / practiceItemId is set (userId is stamped from the path).
+      properties:
+        clipId: { type: integer, format: int64, nullable: true }
+        practiceItemId: { type: integer, format: int64, nullable: true }
+        userTranscript: { type: string }
+
+    WordDiff:
+      type: object
+      properties:
+        tag: { type: string, enum: [CORRECT, SUBSTITUTED, MISSING, EXTRA] }
+        actualWord: { type: string, nullable: true }
+        expectedWord: { type: string, nullable: true }
+
+    DictationAttemptResult:
+      type: object
+      properties:
+        referenceText: { type: string }
+        accuracy: { type: number, format: double }
+        wer: { type: number, format: double }
+        diff:
+          type: array
+          items: { $ref: "#/components/schemas/WordDiff" }
+        aiSuggestions: { type: array, items: { type: string } }
+        practiceSentences: { type: array, items: { type: string } }
+
+    DictationHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        clipId: { type: integer, format: int64, nullable: true }
+        title: { type: string, nullable: true }
+        skill: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        accuracy: { type: number, format: double }
+        wer: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    DictationPracticeItem:
+      type: object
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        audioUrl: { type: string, nullable: true }
+
+    ApiResponseDictationFacets:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DictationFacets" }
+
+    ApiResponseDictationClipList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/DictationClip" }
+
+    ApiResponseDictationAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DictationAttemptResult" }
+
+    ApiResponseDictationHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/DictationHistoryEntry" }
+
+    ApiResponseDictationPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/DictationPracticeItem" }

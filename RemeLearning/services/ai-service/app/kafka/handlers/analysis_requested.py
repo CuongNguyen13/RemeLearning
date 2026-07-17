@@ -1,11 +1,11 @@
 from app.analysis.base import MistakeAnalyzer
-from app.analysis.rule_based_analyzer import RuleBasedAnalyzer
+from app.analysis.factory import create_analyzer
 from app.kafka import topics
 from app.kafka.producer import event_producer
 from app.schemas.events import AnalysisRequestedEvent, LearningGapAnalyzedEvent
 
-# Swappable: replace with an LLM-backed MistakeAnalyzer later without touching this handler.
-_analyzer: MistakeAnalyzer = RuleBasedAnalyzer()
+# Chosen from config (rule-based | scoring-engine); swappable for an LLM-backed analyzer later.
+_analyzer: MistakeAnalyzer = create_analyzer()
 
 
 async def handle_analysis_requested(payload: dict) -> None:

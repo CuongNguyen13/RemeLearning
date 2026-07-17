@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * A recommendation row derived from ai-service's {@code learning.gap.analyzed} event.
@@ -26,5 +27,6 @@ public class Recommendation {
 	private String label;
 	private double forgettingScore;
 	private String recommendationText;
+	private List<String> exercises;
 	private Instant updatedAt;
 }
