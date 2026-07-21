@@ -28,5 +28,6 @@ public class DictationClip {
 	private String scriptText;
 	private String storageKey;
 	private String source;
+	private String folder;
 	private Instant createdAt;
 }

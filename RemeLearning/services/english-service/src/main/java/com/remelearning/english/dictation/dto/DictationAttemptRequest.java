@@ -1,7 +1,10 @@
 package com.remelearning.english.dictation.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * Payload for POST /api/v1/dictation/attempts - a learner's typed answer for one clip. Exactly one
@@ -22,4 +25,12 @@ public class DictationAttemptRequest {
 
 	@NotBlank
 	private String userTranscript;
+
+	/**
+	 * Wrong attempts the learner made on individual sentences before eventually retyping each one
+	 * correctly (sentence-mode dictation forces a correct retry before advancing) - null/empty for a
+	 * plain or AI-practice attempt. Folded into the same miss/weak-point pipeline as the main transcript.
+	 */
+	@Valid
+	private List<DictationSentenceMistakeRequest> sentenceMistakes;
 }

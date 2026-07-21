@@ -31,6 +31,20 @@ Cloud TTS) đọc thành audio. Cả hai chấm điểm chung bằng WER (`Dicta
 thời, và publish `learning.gap.analyzed` để pipeline gợi ý học tập sẵn có biến lỗi thành đề xuất.
 Xem mục 1, 6.
 
+**Rev 2 (chép chính tả theo từng câu)**: bổ sung mô hình duyệt bài **folder → file** (3 endpoint mới:
+`/folders`, `/folders/{folderId}/lessons`, `/clips/{clipId}` chi tiết) cộng `minListensForHint` trên
+`/facets`, để FE luyện chép chính tả từng câu (nghe câu, gõ đúng tự next) thay vì cả clip một Textarea.
+Script được tách câu (`dictation_clip_sentences`) ngay khi import; mốc `startMs`/`endMs` cho từng câu
+được AI-align **lazy** ngay trong `GET /api/v1/dictation/clips/{clipId}`: nếu bất kỳ câu nào còn thiếu
+`startMs`/`endMs`, service đọc audio của clip qua `StorageClient` rồi gọi `ai-service`
+`POST /api/v1/dictation/align-sentences` (Whisper word-timestamps + khớp câu tuần tự theo thứ tự, xem
+mục 7) để lấy mốc thời gian, lưu ngay xuống `dictation_clip_sentences` (`updateSentenceTimestamps`) rồi
+mới trả response — nên request đó có thể chậm hơn bình thường (transcribe cả audio clip). Nếu
+`ai-service` không gọi được hoặc một câu không khớp được, câu đó vẫn giữ `null` (không chặn response),
+và sẽ được thử lại ở lần `GET` kế tiếp. Chấm điểm vẫn **FE-only**: BE chỉ trả `scriptText`/`sentences`
+khi mở chi tiết 1 bài, FE tự so khớp rồi gọi nguyên `POST /attempts` hiện có. Facet-filter/`/sessions`
+cũ **không bị xoá**, chỉ không còn là luồng chính của FE.
+
 `recording-service`, `recommendation-service`, `dashboard-service` nay cũng đã có API/Kafka thật (trước đây
 chỉ là skeleton) — hoàn thiện đầu và cuối của pipeline: `recording-service` là điểm vào (upload → S3 →
 `recording.uploaded`), `recommendation-service`/`dashboard-service` là điểm ra (tổng hợp `learning.gap.analyzed`
@@ -300,8 +314,10 @@ và `label_key` đã được lưu sẵn ở đó), lọc `next_review_at <= now
   khởi động qua `StorageClient` của `common` (mặc định đọc từ ổ đĩa local). Mỗi clip gắn taxonomy cố
   định: **skill** (4 kỹ năng), **level** (CEFR A1–C2), **topic**, **exam_type** (TOEIC/IELTS/…) — suy
   ra từ đường dẫn thư mục + tên file, **không dùng AI**.
-- **B. "Luyện nghe với AI"** — từ những từ learner hay nghe sai, Gemini sinh câu luyện tập rồi
-  Supertonic (chạy trong `ai-service`) đọc thành audio để nghe lại đúng những chỗ đã sai.
+- **B. "Luyện nghe với AI"** — từ những từ/câu learner hay nghe sai, Gemini sinh **một đoạn văn luyện
+  tập duy nhất** (độc thoại hoặc hội thoại nhiều người, tuỳ Gemini chọn) lồng ghép tự nhiên các từ đó,
+  mỗi speaker được gán ngẫu nhiên một giọng Supertonic khác nhau, từng câu thoại được Supertonic
+  (chạy trong `ai-service`) đọc riêng rồi ghép lại (`WavAudioMerger`) thành một file audio duy nhất.
 
 Cả hai phần chấm điểm chung một luồng (`POST /attempts`): dùng lại `DictationScorer` (WER) đã có, gọi
 `LlmClient` (Gemini) cho gợi ý tức thời, và **publish `learning.gap.analyzed`** để pipeline gợi ý học
@@ -313,7 +329,9 @@ TTS đổi từ Google Cloud sang **Supertonic** (`reme.tts.provider=supertonic`
 ### GET `/api/v1/dictation/facets`
 
 Các giá trị lọc phân biệt trong thư viện (skills/levels/topics/examTypes), để dựng bộ lọc FE.
-- **Response `data`** — `DictationFacetsDto`: `{skills[], levels[], topics[], examTypes[]}`.
+- **Response `data`** — `DictationFacetsDto`: `{skills[], levels[], topics[], examTypes[],
+  minListensForHint}` (`minListensForHint`: ngưỡng số lần nghe tối thiểu trước khi FE mở gợi ý — đếm
+  ở FE theo từng câu, cấu hình qua `dictation.hint.min-listens`, mặc định 3).
 
 ### GET `/api/v1/dictation/clips`
 
@@ -321,6 +339,38 @@ Duyệt clip trong thư viện, lọc theo bất kỳ tập con nào của `skil
 - **Query params**: `skill?`, `level?`, `topic?`, `examType?`, `limit` (mặc định 50).
 - **Response `data`** — `DictationClipDto[]`: `{clipId, code, title, skill, level, topic, examType,
   audioUrl}` (không có script — tránh lộ đáp án).
+
+### GET `/api/v1/dictation/folders` (rev 2)
+
+Danh sách folder (chủ đề) trong thư viện — `folder` = tên thư mục cha trực tiếp của file audio trong
+storage (khác với `topic`/`skill`/`level`/`examType`, vốn suy ra theo taxonomy riêng của
+`DictationLibraryImporter`; 2 khái niệm song song, không thay thế nhau).
+- **Response `data`** — `DictationFolderDto[]`: `{folderId, name, lessonCount}`.
+
+### GET `/api/v1/dictation/folders/{folderId}/lessons` (rev 2)
+
+Danh sách bài tập (clip) trong 1 folder — nhẹ, **không** có `scriptText`/`sentences`, chỉ đủ để render
+danh sách; script chỉ tải khi mở chi tiết 1 bài (endpoint dưới).
+- **Response `data`** — `DictationLessonSummaryDto[]`: `{clipId, code, title, audioUrl}`.
+
+### GET `/api/v1/dictation/clips/{clipId}` (rev 2)
+
+Chi tiết 1 clip — script đầy đủ + câu đã tách — dùng khi learner mở 1 bài để luyện chép chính tả từng
+câu. Ngược lại với `/clips` (bulk-list) và `/folders/{folderId}/lessons`, endpoint này **có** trả script
+vì chỉ tải cho đúng 1 bài đang mở, không phải danh sách bulk.
+- **Xử lý**: nếu bất kỳ câu nào của clip còn thiếu `startMs`/`endMs`, gọi `ai-service`
+  `POST /api/v1/dictation/align-sentences` trước khi trả response (xem mục 7 + phần mô tả ở đầu file)
+  — lazy, chạy ngay trong request này, không phải một job nền riêng.
+- **Query param** — `translationLang?` (mới): ngôn ngữ UI hiện tại của learner (vd `"vi"`). Nếu có và
+  khác `"en"`, bất kỳ câu nào còn thiếu `translation` sẽ được dịch lazy bằng LLM (`ensureSentencesTranslated`)
+  ngay trong request này (một lệnh gọi LLM cho cả clip), lưu lại, rồi trả về cùng response — bỏ qua
+  hoàn toàn nếu param rỗng hoặc bằng `"en"` (ngôn ngữ gốc của nội dung).
+- **Response `data`** — `DictationClipDetailDto`: `{clipId, code, title, audioUrl, scriptText,
+  sentences[]}`, mỗi phần tử `sentences` là `DictationSentenceDto`: `{index, text, startMs, endMs,
+  translation}` (`startMs`/`endMs` **null** nếu AI-align chưa chạy được, hoặc không khớp được câu đó
+  trong audio; `translation` **null** nếu không có `translationLang` hoặc bằng `"en"`).
+- **Lỗi**: `404` nếu `clipId` không tồn tại. Lỗi gọi `ai-service` **không** làm hỏng response — câu đó
+  chỉ giữ `null` và được thử lại ở lần gọi sau.
 
 ### GET `/api/v1/dictation/clips/{clipId}/audio`
 
@@ -339,30 +389,112 @@ Chấm điểm bản gõ so với script bằng Word Error Rate (WER, Levenshtei
 hoặc **clip AI-practice**.
 
 - **Request body** — `DictationAttemptRequest`: `userId` (bắt buộc), `userTranscript` (bắt buộc), và
-  **đúng một trong** `clipId` / `practiceItemId`.
+  **đúng một trong** `clipId` / `practiceItemId`; kèm `sentenceMistakes?: DictationSentenceMistake[]`
+  (mới) — `{sentenceIndex, expectedText, attemptedText}`, chỉ FE sentence-mode gửi (xem mục "Chép
+  chính tả từng câu" bên dưới), null/rỗng với AI-practice hoặc clip không dùng sentence-mode.
 - **Xử lý** (`DictationServiceImpl`):
-  1. Chấm bằng `DictationScorer` (WER + diff từng từ), lưu `dictation_attempts` + từng lỗi vào
-     `dictation_misses`.
-  2. Gọi `DictationAnalyzer` (Gemini nếu `dictation.analyzer.mode=llm`, mặc định rule-based) →
+  1. Chấm bằng `DictationScorer` (WER + diff từng từ) trên **toàn bộ `userTranscript`**, lưu
+     `dictation_attempts` + từng lỗi vào `dictation_misses`.
+  2. Nếu có `sentenceMistakes`, chấm riêng từng cặp `expectedText`/`attemptedText` bằng cùng
+     `DictationScorer`, gộp các từ sai vào **cùng danh sách `dictation_misses`** ở bước 1 — đây là
+     cách các lần gõ sai khi luyện từng câu (buộc phải gõ đúng mới được sang câu tiếp, xem rev 3 bên
+     dưới) vẫn được ghi nhận cho AI dù `userTranscript` cuối cùng đã đúng 100%.
+  3. Gọi `DictationAnalyzer` (Gemini nếu `dictation.analyzer.mode=llm`, mặc định rule-based) →
      gợi ý học tập + câu luyện tập, lưu câu luyện vào `dictation_practice_items`.
-  3. Publish `learning.gap.analyzed` (các từ sai thành `WeakPointPayload` category `vocabulary`,
+  4. Publish `learning.gap.analyzed` (các từ sai thành `WeakPointPayload` category `vocabulary`,
      `forgettingScore` bão hòa theo số lần sai) để pipeline gợi ý xử lý.
 - **Response `data`** — `DictationAttemptResultDto`: `{referenceText, accuracy, wer, diff[],
-  aiSuggestions[], practiceSentences[]}`.
+  aiSuggestions[], practiceSentences[]}` — không đổi; `accuracy`/`wer`/`diff` vẫn tính trên
+  `userTranscript`, không tính `sentenceMistakes`.
 - **Lỗi**: `400` nếu thiếu cả `clipId` lẫn `practiceItemId`; `404` nếu id không tồn tại.
 
 ### GET `/api/v1/dictation/history/{userId}`
 
 Lịch sử chấm điểm, mới nhất trước — join `dictation_attempts` với `dictation_clips`.
 - **Response `data`** — `DictationHistoryEntryDto[]`: `{attemptId, clipId, title, skill, level,
-  examType, accuracy, wer, attemptedAt}`.
+  examType, accuracy, wer, attemptedAt, attemptCount, practiceType}`.
+- `attemptCount` — số lần người học đã làm clip này (tính cả lần này), tính bằng window function
+  `COUNT(*) OVER (PARTITION BY user_id, clip_id ORDER BY created_at)` trên tất cả các attempts cho
+  cùng clip đó; `null` cho các entry AI-practice (không có `clipId`).
+- `practiceType` — `LIBRARY` (có `clipId`) hoặc `AI_PRACTICE` (không có, tức là chép từ một câu do
+  Gemini sinh ra), tính ngay trong Java (`DictationServiceImpl.getHistory`) từ `clipId`, không cần
+  cột DB mới — để FE gắn nhãn "Thư viện" / "Luyện tập với AI" cho từng dòng lịch sử.
+
+### GET `/api/v1/dictation/history/{userId}/{attemptId}`
+
+Chi tiết đầy đủ một lần chấm điểm trong lịch sử: lời thoại gốc, bản gõ của người học, danh sách từ
+sai (lấy thẳng từ `dictation_misses`, không tái tạo diff theo vị trí — xem ghi chú bên dưới), và các
+gợi ý AI đã sinh ra tại thời điểm đó (`ai_suggestions`, cột mới trên `dictation_attempts`).
+- **Response `data`** — `DictationAttemptDetailDto`: `{attemptId, title, skill, level, examType,
+  referenceText, userTranscript, accuracy, wer, mistakes: [{expectedWord, actualWord, tag}],
+  aiSuggestions[], attemptedAt}`.
+- **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId` (scoped ownership check).
+- **Vì sao không phải diff đầy đủ theo vị trí**: `dictation_misses` không lưu vị trí từ trong câu, nên
+  không dựng lại được đúng mảng diff xen kẽ CORRECT/SUBSTITUTED/MISSING như màn kết quả chấm điểm tức
+  thời. Với bài chép từng câu (sentence-mode), bản gõ cuối cùng luôn đúng 100% (bắt buộc sửa đúng mới
+  qua câu) nên chấm lại từ đầu (`DictationScorer.score`) sẽ cho ra 0 lỗi — che mất đúng những chỗ người
+  học từng sai. Vì vậy màn chi tiết hiển thị danh sách từ sai dạng phẳng từ `dictation_misses`, đúng cho
+  cả hai luồng chấm điểm, đổi lại không phải màn hình gạch chân từng từ trong câu.
 
 ### GET `/api/v1/dictation/ai-practice/{userId}` · POST `.../ai-practice/{userId}/generate` · GET `.../ai-practice/items/{practiceItemId}/audio`
 
 Phần "Luyện nghe với AI": liệt kê các câu luyện (`DictationPracticeItemDto` = `{practiceItemId,
-audioUrl}` — `audioUrl` null cho tới khi tổng hợp xong), `generate` sẽ (tạo và) tổng hợp audio bằng
-Supertonic rồi lưu qua `StorageClient`, và endpoint audio stream file WAV đã tổng hợp. Chép chính tả
-một clip AI-practice cũng dùng chung `POST /attempts`.
+audioUrl, level, examType, topic}` — `audioUrl` null cho tới khi tổng hợp xong; `level`/`examType`/
+`topic` null cho các item sinh ra không qua chọn facet, vd từ một history attempt). `generate` (nút
+"Tạo bài luyện") lấy nội dung các practice item còn thiếu audio (`findPracticeItemsWithoutAudio`), hoặc
+nếu chưa có item nào thì lấy các từ sai nhiều nhất trong `missWindow` (mặc định 8) attempt gần nhất
+(`findTopMissedWords`).
+- **Request body** — `GenerateAiPracticeRequest` (mới, optional; thân request có thể bỏ trống hoàn
+  toàn để giữ hành vi mặc định cũ): `{level?, examType?, translationLang?}`.
+  - `level`/`examType`: một giá trị cụ thể (vd `"B1"`, `"TOEIC"`), chuỗi đặc biệt `"RANDOM"` (server tự
+    chọn ngẫu nhiên — `level` từ pool CEFR cố định `A1, A2, B1, B2, C1`; `examType` từ danh sách exam
+    type **đang có thật trong thư viện** (`findDistinctExamTypes`), nếu thư viện chưa có exam type nào
+    thì fallback về `TOEIC, IELTS, TOEFL, General`), hoặc bỏ trống/null (không ràng buộc — LLM tự chọn
+    tự do, đúng hành vi mặc định trước đây). Giá trị đã resolve (không còn `"RANDOM"`) được trả về
+    trong `level`/`examType` của mỗi item, để FE luôn biết chính xác cái gì đã được chọn.
+  - `translationLang`: ngôn ngữ UI hiện tại; nếu có và khác `"en"`, mỗi dòng thoại được sinh kèm bản dịch.
+- **Xử lý**: gọi `LlmDictationDialogueGenerator` (luôn dùng Gemini, không phụ thuộc `dictation.analyzer.mode`)
+  để sinh **một đoạn văn luyện tập duy nhất** (độc thoại hoặc hội thoại nhiều speaker) lồng ghép các
+  từ/câu mục tiêu, kèm **nhãn chủ đề (`topic`)** do LLM tự đặt và (nếu có `translationLang` hợp lệ) bản
+  dịch từng dòng; gán ngẫu nhiên một giọng Supertonic khác nhau cho mỗi speaker; tổng hợp audio từng câu
+  thoại qua Supertonic (ai-service) từ **đúng cùng văn bản** sẽ được lưu làm câu chấm điểm/hiển thị (kể
+  cả tiền tố `"Speaker: "` nếu hội thoại nhiều speaker — trước đây audio chỉ đọc phần lời thoại còn văn
+  bản chấm điểm lại có thêm tiền tố tên, khiến audio hội thoại nhiều speaker không đọc đúng tên người nói
+  học sinh được chấm theo; nay đã sửa bằng cách dùng chung một `lineText` cho cả hai), ghép các đoạn WAV
+  lại (`WavAudioMerger`) thành một file duy nhất, lưu qua `StorageClient`, rồi **thay thế** các practice
+  item còn thiếu audio trước đó bằng đúng một item mới này. Nếu sinh/tổng hợp audio lỗi ở bất kỳ bước
+  nào, hệ thống log cảnh báo và giữ nguyên các item cũ để lần gọi sau thử lại. Chép chính tả một clip
+  AI-practice cũng dùng chung `POST /attempts`.
+
+### GET `/api/v1/dictation/ai-practice/items/{practiceItemId}/detail`
+
+Mở một bài luyện AI để chép chính tả **theo từng câu**, giống hệt trải nghiệm chép một lesson trong
+thư viện (`SentenceDictationRunner` phía FE dùng chung cho cả hai). Trả về `DictationPracticeItemDetailDto
+= {practiceItemId, audioUrl, scriptText, level, examType, topic, sentences[]}` — `sentences` được tách
+từ `sentenceText` gốc và mang theo bản dịch đã lưu của cả đoạn (nếu có): nếu là hội thoại nhiều speaker
+(mỗi dòng dạng `"Speaker: câu"`, xem `synthesizeDialoguePracticeItem`) thì tách theo dòng (`\n`), giữ
+nguyên cấu trúc lượt nói; nếu là độc thoại một giọng (không có `\n`) thì tách theo dấu câu kết thúc
+(`.`/`!`/`?`) — bản dịch được zip song song theo cùng cách tách câu. Vì audio của cả đoạn đã được ghép
+thành **một file WAV duy nhất** (không có timestamp riêng cho từng câu), mọi `sentence.startMs`/`endMs`
+luôn là `null` — FE tự ước lượng khoảng thời gian mỗi câu theo tỷ lệ số từ so với tổng thời lượng audio,
+đúng cơ chế fallback đã có sẵn cho một clip thư viện chưa chạy AI-alignment (`estimateSentenceRange`).
+- **Lỗi**: `404` nếu `practiceItemId` không tồn tại.
+
+### POST `/api/v1/dictation/history/{userId}/{attemptId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một dòng lịch sử cụ thể — khác `generate` ở trên (dùng toàn bộ lịch sử),
+endpoint này chỉ phân tích **đúng một attempt** (`attemptId`): lấy các từ sai riêng của attempt đó từ
+`dictation_misses` (`findMissesByAttemptId`, khử trùng lặp không phân biệt hoa/thường), rồi gọi
+**cùng** `LlmDictationDialogueGenerator` mà `generate` ở trên dùng (trước đây luồng này gọi một
+analyzer riêng, `DictationAnalyzer.generatePracticeSentences`, sinh ra nhiều item một-câu-một-item;
+nay đã hợp nhất thành một đoạn văn luyện tập duy nhất giống hệt luồng `generate`) để Gemini viết một
+đoạn hội thoại/độc thoại nhắm đúng vào những từ đó, tổng hợp audio Supertonic, lưu, rồi trả về toàn bộ
+danh sách AI-practice đã làm mới. Khác biệt duy nhất so với `generate`: endpoint này **không có** tham
+số chọn `level`/`examType` — cả hai luôn để `null` (generator tự áp dụng mặc định của nó).
+- **Query param** — `translationLang?` (mới): giống hệt ý nghĩa ở `generate` — nếu có và khác `"en"`,
+  đoạn văn sinh ra kèm bản dịch từng dòng.
+- **Response `data`** — `DictationPracticeItemDto[]` (như `generate`).
+- **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
 
 ### Cơ chế chấm điểm (Java scoring engine, package `common.scoring`)
 
@@ -663,20 +795,41 @@ proxy, nên client không cần lặp lại nó trong `PracticeRedoRequestDto`.
 Tất cả là proxy thuần túy; endpoint audio **relay nguyên** luồng bytes (status/headers/body) từ
 english-service qua `WebClient.toEntityFlux(DataBuffer)`.
 
-- **GET `/api/v1/learners/{userId}/dictation/facets`** → `DictationFacetsDto`.
+- **GET `/api/v1/learners/{userId}/dictation/facets`** → `DictationFacetsDto` (nay có thêm
+  `minListensForHint`).
 - **GET `/api/v1/learners/{userId}/dictation/clips`** (query `skill?/level?/topic?/examType?/limit`) →
   `DictationClipDto[]`.
+- **GET `/api/v1/learners/{userId}/dictation/folders`** (rev 2) → `DictationFolderDto[]`
+  `{folderId, name, lessonCount}`.
+- **GET `/api/v1/learners/{userId}/dictation/folders/{folderId}/lessons`** (rev 2) →
+  `DictationLessonSummaryDto[]` `{clipId, code, title, audioUrl}` (không script).
+- **GET `/api/v1/learners/{userId}/dictation/clips/{clipId}`** (rev 2, query `translationLang?` mới) →
+  `DictationClipDetailDto` `{clipId, code, title, audioUrl, scriptText, sentences[]}` (mỗi `sentence`
+  nay có thêm `translation?`, dịch lazy khi `translationLang` khác `"en"`) — `404` nếu không tồn tại.
 - **GET `/api/v1/learners/{userId}/dictation/clips/{clipId}/audio`** → stream audio.
 - **POST `/api/v1/learners/{userId}/dictation/sessions`** — body `StartDictationSessionRequestDto`
   `{skill?, level?, topic?, examType?, count=5}` → `DictationClipDto[]`.
 - **POST `/api/v1/learners/{userId}/dictation/attempts`** — `userId` gán đè lên body; body
-  `DictationAttemptRequestDto` `{clipId?, practiceItemId?, userTranscript}` → `DictationAttemptResultDto`
+  `DictationAttemptRequestDto` `{clipId?, practiceItemId?, userTranscript, sentenceMistakes?}` (proxy
+  nguyên vẹn, xem mục sentence-mode bên dưới) → `DictationAttemptResultDto`
   `{referenceText, accuracy, wer, diff[], aiSuggestions[], practiceSentences[]}`.
 - **GET `/api/v1/learners/{userId}/dictation/history`** → `DictationHistoryEntryDto[]`
-  `{attemptId, clipId, title, skill, level, examType, accuracy, wer, attemptedAt}`.
-- **GET `/api/v1/learners/{userId}/dictation/ai-practice`** · **POST `.../ai-practice/generate`** →
-  `DictationPracticeItemDto[]` `{practiceItemId, audioUrl}`.
+  `{attemptId, clipId, title, skill, level, examType, accuracy, wer, attemptedAt, attemptCount, practiceType}`.
+  `attemptCount` — số lần đã làm bài này (tính cả lần này), `null` cho bài AI-practice. `practiceType`
+  — `LIBRARY`/`AI_PRACTICE`, để FE gắn nhãn "Thư viện"/"Luyện tập với AI" từng dòng lịch sử.
+- **GET `/api/v1/learners/{userId}/dictation/history/{attemptId}`** → `DictationAttemptDetailDto`
+  (như trên) — thin proxy sang `GET /api/v1/dictation/history/{userId}/{attemptId}`.
+- **POST `/api/v1/learners/{userId}/dictation/history/{attemptId}/ai-practice`** (query
+  `translationLang?` mới) — nút "Luyện tập với AI" trên một dòng lịch sử — thin proxy sang
+  `POST /api/v1/dictation/history/{userId}/{attemptId}/ai-practice` → `DictationPracticeItemDto[]`.
+- **GET `/api/v1/learners/{userId}/dictation/ai-practice`** · **POST `.../ai-practice/generate`**
+  (body `GenerateAiPracticeRequestDto` `{level?, examType?, translationLang?}` mới, optional) →
+  `DictationPracticeItemDto[]` `{practiceItemId, audioUrl, level, examType, topic}`.
 - **GET `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/audio`** → stream WAV.
+- **GET `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/detail`** — thin proxy
+  sang `GET /api/v1/dictation/ai-practice/items/{practiceItemId}/detail` → `DictationPracticeItemDetailDto`
+  `{practiceItemId, audioUrl, scriptText, level, examType, topic, sentences[]}` (mỗi `sentence` nay có
+  thêm `translation?`), mở bài luyện AI để chép chính tả theo từng câu (xem mục english-service ở trên).
 
 ---
 
@@ -775,6 +928,24 @@ Nhận trực tiếp file audio/video qua `multipart/form-data` — dùng khi ch
 File upload được đọc theo chunk (`UPLOAD_CHUNK_SIZE_BYTES`, mặc định 1 MiB) qua `UploadFile.read(size)`
 và ghi tuần tự xuống temp file, thay vì gọi `file.read()` không tham số (buffer toàn bộ file vào RAM
 một lần) — nhờ vậy dung lượng RAM dùng không phụ thuộc kích thước file upload.
+
+### POST `/api/v1/dictation/align-sentences`
+
+Khớp các câu trong script (thứ tự cố định) với mốc thời gian trong audio của chính clip đó — dùng bởi
+`english-service`'s `GET /api/v1/dictation/clips/{clipId}` (mục 1) khi phát hiện câu nào còn thiếu
+`startMs`/`endMs`.
+
+- **Request** (multipart form):
+  - `audio`: `UploadFile` (bắt buộc) — file audio của clip
+  - `sentences`: string (bắt buộc) — mảng JSON các câu theo đúng thứ tự `seq` (multipart không có
+    kiểu list gốc nên phải JSON-encode)
+- **Xử lý**: transcribe `audio` bằng `FasterWhisperEngine.transcribe_words` (Whisper với
+  `word_timestamps=True`) để lấy danh sách từ kèm mốc thời gian, rồi `app/align/sentence_aligner.py`
+  khớp tuần tự từng câu với dòng từ đó theo thứ tự (câu sau không được dùng lại từ câu trước đã khớp).
+  Câu nào Whisper không nhận ra được (từ đầu câu không xuất hiện trong phần audio còn lại) trả về
+  `null`/`null` thay vì đoán bừa.
+- **Response**: mảng `SentenceTimingResponse` — cùng thứ tự/độ dài với `sentences` — mỗi phần tử
+  `{start_ms, end_ms}` (mili-giây, `null` nếu không khớp được).
 
 ### POST `/api/v1/faces/enroll`
 
@@ -1053,15 +1224,21 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | GET | `/api/v1/learners/{userId}/recommendations` | proxy `/recommendations/{userId}/grouped` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/practice/next` | fan-out 3 endpoint weak-points, top N theo `forgettingScore` |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/practice/redo` | proxy sang english-service `/api/v1/practice/redo` |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/facets` | proxy facets thư viện dictation |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/facets` | proxy facets thư viện dictation (nay có `minListensForHint`) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/clips` | proxy duyệt clip theo skill/level/topic/examType |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/folders` | proxy `/api/v1/dictation/folders` (rev 2, folder→file) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/folders/{folderId}/lessons` | proxy `/api/v1/dictation/folders/{folderId}/lessons` (rev 2) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/clips/{clipId}` | proxy chi tiết 1 clip (script + sentences, rev 2; `?translationLang=` dịch lazy) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/clips/{clipId}/audio` | relay stream audio clip |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/sessions` | proxy `/api/v1/dictation/sessions/{userId}` (batch clip theo facets) |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/attempts` | proxy `/api/v1/dictation/attempts` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/history` | proxy `/api/v1/dictation/history/{userId}` |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice` | proxy danh sách AI-practice |
-| bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/ai-practice/generate` | proxy tổng hợp audio AI-practice |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/history/{attemptId}` | proxy `/api/v1/dictation/history/{userId}/{attemptId}` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/history/{attemptId}/ai-practice` | proxy `/api/v1/dictation/history/{userId}/{attemptId}/ai-practice` (nay dùng chung generator với `generate`; `?translationLang=`) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice` | proxy danh sách AI-practice (nay có `level`/`examType`/`topic`) |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/ai-practice/generate` | proxy tổng hợp audio AI-practice, body `{level?, examType?, translationLang?}` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/audio` | relay stream audio AI-practice |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/detail` | proxy chi tiết 1 bài luyện AI (passage + sentences, cho chép chính tả từng câu) |
 | user-service | REST | POST | `/api/v1/auth/register` | hash password, phát JWT, `409` nếu email trùng |
 | user-service | REST | POST | `/api/v1/auth/login` | phát JWT, `401` chung cho email sai/không tồn tại |
 | user-service | REST | GET | `/api/v1/users/{userId}` | 404 nếu không tồn tại |
@@ -1076,15 +1253,21 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (pronunciation) | REST | GET | `/api/v1/pronunciation/weak-points/{userId}/grouped` | nhóm theo `PronunciationType` |
 | english-service (practice) | REST | POST | `/api/v1/practice/redo` | chấm điểm redo-exercise, chấm điểm trực tiếp bằng Java scoring engine, refresh mistake history, trigger re-analysis |
 | english-service (practice) | REST | GET | `/api/v1/practice/review-queue/{userId}` | item đến hạn ôn lại theo lịch Leitner |
-| english-service (dictation) | REST | GET | `/api/v1/dictation/facets` | facets thư viện (skill/level/topic/examType) |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/facets` | facets thư viện (skill/level/topic/examType) + `minListensForHint` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/clips` | duyệt clip thư viện theo facets |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/folders` | (rev 2) danh sách folder (chủ đề) + `lessonCount` |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/folders/{folderId}/lessons` | (rev 2) danh sách bài trong 1 folder, không script |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/clips/{clipId}` | (rev 2) chi tiết 1 clip: script + sentences; lazy-align qua ai-service nếu còn thiếu startMs/endMs; `?translationLang=` dịch lazy từng câu; `404` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/clips/{clipId}/audio` | stream audio clip từ StorageClient |
 | english-service (dictation) | REST | POST | `/api/v1/dictation/sessions/{userId}` | batch clip thư viện ngẫu nhiên theo facets |
 | english-service (dictation) | REST | POST | `/api/v1/dictation/attempts` | chấm WER + ghi misses + AI gợi ý + publish `learning.gap.analyzed`; `400`/`404` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/history/{userId}` | lịch sử chấm điểm dictation, mới nhất trước |
-| english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/{userId}` | danh sách câu luyện AI |
-| english-service (dictation) | REST | POST | `/api/v1/dictation/ai-practice/{userId}/generate` | Gemini sinh câu + Supertonic tổng hợp audio |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/history/{userId}/{attemptId}` | chi tiết 1 lần chấm điểm: lời thoại gốc, bản gõ, danh sách từ sai, gợi ý AI đã lưu; `404` |
+| english-service (dictation) | REST | POST | `/api/v1/dictation/history/{userId}/{attemptId}/ai-practice` | nay gọi cùng `LlmDictationDialogueGenerator` mà `generate` dùng (một đoạn duy nhất, không còn nhiều item một-câu) từ misses của đúng 1 attempt + Supertonic tổng hợp audio; `?translationLang=`; `404` |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/{userId}` | danh sách câu luyện AI (nay có `level`/`examType`/`topic`) |
+| english-service (dictation) | REST | POST | `/api/v1/dictation/ai-practice/{userId}/generate` | body `GenerateAiPracticeRequest` `{level?, examType?, translationLang?}` (hỗ trợ `"RANDOM"`); Gemini sinh một đoạn hội thoại/độc thoại duy nhất kèm `topic` + bản dịch tùy chọn + Supertonic tổng hợp audio từng câu rồi ghép lại |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/items/{practiceItemId}/audio` | stream audio AI-practice |
+| english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/items/{practiceItemId}/detail` | chi tiết 1 bài luyện AI: passage tách thành sentences (dòng nếu hội thoại, câu nếu độc thoại) kèm bản dịch; sentences luôn `startMs`/`endMs` null; `404` |
 | recording-service | REST | POST | `/api/v1/recordings` | multipart upload → S3 + publish `recording.uploaded` |
 | recording-service | REST | GET | `/api/v1/recordings/{recordingId}` | 404 nếu không tồn tại |
 | recording-service | REST | GET | `/api/v1/recordings/user/{userId}` | danh sách theo user |
@@ -1096,6 +1279,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | ai-service | REST | POST | `/api/v1/upload` | STT đồng bộ từ multipart upload |
 | ai-service | REST | POST | `/api/v1/analyze` | phân tích lỗi/quên đồng bộ |
 | ai-service | REST | POST | `/api/v1/tts/synthesize` | tổng hợp giọng nói bằng Supertonic (ONNX/CPU, 44.1kHz), trả base64 WAV — dùng cho AI-practice của dictation |
+| ai-service | REST | POST | `/api/v1/dictation/align-sentences` | Whisper word-timestamps + khớp câu tuần tự — trả startMs/endMs cho từng câu dictation |
 | ai-service | REST | POST | `/api/v1/faces/enroll` | enroll khuôn mặt (ảnh từ user-service hoặc upload trực tiếp) |
 | ai-service | REST | GET | `/api/v1/faces` | danh sách khuôn mặt đã enroll |
 | english-service (vocabulary) | Kafka in | `transcript.ready` | `TranscriptReadyConsumer` | lưu Transcript + Segments |

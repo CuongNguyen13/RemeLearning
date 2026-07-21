@@ -23,6 +23,7 @@ Full spec: [`openapi.yaml`](openapi.yaml) / `/swagger-ui.html` when running. Det
 | GET | `/api/v1/learners/{userId}/overview` | composite — fans out to user-service + dashboard-service + recording-service |
 | GET | `/api/v1/learners/{userId}/weak-points` | composite — fans out to english-service's 3 domains |
 | GET | `/api/v1/learners/{userId}/recommendations` | proxy → recommendation-service |
+| GET/POST | `/api/v1/learners/{userId}/dictation/*` | thin proxy → english-service's `dictation` package (facets/clips/sessions/attempts/history/ai-practice, plus folder → file browsing rev 2: `folders`, `folders/{folderId}/lessons`, `clips/{clipId}` detail (also relays an optional `?translationLang=`), per-attempt History detail: `history/{attemptId}`, per-attempt AI-practice generation: `history/{attemptId}/ai-practice` (`?translationLang=`), and per-item AI-practice sentence-mode detail: `ai-practice/items/{practiceItemId}/detail`; both AI-practice generation endpoints (`ai-practice/generate` and `history/{attemptId}/ai-practice`) also relay the new `level`/`examType`/`translationLang` facets straight through to english-service) |
 
 Every fan-out call is wrapped in `.onErrorResume(...)` — if one downstream service is down, its slice
 of the response defaults to empty/null instead of failing the whole request.

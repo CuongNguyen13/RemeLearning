@@ -10,6 +10,11 @@ Python AI service for RemeLearning. Responsibilities:
    above, for manual/ad-hoc calls.
 4. Expose `POST /api/v1/upload` (multipart/form-data: `file`, optional `language_code`) to accept a video/audio
    file directly and run STT + diarization synchronously — for environments where Kafka/S3 aren't wired up yet.
+5. Expose `POST /api/v1/dictation/align-sentences` (multipart: `audio` file, `sentences` as a JSON-encoded
+   array of strings) — transcribes `audio` with Whisper word-level timestamps and matches the given script
+   sentences against that timeline in order, returning each sentence's `{start_ms, end_ms}` (null if a
+   sentence couldn't be located). Called by `english-service`'s dictation `getClipDetail` the first time a
+   clip's sentences are read without timestamps — see `app/align/sentence_aligner.py`.
 
 See `RemeLearning/common/src/main/java/com/remelearning/common/constants/KafkaTopics.java` for the shared
 topic-name contract with the Java services.

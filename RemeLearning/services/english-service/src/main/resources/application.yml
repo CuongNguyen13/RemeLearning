@@ -4,9 +4,10 @@ spring:
   application:
     name: english-service
   datasource:
-    url: ${DB_URL:jdbc:postgresql://db.oaltfczuectbznkuywfm.supabase.co:5432/postgres?currentSchema=reme_english&sslmode=require}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?currentSchema=reme_english}
+    username: ${DB_USERNAME:postgres.oaltfczuectbznkuywfm}
+    password: ${DB_PASSWORD:Remelearning123!}
+    schema: ${DB_SCHEMA:reme_english}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -50,10 +51,16 @@ reme:
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
   llm:
-    provider: ${LLM_PROVIDER:gemini}
+    provider: ${LLM_PROVIDER:zen} #  gemini | ollama | zen
     gemini:
       api-key: ${GEMINI_API_KEY:}
       model: ${GEMINI_MODEL:gemini-2.0-flash}
+    ollama:
+      model: ${OLLAMA_MODEL:deepseek-v4-flash:cloud}
+      api-key: ${OLLAMA_API_KEY:}
+    zen:
+      api-key: ${ZEN_API_KEY:}
+      model: ${ZEN_MODEL:big-pickle}
   tts:
     # supertonic (default) calls ai-service's on-device Supertonic model; google is the alternative.
     provider: ${TTS_PROVIDER:supertonic}
@@ -61,6 +68,12 @@ reme:
       base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
     google:
       api-key: ${GOOGLE_TTS_API_KEY:}
+  alignment:
+    # ai-service's Whisper word-timestamp alignment (POST /api/v1/dictation/align-sentences), used by
+    # dictation's getClipDetail to lazily fill in sentences[].startMs/endMs.
+    ai-service:
+      base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+      read-timeout-seconds: ${ALIGNMENT_READ_TIMEOUT_SECONDS:120}
 
 vocabulary:
   classifier:
@@ -77,7 +90,7 @@ pronunciation:
 dictation:
   # rule-based (default, no LLM cost) or llm (Gemini) for the miss analysis + practice sentences.
   analyzer:
-    mode: ${DICTATION_ANALYZER_MODE:rule-based} # rule-based | llm
+    mode: ${DICTATION_ANALYZER_MODE:llm} # rule-based | llm
   # The fixed audio library (rooted at reme.storage.local.root) is imported into dictation_clips on
   # startup via common's StorageClient. Turn off to skip the scan (e.g. once already imported).
   library:

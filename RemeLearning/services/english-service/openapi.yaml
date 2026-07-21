@@ -229,6 +229,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseDictationClipList"
 
+  /api/v1/dictation/folders:
+    get:
+      tags: [Dictation]
+      summary: The distinct clip folders (topic groupings), each with its lesson count, for folder->file browsing
+      operationId: listDictationFolders
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationFolderList"
+
+  /api/v1/dictation/folders/{folderId}/lessons:
+    get:
+      tags: [Dictation]
+      summary: >
+        The lessons (clips) inside one folder - light-weight, no scriptText/sentences, so the answer
+        only loads once the learner opens a specific lesson via GET /dictation/clips/{clipId}
+      operationId: listDictationFolderLessons
+      parameters:
+        - name: folderId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationLessonSummaryList"
+
+  /api/v1/dictation/clips/{clipId}:
+    get:
+      tags: [Dictation]
+      summary: >
+        Full detail for one clip - scriptText + ordered sentences. Any sentence still missing
+        startMs/endMs is lazily AI-aligned (calls ai-service's Whisper-based alignment) before this
+        responds; a sentence that can't be aligned stays null and is retried on a later call
+      operationId: getDictationClipDetail
+      parameters:
+        - name: clipId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: translationLang
+          in: query
+          required: false
+          description: >
+            Learner's UI language (e.g. "vi"); when present and not "en", each sentence still
+            missing a translation is lazily translated via the LLM and persisted. Omitted or "en"
+            skips translation entirely.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationClipDetail"
+        "404":
+          description: No clip with the given id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
   /api/v1/dictation/clips/{clipId}/audio:
     get:
       tags: [Dictation]
@@ -325,6 +393,75 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseDictationHistoryEntryList"
 
+  /api/v1/dictation/history/{userId}/{attemptId}:
+    get:
+      tags: [Dictation]
+      summary: >
+        Full detail for one of a learner's own past attempts - reference text, transcript, mistakes,
+        and the AI suggestions generated at the time
+      operationId: getDictationAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationAttemptDetail"
+        "404":
+          description: No attempt with the given id, or it doesn't belong to userId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/dictation/history/{userId}/{attemptId}/ai-practice:
+    post:
+      tags: [Dictation]
+      summary: >
+        Generate AI-practice clips targeted at one specific past attempt's mistakes (the "Luyện tập
+        với AI" action from a history row): Gemini sentences from that attempt's misses, voiced by
+        Supertonic (via ai-service) and stored via the StorageClient
+      operationId: generateAiPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: translationLang
+          in: query
+          required: false
+          description: >
+            Learner's UI language (e.g. "vi"); when present and not "en", the generated passage's
+            per-line translation is produced alongside the passage text. No level/examType selector
+            exists for this entry point - both resolve to the generator's own default.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationPracticeItemList"
+        "404":
+          description: No attempt with the given id, or it doesn't belong to userId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
   /api/v1/dictation/ai-practice/{userId}:
     get:
       tags: [Dictation]
@@ -347,14 +484,26 @@ paths:
     post:
       tags: [Dictation]
       summary: >
-        Generate/synthesize AI-practice clips: Gemini sentences targeting the learner's most-missed
-        words, voiced by Supertonic (via ai-service) and stored via the StorageClient
+        Generates one AI-practice listening passage (a monologue or multi-speaker dialogue,
+        written by Gemini) targeting the learner's still-unsynthesized practice items or, if none,
+        their most-missed words; assigns a random Supertonic voice per speaker, synthesizes each
+        line via ai-service, merges the clips into one audio file, stores it via StorageClient, and
+        replaces any prior unsynthesized items with this single new one
       operationId: generateAiPractice
       parameters:
         - name: userId
           in: path
           required: true
           schema: { type: string }
+      requestBody:
+        required: false
+        description: >
+          All fields optional; omitting the body entirely (or every field) matches the pre-existing
+          default behavior (no facet preference, no translation).
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateAiPracticeRequest"
       responses:
         "200":
           description: OK
@@ -378,6 +527,35 @@ paths:
           description: Audio stream (wav)
           content:
             audio/wav: { schema: { type: string, format: binary } }
+
+  /api/v1/dictation/ai-practice/items/{practiceItemId}/detail:
+    get:
+      tags: [Dictation]
+      summary: >
+        Full detail for one AI-practice item - passage text split into sentences, mirroring
+        getDictationClipDetail - so the same sentence-by-sentence runner drives both the library and
+        the "Luyện nghe với AI" section. Sentences never carry AI-aligned timestamps (the passage's
+        audio is one merged file with no per-sentence timing); the client falls back to its own
+        word-count-share estimate the same way it does for an unaligned library clip.
+      operationId: getAiPracticeDetail
+      parameters:
+        - name: practiceItemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseDictationPracticeItemDetail"
+        "404":
+          description: No AI-practice item with the given id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
 
 components:
   schemas:
@@ -595,6 +773,48 @@ components:
         levels: { type: array, items: { type: string } }
         topics: { type: array, items: { type: string } }
         examTypes: { type: array, items: { type: string } }
+        minListensForHint: { type: integer, description: "min listens (counted client-side, per sentence) before the FE reveals a hint" }
+
+    DictationFolder:
+      type: object
+      description: One folder (topic grouping) in the dictation library.
+      properties:
+        folderId: { type: string }
+        name: { type: string }
+        lessonCount: { type: integer }
+
+    DictationLessonSummary:
+      type: object
+      description: One lesson (clip) inside a folder; deliberately light - no scriptText/sentences.
+      properties:
+        clipId: { type: integer, format: int64 }
+        code: { type: string }
+        title: { type: string }
+        audioUrl: { type: string, description: "service-relative audio stream path" }
+
+    DictationSentence:
+      type: object
+      properties:
+        index: { type: integer }
+        text: { type: string }
+        startMs: { type: integer, nullable: true, description: "null if AI-alignment hasn't matched this sentence yet" }
+        endMs: { type: integer, nullable: true, description: "null if AI-alignment hasn't matched this sentence yet" }
+        translation: { type: string, nullable: true, description: "null if no translation was requested/generated" }
+
+    DictationClipDetail:
+      type: object
+      description: >
+        Full clip detail returned only when the learner opens it to practice sentence-by-sentence;
+        unlike DictationLessonSummary/DictationClip, this carries the reference script.
+      properties:
+        clipId: { type: integer, format: int64 }
+        code: { type: string }
+        title: { type: string }
+        audioUrl: { type: string }
+        scriptText: { type: string }
+        sentences:
+          type: array
+          items: { $ref: "#/components/schemas/DictationSentence" }
 
     DictationClip:
       type: object
@@ -622,12 +842,29 @@ components:
     DictationAttemptRequest:
       type: object
       required: [userId, userTranscript]
-      description: Exactly one of clipId / practiceItemId must be set.
+      description: >
+        Exactly one of clipId / practiceItemId must be set. sentenceMistakes is only sent for
+        sentence-mode library attempts (the FE forces a correct retype before letting the learner
+        advance, so userTranscript itself ends up fully correct - sentenceMistakes is how the
+        wrong attempts along the way still reach the miss/weak-point pipeline).
       properties:
         userId: { type: string }
         clipId: { type: integer, format: int64, nullable: true }
         practiceItemId: { type: integer, format: int64, nullable: true }
         userTranscript: { type: string }
+        sentenceMistakes:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/DictationSentenceMistake" }
+
+    DictationSentenceMistake:
+      type: object
+      required: [sentenceIndex, expectedText, attemptedText]
+      description: One incorrect check on a single sentence during sentence-mode practice.
+      properties:
+        sentenceIndex: { type: integer, minimum: 0, description: "0-based position within the clip's sentences" }
+        expectedText: { type: string }
+        attemptedText: { type: string }
 
     WordDiff:
       type: object
@@ -660,12 +897,78 @@ components:
         accuracy: { type: number, format: double }
         wer: { type: number, format: double }
         attemptedAt: { type: string, format: date-time }
+        attemptCount:
+          type: integer
+          nullable: true
+          description: How many attempts (including this one) the learner has made on this clip; null for AI-practice entries.
+        practiceType:
+          type: string
+          enum: [LIBRARY, AI_PRACTICE]
+          description: LIBRARY when clipId is present, AI_PRACTICE otherwise - lets the UI badge each row.
+
+    DictationMistake:
+      type: object
+      properties:
+        expectedWord: { type: string, nullable: true }
+        actualWord: { type: string, nullable: true }
+        tag: { type: string, enum: [CORRECT, SUBSTITUTED, MISSING, EXTRA] }
+
+    DictationAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        title: { type: string, nullable: true }
+        skill: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        referenceText: { type: string }
+        userTranscript: { type: string }
+        accuracy: { type: number, format: double }
+        wer: { type: number, format: double }
+        mistakes:
+          type: array
+          items: { $ref: "#/components/schemas/DictationMistake" }
+        aiSuggestions: { type: array, items: { type: string } }
+        attemptedAt: { type: string, format: date-time }
 
     DictationPracticeItem:
       type: object
       properties:
         practiceItemId: { type: integer, format: int64 }
         audioUrl: { type: string, nullable: true, description: "null until Supertonic has synthesized the audio" }
+        level: { type: string, nullable: true, description: "resolved CEFR level (A1-C1); null for items generated without an explicit facet selection, e.g. from a history attempt" }
+        examType: { type: string, nullable: true, description: "resolved exam type (e.g. TOEIC); null for items generated without an explicit facet selection" }
+        topic: { type: string, nullable: true, description: "short topic label the LLM assigned to the generated passage" }
+
+    DictationPracticeItemDetail:
+      type: object
+      description: >
+        Full AI-practice item detail returned only when the learner opens it to practice
+        sentence-by-sentence; mirrors DictationClipDetail so the same runner drives both sections.
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        audioUrl: { type: string, nullable: true }
+        scriptText: { type: string }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        sentences:
+          type: array
+          items: { $ref: "#/components/schemas/DictationSentence" }
+
+    GenerateAiPracticeRequest:
+      type: object
+      description: >
+        All fields optional. level/examType each accept a concrete value (e.g. "B1", "TOEIC"), the
+        literal "RANDOM" (resolved server-side - level from a fixed CEFR pool A1/A2/B1/B2/C1,
+        examType from the library's own distinct exam types, falling back to TOEIC/IELTS/TOEFL/
+        General if the library has none), or omitted/blank (no preference, matching the
+        pre-existing default behavior). translationLang is the learner's UI language; a translation
+        is only generated when it's not "en".
+      properties:
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        translationLang: { type: string, nullable: true }
 
     ApiResponseDictationFacets:
       allOf:
@@ -683,6 +986,31 @@ components:
               type: array
               items: { $ref: "#/components/schemas/DictationClip" }
 
+    ApiResponseDictationFolderList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/DictationFolder" }
+
+    ApiResponseDictationLessonSummaryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/DictationLessonSummary" }
+
+    ApiResponseDictationClipDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DictationClipDetail" }
+
     ApiResponseDictationAttemptResult:
       allOf:
         - $ref: "#/components/schemas/ApiResponseBase"
@@ -699,6 +1027,13 @@ components:
               type: array
               items: { $ref: "#/components/schemas/DictationHistoryEntry" }
 
+    ApiResponseDictationAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DictationAttemptDetail" }
+
     ApiResponseDictationPracticeItemList:
       allOf:
         - $ref: "#/components/schemas/ApiResponseBase"
@@ -707,3 +1042,10 @@ components:
             data:
               type: array
               items: { $ref: "#/components/schemas/DictationPracticeItem" }
+
+    ApiResponseDictationPracticeItemDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/DictationPracticeItemDetail" }

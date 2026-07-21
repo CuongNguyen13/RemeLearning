@@ -7,4 +7,7 @@ import lombok.Data;
 public class DictationPracticeItemDto {
 	private Long practiceItemId;
 	private String audioUrl;
+	private String level;
+	private String examType;
+	private String topic;
 }

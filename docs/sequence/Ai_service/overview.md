@@ -126,6 +126,15 @@ sequenceDiagram
   via `SupertonicTtsClient` to voice Gemini-suggested practice sentences. Gated by `TTS_ENABLED`
   (default true); the model loads lazily on the first request.
 
+- **Sentence alignment** (`POST /api/v1/dictation/align-sentences`, `app/align/`) transcribes an
+  uploaded clip with Whisper word-level timestamps (`FasterWhisperEngine.transcribe_words`, not the
+  segment-level `transcribe`/`transcribe_auto` the pipelines above use) then matches a given list of
+  script sentences against that timeline in order (`app/align/sentence_aligner.py`, pure logic, no ML
+  deps - see `tests/test_sentence_aligner.py`). Called by english-service's dictation
+  `getClipDetail`, via `SentenceAlignmentClient` (`common.ai.align`), the first time a clip's sentences
+  are read without `startMs`/`endMs`; a sentence whose first word can't be found in the remaining
+  timeline comes back with null timings rather than a guess.
+
 - `KAFKA_ENABLED` (`app/config.py`) defaults to `false`; with it `false`, only the REST endpoints run
   and the two consumer tasks in `app/main.py`'s lifespan never start.
 - The Kafka payloads (`app/schemas/events.py`) are plain pydantic models with **snake_case** JSON keys

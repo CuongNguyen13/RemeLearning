@@ -4,10 +4,16 @@ import com.remelearning.bff.client.EnglishServiceClient;
 import com.remelearning.bff.client.RecommendationServiceClient;
 import com.remelearning.bff.dto.DictationAttemptRequestDto;
 import com.remelearning.bff.dto.DictationAttemptResultDto;
+import com.remelearning.bff.dto.DictationAttemptDetailDto;
+import com.remelearning.bff.dto.DictationClipDetailDto;
 import com.remelearning.bff.dto.DictationClipDto;
 import com.remelearning.bff.dto.DictationFacetsDto;
+import com.remelearning.bff.dto.DictationFolderDto;
 import com.remelearning.bff.dto.DictationHistoryEntryDto;
+import com.remelearning.bff.dto.DictationLessonSummaryDto;
+import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
+import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.LearnerOverviewResponse;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.RecommendationDto;
@@ -105,6 +111,27 @@ public class LearnerController {
 		return englishServiceClient.streamClipAudio(clipId);
 	}
 
+	@Operation(summary = "The dictation library's folders (topic groupings), each with its lesson count; thin proxy to english-service")
+	@GetMapping("/{userId}/dictation/folders")
+	public Mono<ApiResponse<List<DictationFolderDto>>> getDictationFolders(@PathVariable String userId) {
+		return englishServiceClient.getDictationFolders().map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "The lessons (clips) inside one dictation folder, light-weight (no script); thin proxy to english-service")
+	@GetMapping("/{userId}/dictation/folders/{folderId}/lessons")
+	public Mono<ApiResponse<List<DictationLessonSummaryDto>>> getDictationFolderLessons(
+			@PathVariable String userId, @PathVariable String folderId) {
+		return englishServiceClient.getDictationFolderLessons(folderId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one dictation clip - script + split sentences, optionally translated - for sentence-by-sentence practice; thin proxy to english-service")
+	@GetMapping("/{userId}/dictation/clips/{clipId}")
+	public Mono<ApiResponse<DictationClipDetailDto>> getDictationClip(
+			@PathVariable String userId, @PathVariable Long clipId,
+			@RequestParam(required = false) String translationLang) {
+		return englishServiceClient.getDictationClip(clipId, translationLang).map(ApiResponse::ok);
+	}
+
 	@Operation(summary = "Start a dictation session: a batch of library clips matching the requested facets; thin proxy to english-service")
 	@PostMapping("/{userId}/dictation/sessions")
 	public Mono<ApiResponse<List<DictationClipDto>>> startDictationSession(
@@ -126,16 +153,33 @@ public class LearnerController {
 		return englishServiceClient.getDictationHistory(userId).map(ApiResponse::ok);
 	}
 
+	@Operation(summary = "Full detail for one of a learner's own past dictation attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/dictation/history/{attemptId}")
+	public Mono<ApiResponse<DictationAttemptDetailDto>> getDictationAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getDictationAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
 	@Operation(summary = "A learner's AI-practice items (Gemini + Supertonic); thin proxy to english-service")
 	@GetMapping("/{userId}/dictation/ai-practice")
 	public Mono<ApiResponse<List<DictationPracticeItemDto>>> getAiPractice(@PathVariable String userId) {
 		return englishServiceClient.getAiPractice(userId).map(ApiResponse::ok);
 	}
 
-	@Operation(summary = "Generate/synthesize AI-practice audio from a learner's most-missed words; thin proxy to english-service")
+	@Operation(summary = "Generate AI-practice audio honoring the requested level/exam-type facets (concrete value, \"RANDOM\", or omitted) and translation language; thin proxy to english-service")
 	@PostMapping("/{userId}/dictation/ai-practice/generate")
-	public Mono<ApiResponse<List<DictationPracticeItemDto>>> generateAiPractice(@PathVariable String userId) {
-		return englishServiceClient.generateAiPractice(userId).map(ApiResponse::ok);
+	public Mono<ApiResponse<List<DictationPracticeItemDto>>> generateAiPractice(
+			@PathVariable String userId, @RequestBody(required = false) GenerateAiPracticeRequestDto request) {
+		return englishServiceClient.generateAiPractice(userId, request == null ? new GenerateAiPracticeRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI-practice audio targeted at one specific past attempt's mistakes (the \"Luyện tập với AI\" history action); thin proxy to english-service")
+	@PostMapping("/{userId}/dictation/history/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<DictationPracticeItemDto>>> generateAiPracticeFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId,
+			@RequestParam(required = false) String translationLang) {
+		return englishServiceClient.generateAiPracticeFromAttempt(userId, attemptId, translationLang).map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Stream one AI-practice item's synthesized audio; relays english-service's audio response")
@@ -143,5 +187,12 @@ public class LearnerController {
 	public Mono<ResponseEntity<Flux<DataBuffer>>> getAiPracticeAudio(
 			@PathVariable String userId, @PathVariable Long practiceItemId) {
 		return englishServiceClient.streamPracticeAudio(practiceItemId);
+	}
+
+	@Operation(summary = "Full detail for one AI-practice item - passage text split into sentences - for sentence-by-sentence practice; thin proxy to english-service")
+	@GetMapping("/{userId}/dictation/ai-practice/items/{practiceItemId}/detail")
+	public Mono<ApiResponse<DictationPracticeItemDetailDto>> getAiPracticeDetail(
+			@PathVariable String userId, @PathVariable Long practiceItemId) {
+		return englishServiceClient.getAiPracticeDetail(practiceItemId).map(ApiResponse::ok);
 	}
 }

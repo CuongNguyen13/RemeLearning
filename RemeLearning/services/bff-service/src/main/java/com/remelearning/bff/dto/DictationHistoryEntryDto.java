@@ -4,7 +4,8 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** One past graded dictation attempt, proxied from english-service. */
+/** One past graded dictation attempt, proxied from english-service.
+ * Includes attemptCount so the UI shows how many times the learner has practiced each lesson. */
 @Data
 public class DictationHistoryEntryDto {
 	private Long attemptId;
@@ -16,4 +17,8 @@ public class DictationHistoryEntryDto {
 	private double accuracy;
 	private double wer;
 	private Instant attemptedAt;
+	/** How many attempts (including this one) the learner has made on this clip; null for AI-practice entries. */
+	private Integer attemptCount;
+	/** LIBRARY (clipId present) or AI_PRACTICE (clipId null), for the UI to badge each row. */
+	private String practiceType;
 }

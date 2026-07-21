@@ -13,8 +13,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +46,50 @@ class DictationLibraryImporterTest {
 		assertThat(clip.getLevel()).isNull();
 		assertThat(clip.getStorageKey()).isEqualTo(audioKey);
 		assertThat(clip.getScriptText()).contains("Where is Jane?");
+	}
+
+	// Splits the script into one sentence per non-blank line and upserts each keyed by (clipId, seq),
+	// leaving out blank lines entirely.
+	@Test
+	void importsSentencesSkippingBlankLines() {
+		String audioKey = "english-conversations/english-conversations-0001-1-at-home-1.mp3";
+		String scriptKey = "english-conversations/scripts/english-conversations-0001-1-at-home-1.txt";
+		when(storageClient.list("")).thenReturn(List.of(audioKey));
+		when(storageClient.exists(scriptKey)).thenReturn(true);
+		when(storageClient.read(scriptKey)).thenReturn(script("Where is Jane?\n\nShe is in the living room.\n"));
+		doAnswer(invocation -> {
+			DictationClip clip = invocation.getArgument(0);
+			clip.setId(9L);
+			return null;
+		}).when(dictationMapper).upsertClip(any());
+
+		importer.run(null);
+
+		verify(dictationMapper).upsertSentence(9L, 1, "Where is Jane?");
+		verify(dictationMapper).upsertSentence(9L, 2, "She is in the living room.");
+		verify(dictationMapper, never()).upsertSentence(eq(9L), eq(3), anyString());
+	}
+
+	// The direct parent folder of the audio file becomes the clip's folder, for folder->file browsing.
+	@Test
+	void derivesFolderFromDirectParentDirectory() {
+		String flatAudioKey = "english-conversations/english-conversations-0001-1-at-home-1.mp3";
+		String flatScriptKey = "english-conversations/scripts/english-conversations-0001-1-at-home-1.txt";
+		String nestedAudioKey = "toeic/B1/Speaking/toeic-0009-a-topic.mp3";
+		String nestedScriptKey = "toeic/B1/Speaking/scripts/toeic-0009-a-topic.txt";
+		when(storageClient.list("")).thenReturn(List.of(flatAudioKey, nestedAudioKey));
+		when(storageClient.exists(flatScriptKey)).thenReturn(true);
+		when(storageClient.read(flatScriptKey)).thenReturn(script("Hi."));
+		when(storageClient.exists(nestedScriptKey)).thenReturn(true);
+		when(storageClient.read(nestedScriptKey)).thenReturn(script("Hello."));
+
+		importer.run(null);
+
+		ArgumentCaptor<DictationClip> captor = ArgumentCaptor.forClass(DictationClip.class);
+		verify(dictationMapper, times(2)).upsertClip(captor.capture());
+		assertThat(captor.getAllValues())
+				.extracting(DictationClip::getFolder)
+				.containsExactly("english-conversations", "Speaking");
 	}
 
 	// Uses the folder-path convention <examType>/<level>/<skill>/... to tag level and skill.

@@ -27,7 +27,7 @@ public class StorageProperties {
 	@Setter
 	public static class Local {
 		/** Base directory every key resolves under; defaults to a relative {@code ./data} dir. */
-		private String root = "./data";
+		private String root = "D://Personal Project//Audio";
 	}
 
 	/** S3/MinIO settings for the storage abstraction (distinct from {@code reme.s3.*} used elsewhere). */

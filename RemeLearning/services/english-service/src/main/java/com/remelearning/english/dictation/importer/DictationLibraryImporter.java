@@ -82,7 +82,7 @@ public class DictationLibraryImporter implements ApplicationRunner {
 		String fileName = segments[segments.length - 1];
 		String code = stripExtension(fileName);
 
-		dictationMapper.upsertClip(DictationClip.builder()
+		DictationClip clip = DictationClip.builder()
 				.code(code)
 				.title(deriveTitle(code))
 				.skill(deriveSkill(segments))
@@ -92,8 +92,33 @@ public class DictationLibraryImporter implements ApplicationRunner {
 				.scriptText(scriptText)
 				.storageKey(audioKey)
 				.source("library")
-				.build());
+				.folder(deriveFolder(segments))
+				.build();
+		dictationMapper.upsertClip(clip);
+		importSentences(clip.getId(), scriptText);
 		return true;
+	}
+
+	// Splits the script into one sentence per non-blank line (the convention already used by
+	// common.content.dictation.DictationContentServiceImpl.readLessonSentences) and upserts each,
+	// keyed by its 1-based position in the script so a re-import stays idempotent.
+	private void importSentences(Long clipId, String scriptText) {
+		String[] lines = scriptText.split("\\r?\\n");
+		int seq = 0;
+		for (String line : lines) {
+			String trimmed = line.trim();
+			if (trimmed.isEmpty()) {
+				continue;
+			}
+			seq++;
+			dictationMapper.upsertSentence(clipId, seq, trimmed);
+		}
+	}
+
+	// Folder = the direct parent directory of the audio file, for the folder->file browse UI; a
+	// clip with no parent directory (audio sitting at the storage root) falls back to "general".
+	private String deriveFolder(String[] segments) {
+		return segments.length > 1 ? segments[segments.length - 2] : "general";
 	}
 
 	// Script lives under a sibling scripts/ folder with the same base name and a .txt extension.

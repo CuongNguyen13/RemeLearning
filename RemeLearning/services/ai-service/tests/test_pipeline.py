@@ -31,6 +31,9 @@ class FakeWhisperEngine(SpeechToTextEngine):
         segment = RawSegment(text=text, start_seconds=0.0, end_seconds=duration)
         return [segment], (language_code or detected_language)
 
+    def transcribe_words(self, audio_path, language_code=None):
+        raise NotImplementedError
+
 
 def test_transcribes_each_speaker_turn_in_its_own_detected_language(tmp_path):
     wav_path = tmp_path / "recording.wav"

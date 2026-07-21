@@ -225,6 +225,10 @@ sequenceDiagram
     Ctrl-->>Caller: 200 ApiResponse{data: DictationAttemptResultDto}
 ```
 
+A fourth flow, `GET /api/v1/dictation/history/{userId}/{attemptId}`, returns full detail for one past
+attempt (reference text, transcript, a flat mistake list, and the AI suggestions persisted at submit
+time) — see [dictation-practice.md](dictation-practice.md) section 4.
+
 ## Notes
 
 - Idempotency keys: `recording_id` for transcripts, `(user_id, item_id)` for weak points and for
@@ -242,3 +246,6 @@ sequenceDiagram
 - `dictation` is the only one of the five packages with no Kafka consumer of its own - it reads
   `vocabulary`/`grammar`'s weak-point tables via their existing service interfaces in-process
   instead, and is triggered synchronously by the FE (through bff-service) rather than by an event.
+- The diagram in section 4 above predates the `dictation` package's rewrite around a fixed real-audio
+  library (see [dictation-practice.md](dictation-practice.md) for the current, accurate flow,
+  including rev 2's folder -> file browsing and sentence-mode clip detail).

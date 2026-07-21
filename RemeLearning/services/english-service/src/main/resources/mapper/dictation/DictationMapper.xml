@@ -7,9 +7,9 @@
     <insert id="upsertClip" parameterType="com.remelearning.english.dictation.domain.DictationClip"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO dictation_clips
-            (code, title, skill, level, topic, exam_type, script_text, storage_key, source, created_at)
+            (code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at)
         VALUES
-            (#{code}, #{title}, #{skill}, #{level}, #{topic}, #{examType}, #{scriptText}, #{storageKey}, #{source}, now())
+            (#{code}, #{title}, #{skill}, #{level}, #{topic}, #{examType}, #{scriptText}, #{storageKey}, #{source}, #{folder}, now())
         ON CONFLICT (code) DO UPDATE SET
             title = EXCLUDED.title,
             skill = EXCLUDED.skill,
@@ -18,11 +18,12 @@
             exam_type = EXCLUDED.exam_type,
             script_text = EXCLUDED.script_text,
             storage_key = EXCLUDED.storage_key,
-            source = EXCLUDED.source
+            source = EXCLUDED.source,
+            folder = EXCLUDED.folder
     </insert>
 
     <select id="findClipById" resultType="com.remelearning.english.dictation.domain.DictationClip">
-        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, created_at
+        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at
         FROM dictation_clips
         WHERE id = #{clipId}
     </select>
@@ -35,7 +36,7 @@
     </sql>
 
     <select id="findClipsByFacets" resultType="com.remelearning.english.dictation.domain.DictationClip">
-        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, created_at
+        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at
         FROM dictation_clips
         WHERE 1 = 1
         <include refid="facetFilter"/>
@@ -44,7 +45,7 @@
     </select>
 
     <select id="findRandomClipsByFacets" resultType="com.remelearning.english.dictation.domain.DictationClip">
-        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, created_at
+        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at
         FROM dictation_clips
         WHERE 1 = 1
         <include refid="facetFilter"/>
@@ -68,6 +69,48 @@
         SELECT DISTINCT exam_type FROM dictation_clips WHERE exam_type IS NOT NULL ORDER BY exam_type
     </select>
 
+    <select id="findDistinctFolders" resultType="com.remelearning.english.dictation.domain.FolderCount">
+        SELECT folder AS folder, COUNT(*) AS count
+        FROM dictation_clips
+        GROUP BY folder
+        ORDER BY folder
+    </select>
+
+    <select id="findClipsByFolder" resultType="com.remelearning.english.dictation.domain.DictationClip">
+        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at
+        FROM dictation_clips
+        WHERE folder = #{folder}
+        ORDER BY code
+    </select>
+
+    <!-- Upsert keyed on (clip_id, seq): re-running the importer updates sentence text without
+         disturbing any start_ms/end_ms already written by the alignment step. -->
+    <insert id="upsertSentence">
+        INSERT INTO dictation_clip_sentences (clip_id, seq, text, created_at)
+        VALUES (#{clipId}, #{seq}, #{text}, now())
+        ON CONFLICT (clip_id, seq) DO UPDATE SET
+            text = EXCLUDED.text
+    </insert>
+
+    <update id="updateSentenceTimestamps">
+        UPDATE dictation_clip_sentences
+        SET start_ms = #{startMs}, end_ms = #{endMs}
+        WHERE clip_id = #{clipId} AND seq = #{seq}
+    </update>
+
+    <update id="updateSentenceTranslation">
+        UPDATE dictation_clip_sentences
+        SET translation = #{translation}
+        WHERE clip_id = #{clipId} AND seq = #{seq}
+    </update>
+
+    <select id="findSentencesByClipId" resultType="com.remelearning.english.dictation.domain.DictationClipSentence">
+        SELECT id, clip_id, seq, text, start_ms, end_ms, translation, created_at
+        FROM dictation_clip_sentences
+        WHERE clip_id = #{clipId}
+        ORDER BY seq
+    </select>
+
     <insert id="insertAttempt" parameterType="com.remelearning.english.dictation.domain.DictationAttempt"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO dictation_attempts
@@ -84,6 +127,10 @@
         </foreach>
     </insert>
 
+    <update id="updateAttemptAiSuggestions">
+        UPDATE dictation_attempts SET ai_suggestions = #{aiSuggestions} WHERE id = #{attemptId}
+    </update>
+
     <select id="countMissesForWord" resultType="int">
         SELECT count(*) FROM dictation_misses
         WHERE user_id = #{userId} AND lower(expected_word) = lower(#{word})
@@ -98,37 +145,67 @@
         LIMIT #{limit}
     </select>
 
+    <!-- History entries with the learner's running attempt count per clip, so the UI can show
+         how many times they've practiced each lesson. The window-function count partitions by
+         (user_id, clip_id) and includes the current row, so the oldest attempt on a clip shows
+         1 and the newest shows N. AI-practice rows (clip_id IS NULL) get NULL for attempt_count. -->
     <select id="findHistoryByUserId" resultType="com.remelearning.english.dictation.domain.DictationHistoryRow">
         SELECT a.id AS attempt_id, a.clip_id AS clip_id, c.title AS title, c.skill AS skill,
                c.level AS level, c.exam_type AS exam_type,
-               a.accuracy AS accuracy, a.wer AS wer, a.created_at AS created_at
+               a.accuracy AS accuracy, a.wer AS wer, a.created_at AS created_at,
+               CASE WHEN a.clip_id IS NOT NULL THEN
+                   COUNT(*) OVER (PARTITION BY a.user_id, a.clip_id ORDER BY a.created_at ASC
+                                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+               END AS attempt_count
         FROM dictation_attempts a
         LEFT JOIN dictation_clips c ON c.id = a.clip_id
         WHERE a.user_id = #{userId}
         ORDER BY a.created_at DESC
     </select>
 
+    <select id="findAttemptDetailByIdAndUserId" resultType="com.remelearning.english.dictation.domain.DictationAttemptDetailRow">
+        SELECT a.id AS attempt_id, a.clip_id AS clip_id, a.practice_item_id AS practice_item_id,
+               COALESCE(c.title, 'AI practice') AS title,
+               c.skill AS skill, c.level AS level, c.exam_type AS exam_type,
+               COALESCE(c.script_text, p.sentence_text) AS reference_text,
+               a.user_transcript AS user_transcript,
+               a.accuracy AS accuracy, a.wer AS wer, a.ai_suggestions AS ai_suggestions, a.created_at AS created_at
+        FROM dictation_attempts a
+        LEFT JOIN dictation_clips c ON c.id = a.clip_id
+        LEFT JOIN dictation_practice_items p ON p.id = a.practice_item_id
+        WHERE a.id = #{attemptId} AND a.user_id = #{userId}
+    </select>
+
+    <select id="findMissesByAttemptId" resultType="com.remelearning.english.dictation.domain.DictationMiss">
+        SELECT id, attempt_id, user_id, clip_id, expected_word, actual_word, tag, created_at
+        FROM dictation_misses
+        WHERE attempt_id = #{attemptId}
+        ORDER BY id
+    </select>
+
     <insert id="insertPracticeItem" parameterType="com.remelearning.english.dictation.domain.DictationPracticeItem"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO dictation_practice_items (user_id, sentence_text, source, storage_key, created_at)
-        VALUES (#{userId}, #{sentenceText}, #{source}, #{storageKey}, now())
+        INSERT INTO dictation_practice_items
+            (user_id, sentence_text, source, storage_key, level, exam_type, topic, translation_text, created_at)
+        VALUES
+            (#{userId}, #{sentenceText}, #{source}, #{storageKey}, #{level}, #{examType}, #{topic}, #{translationText}, now())
     </insert>
 
     <select id="findPracticeItemById" resultType="com.remelearning.english.dictation.domain.DictationPracticeItem">
-        SELECT id, user_id, sentence_text, source, storage_key, created_at
+        SELECT id, user_id, sentence_text, source, storage_key, level, exam_type, topic, translation_text, created_at
         FROM dictation_practice_items
         WHERE id = #{practiceItemId}
     </select>
 
     <select id="findPracticeItemsByUserId" resultType="com.remelearning.english.dictation.domain.DictationPracticeItem">
-        SELECT id, user_id, sentence_text, source, storage_key, created_at
+        SELECT id, user_id, sentence_text, source, storage_key, level, exam_type, topic, translation_text, created_at
         FROM dictation_practice_items
         WHERE user_id = #{userId}
         ORDER BY created_at DESC
     </select>
 
     <select id="findPracticeItemsWithoutAudio" resultType="com.remelearning.english.dictation.domain.DictationPracticeItem">
-        SELECT id, user_id, sentence_text, source, storage_key, created_at
+        SELECT id, user_id, sentence_text, source, storage_key, level, exam_type, topic, translation_text, created_at
         FROM dictation_practice_items
         WHERE user_id = #{userId} AND storage_key IS NULL
         ORDER BY created_at DESC
@@ -137,5 +214,9 @@
     <update id="updatePracticeItemStorageKey">
         UPDATE dictation_practice_items SET storage_key = #{storageKey} WHERE id = #{practiceItemId}
     </update>
+
+    <delete id="deletePracticeItemsWithoutAudio">
+        DELETE FROM dictation_practice_items WHERE user_id = #{userId} AND storage_key IS NULL
+    </delete>
 
 </mapper>

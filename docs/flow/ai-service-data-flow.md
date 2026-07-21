@@ -130,6 +130,24 @@ flowchart TD
   `common.ai.tts.supertonic.SupertonicTtsClient` (`reme.tts.provider=supertonic`), which voices
   Gemini-suggested practice sentences. This replaces the earlier Google Cloud TTS path.
 
+## Sentence alignment stage (`app/align/`, synchronous REST)
+
+- `POST /api/v1/dictation/align-sentences` (multipart: `audio` file + `sentences` as a JSON-encoded
+  array of strings, in script order) -> `[{start_ms, end_ms}]`, same order/length as `sentences`.
+  Transcribes `audio` with word-level timestamps (`FasterWhisperEngine.transcribe_words`, distinct
+  from the segment-level `transcribe`/`transcribe_auto` the STT pipeline above uses), then
+  `app/align/sentence_aligner.py::align_sentences` walks the sentences in order, matching each one's
+  tokens sequentially against the word timeline (cursor only moves forward, so no sentence can match
+  words an earlier sentence already claimed). A sentence whose first token never appears in the
+  remaining words comes back `{start_ms: null, end_ms: null}` rather than a guess.
+- Pure matching logic (`sentence_aligner.py`) has no ML dependency and is unit tested directly
+  (`tests/test_sentence_aligner.py`); only the Whisper transcription step needs the model.
+- Consumed by **english-service**'s dictation `getClipDetail`, via
+  `common.ai.align.aiservice.AiServiceSentenceAlignmentClient` (`reme.alignment.ai-service.*`), the
+  first time a clip's `dictation_clip_sentences` rows are read with a null `start_ms`/`end_ms` - the
+  caller reads the clip's own audio (`StorageClient`) and sends it plus the ordered sentence texts;
+  whatever timings come back get persisted immediately, so a clip only ever needs aligning once.
+
 ## Where data leaves this service
 
 - Kafka topics `transcript.ready` / `learning.gap.analyzed` -> consumed by `english-service`,

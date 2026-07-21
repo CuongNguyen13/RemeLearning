@@ -1,7 +1,7 @@
 from faster_whisper import WhisperModel
 
 from app.config import settings
-from app.stt.base import RawSegment, SpeechToTextEngine
+from app.stt.base import RawSegment, SpeechToTextEngine, WordTiming
 
 
 class FasterWhisperEngine(SpeechToTextEngine):
@@ -36,3 +36,14 @@ class FasterWhisperEngine(SpeechToTextEngine):
         ]
         detected_language = language_code or info.language
         return raw_segments, detected_language
+
+    def transcribe_words(self, audio_path: str, language_code: str | None = None) -> list[WordTiming]:
+        """Runs faster-whisper with word_timestamps=True and flattens every segment's words into
+        one chronological list, for sentence-to-audio alignment (see app/align/sentence_aligner.py)
+        rather than the segment-level granularity transcribe/transcribe_auto return."""
+        segments, _info = self._model.transcribe(audio_path, language=language_code, word_timestamps=True)
+        return [
+            WordTiming(word=word.word.strip(), start_seconds=word.start, end_seconds=word.end)
+            for segment in segments
+            for word in (segment.words or [])
+        ]

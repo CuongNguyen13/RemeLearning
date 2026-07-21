@@ -2,10 +2,16 @@ package com.remelearning.bff.client;
 
 import com.remelearning.bff.dto.DictationAttemptRequestDto;
 import com.remelearning.bff.dto.DictationAttemptResultDto;
+import com.remelearning.bff.dto.DictationAttemptDetailDto;
+import com.remelearning.bff.dto.DictationClipDetailDto;
 import com.remelearning.bff.dto.DictationClipDto;
 import com.remelearning.bff.dto.DictationFacetsDto;
+import com.remelearning.bff.dto.DictationFolderDto;
 import com.remelearning.bff.dto.DictationHistoryEntryDto;
+import com.remelearning.bff.dto.DictationLessonSummaryDto;
+import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
+import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
 import com.remelearning.bff.dto.WeakPointDto;
@@ -126,6 +132,16 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch dictation history for userId={}", userId, ex));
 	}
 
+	/** Fetches full detail (reference text, transcript, mistakes, AI suggestions) for one of a learner's own past attempts. */
+	public Mono<DictationAttemptDetailDto> getDictationAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/dictation/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<DictationAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch dictation attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
 	/** Fetches a learner's AI-practice items (Supertonic-voiced) from english-service. */
 	public Mono<List<DictationPracticeItemDto>> getAiPractice(String userId) {
 		return englishServiceClient.get()
@@ -136,14 +152,60 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch AI-practice items for userId={}", userId, ex));
 	}
 
-	/** Triggers (re)generation of a learner's AI-practice audio in english-service. */
-	public Mono<List<DictationPracticeItemDto>> generateAiPractice(String userId) {
+	/** Triggers (re)generation of a learner's AI-practice audio in english-service, honoring the requested level/examType facets and translation language. */
+	public Mono<List<DictationPracticeItemDto>> generateAiPractice(String userId, GenerateAiPracticeRequestDto request) {
 		return englishServiceClient.post()
 				.uri("/api/v1/dictation/ai-practice/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<DictationPracticeItemDto>>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to generate AI-practice for userId={}", userId, ex));
+	}
+
+	/** Triggers AI-practice generation targeted at one specific past attempt's mistakes (the "Luyện tập với AI" history action). */
+	public Mono<List<DictationPracticeItemDto>> generateAiPracticeFromAttempt(String userId, Long attemptId, String translationLang) {
+		return englishServiceClient.post()
+				.uri(uriBuilder -> uriBuilder.path("/api/v1/dictation/history/{userId}/{attemptId}/ai-practice")
+						.queryParamIfPresent("translationLang", java.util.Optional.ofNullable(translationLang))
+						.build(userId, attemptId))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<DictationPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate AI-practice from attempt for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Fetches the dictation-library's folders (topic groupings), each with its lesson count. */
+	public Mono<List<DictationFolderDto>> getDictationFolders() {
+		return englishServiceClient.get()
+				.uri("/api/v1/dictation/folders")
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<DictationFolderDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch dictation folders", ex));
+	}
+
+	/** Fetches the light-weight lesson listing for one dictation-library folder. */
+	public Mono<List<DictationLessonSummaryDto>> getDictationFolderLessons(String folderId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/dictation/folders/{folderId}/lessons", folderId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<DictationLessonSummaryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch dictation lessons for folderId={}", folderId, ex));
+	}
+
+	/** Fetches full detail (script + sentences, optionally translated) for one dictation clip, for sentence-mode practice. */
+	public Mono<DictationClipDetailDto> getDictationClip(Long clipId, String translationLang) {
+		return englishServiceClient.get()
+				.uri(uriBuilder -> uriBuilder.path("/api/v1/dictation/clips/{clipId}")
+						.queryParamIfPresent("translationLang", java.util.Optional.ofNullable(translationLang))
+						.build(clipId))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<DictationClipDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch dictation clip detail for clipId={}", clipId, ex));
 	}
 
 	/** Relays a library clip's audio stream (status/headers/body) from english-service to the caller. */
@@ -162,6 +224,16 @@ public class EnglishServiceClient {
 				.retrieve()
 				.toEntityFlux(DataBuffer.class)
 				.doOnError(ex -> log.error("Failed to stream AI-practice audio for practiceItemId={}", practiceItemId, ex));
+	}
+
+	/** Fetches full detail (passage text split into sentences) for one AI-practice item, for sentence-mode practice. */
+	public Mono<DictationPracticeItemDetailDto> getAiPracticeDetail(Long practiceItemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/dictation/ai-practice/items/{practiceItemId}/detail", practiceItemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<DictationPracticeItemDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch AI-practice item detail for practiceItemId={}", practiceItemId, ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.

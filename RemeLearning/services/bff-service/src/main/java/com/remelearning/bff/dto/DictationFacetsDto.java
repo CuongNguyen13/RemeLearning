@@ -11,4 +11,5 @@ public class DictationFacetsDto {
 	private List<String> levels;
 	private List<String> topics;
 	private List<String> examTypes;
+	private int minListensForHint;
 }

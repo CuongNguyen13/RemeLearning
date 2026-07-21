@@ -1,9 +1,11 @@
+import json
 import os
 import tempfile
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.align.sentence_aligner import align_sentences
 from app.analysis.factory import create_analyzer
 from app.clients.user_service_client import UserServiceNotFoundError, user_service_client
 from app.config import settings
@@ -12,6 +14,7 @@ from app.db.session import session_scope
 from app.face.enrollment import FaceEnrollmentService, NoFaceDetectedError
 from app.face.insightface_engine import InsightFaceEngine
 from app.face.pipeline import identify_speakers_by_face
+from app.schemas.align import SentenceTimingResponse
 from app.schemas.events import (
     AnalysisRequestedEvent,
     EnrolledFaceResponse,
@@ -228,6 +231,43 @@ async def upload(file: UploadFile = File(...), language_code: str | None = Form(
         if settings.voice_authenticity_enabled:
             result = _add_voice_authenticity(result, wav_path, turns, recording_id)
         return result.model_copy(update={"recording_id": recording_id})
+    finally:
+        os.remove(audio_path)
+        os.remove(wav_path)
+
+
+@router.post("/api/v1/dictation/align-sentences", response_model=list[SentenceTimingResponse])
+async def align_dictation_sentences(
+    audio: UploadFile = File(...),
+    sentences: str = Form(...),
+) -> list[SentenceTimingResponse]:
+    """Aligns a dictation clip's script sentences, in order, against its own audio: transcribes the
+    audio with word-level timestamps (FasterWhisperEngine.transcribe_words) then matches each
+    sentence's words sequentially against that timeline (app/align/sentence_aligner.py). Used by
+    english-service's dictation getClipDetail the first time a clip's sentences are read without
+    startMs/endMs - a sentence Whisper couldn't locate comes back with null timings rather than a
+    guess, so english-service leaves it unaligned and can retry on a later read.
+
+    `sentences` is a JSON-encoded array of strings (order matters - it's the clip's sentences in
+    seq order) since multipart/form-data has no native list type; `audio` is the clip's own audio
+    file, read/converted the same way /api/v1/upload does.
+    """
+    try:
+        sentence_list = json.loads(sentences)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="sentences must be a JSON array of strings") from exc
+
+    suffix = os.path.splitext(audio.filename or "")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        while chunk := await audio.read(UPLOAD_CHUNK_SIZE_BYTES):
+            tmp.write(chunk)
+        audio_path = tmp.name
+
+    wav_path = convert_to_wav(audio_path)
+    try:
+        words = _get_whisper_engine().transcribe_words(wav_path)
+        timings = align_sentences(sentence_list, words)
+        return [SentenceTimingResponse(start_ms=t.start_ms, end_ms=t.end_ms) for t in timings]
     finally:
         os.remove(audio_path)
         os.remove(wav_path)

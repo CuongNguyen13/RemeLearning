@@ -4,9 +4,10 @@ spring:
   application:
     name: recording-service
   datasource:
-    url: ${DB_URL:jdbc:postgresql://db.oaltfczuectbznkuywfm.supabase.co:5432/postgres?currentSchema=reme_recording&sslmode=require}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?currentSchema=reme_recording}
+    username: ${DB_USERNAME:postgres.oaltfczuectbznkuywfm}
+    password: ${DB_PASSWORD:Remelearning123!}
+    schema: ${DB_SCHEMA:reme_recording}
   data:
     redis:
       host: ${REDIS_HOST:localhost}

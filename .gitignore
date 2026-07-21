@@ -7,3 +7,6 @@ Business.md
 HUONG_DAN_CAI_DAT.md
 start-all.bat
 stop-all.bat
+.agents/
+.superpowers/
+.codegraph/
