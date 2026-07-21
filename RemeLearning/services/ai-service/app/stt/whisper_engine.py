@@ -43,7 +43,12 @@ class FasterWhisperEngine(SpeechToTextEngine):
         rather than the segment-level granularity transcribe/transcribe_auto return."""
         segments, _info = self._model.transcribe(audio_path, language=language_code, word_timestamps=True)
         return [
-            WordTiming(word=word.word.strip(), start_seconds=word.start, end_seconds=word.end)
+            WordTiming(
+                word=word.word.strip(),
+                start_seconds=word.start,
+                end_seconds=word.end,
+                probability=word.probability,
+            )
             for segment in segments
             for word in (segment.words or [])
         ]

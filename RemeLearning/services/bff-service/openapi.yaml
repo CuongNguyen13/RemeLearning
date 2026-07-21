@@ -655,12 +655,19 @@ components:
 
     DictationLessonSummary:
       type: object
-      description: One lesson (clip) inside a folder; deliberately light - no scriptText/sentences.
+      description: >
+        One lesson (clip) inside a folder; deliberately light - no scriptText/sentences. sentenceCount
+        stands in for a duration estimate. attemptCount/latestAccuracy are the requesting learner's own
+        progress on this clip, null when never attempted.
       properties:
         clipId: { type: integer, format: int64 }
         code: { type: string }
         title: { type: string }
         audioUrl: { type: string }
+        level: { type: string, nullable: true }
+        sentenceCount: { type: integer }
+        attemptCount: { type: integer, nullable: true }
+        latestAccuracy: { type: number, format: double, nullable: true, description: "0..1, null when never attempted" }
 
     DictationSentence:
       type: object

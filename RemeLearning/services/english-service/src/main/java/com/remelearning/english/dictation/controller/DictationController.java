@@ -65,10 +65,11 @@ public class DictationController {
 		return ApiResponse.ok(dictationService.listFolders());
 	}
 
-	@Operation(summary = "The lessons (clips) inside one folder, light-weight (no script) - the answer only loads once a specific lesson is opened")
-	@GetMapping("/folders/{folderId}/lessons")
-	public ApiResponse<List<DictationLessonSummaryDto>> listFolderLessons(@PathVariable String folderId) {
-		return ApiResponse.ok(dictationService.listFolderLessons(folderId));
+	@Operation(summary = "The lessons (clips) inside one folder, light-weight (no script) - the answer only loads once a specific lesson is opened - joined with the learner's own progress (sentence count, attempt count, latest accuracy) on each")
+	@GetMapping("/folders/{folderId}/lessons/{userId}")
+	public ApiResponse<List<DictationLessonSummaryDto>> listFolderLessons(
+			@PathVariable String folderId, @PathVariable String userId) {
+		return ApiResponse.ok(dictationService.listFolderLessons(folderId, userId));
 	}
 
 	@Operation(summary = "Full detail for one clip - script + split sentences - for sentence-by-sentence practice, with an optional per-sentence translation")

@@ -117,11 +117,11 @@ public class LearnerController {
 		return englishServiceClient.getDictationFolders().map(ApiResponse::ok);
 	}
 
-	@Operation(summary = "The lessons (clips) inside one dictation folder, light-weight (no script); thin proxy to english-service")
+	@Operation(summary = "The lessons (clips) inside one dictation folder, light-weight (no script), joined with the learner's own progress on each; thin proxy to english-service")
 	@GetMapping("/{userId}/dictation/folders/{folderId}/lessons")
 	public Mono<ApiResponse<List<DictationLessonSummaryDto>>> getDictationFolderLessons(
 			@PathVariable String userId, @PathVariable String folderId) {
-		return englishServiceClient.getDictationFolderLessons(folderId).map(ApiResponse::ok);
+		return englishServiceClient.getDictationFolderLessons(folderId, userId).map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Full detail for one dictation clip - script + split sentences, optionally translated - for sentence-by-sentence practice; thin proxy to english-service")

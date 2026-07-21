@@ -24,7 +24,9 @@ Also present (own `dictation` package — listen-and-type dictation over a fixed
 an AI-practice section): facet/session browsing, folder → file browsing (rev 2 —
 `/api/v1/dictation/folders`, `.../folders/{folderId}/lessons`, `.../clips/{clipId}` for sentence-mode
 detail — this last one also accepts an optional `?translationLang=`, see below), grading
-(`POST /api/v1/dictation/attempts`), history (including full per-attempt detail via
+(`POST /api/v1/dictation/attempts`, whose AI feedback is a root-cause-classified mistake analysis —
+Vocabulary/Grammar/Phonology, via `DictationAnalyzer`/`dictation.analyzer.mode` below — not a flat
+suggestions list), history (including full per-attempt detail via
 `GET .../history/{userId}/{attemptId}`, and a `practiceType` field so the UI can badge each row
 LIBRARY vs AI_PRACTICE), and AI-practice generation/audio — either aggregate
 (`POST .../ai-practice/{userId}/generate`, from the learner's still-unsynthesized practice items, or

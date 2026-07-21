@@ -19,6 +19,40 @@ Python AI service for RemeLearning. Responsibilities:
 See `RemeLearning/common/src/main/java/com/remelearning/common/constants/KafkaTopics.java` for the shared
 topic-name contract with the Java services.
 
+### Dictation sentence alignment algorithm (`app/align/sentence_aligner.py`)
+
+`transcribe_words` (`app/stt/whisper_engine.py`) runs faster-whisper with `word_timestamps=True` and
+flattens every segment's words into one chronological list (`WordTiming`: word, start/end seconds,
+`probability`). `align_sentences` then matches each script sentence against that timeline, in order,
+using a cursor-based greedy match — **not** a full forced-alignment model, since the per-word
+timestamps are already Whisper's own decoder-attention estimate rather than a phoneme-level alignment:
+
+1. For each sentence, tokenize (lowercase, strip punctuation) and find the sentence's first token at
+   or after the running cursor, skipping any word below `_MIN_WORD_CONFIDENCE` (0.35) and using a
+   1-edit fuzzy match (`_tokens_match`) for tokens of 4+ letters, to tolerate Whisper mishearing a
+   single letter of an otherwise-correct word.
+2. Walk forward from there, matching the sentence's remaining tokens in order (tolerating
+   extra/misheard words in between).
+3. **Reject the match** (leave `start_ms`/`end_ms` as `None`) unless the sentence's *last* token was
+   reached AND at least `_MIN_MATCH_RATIO` (0.8) of its tokens matched overall — a partial match
+   anchored on an earlier word would truncate the clip mid-sentence, which is worse than leaving it
+   unaligned for a later retry.
+4. On acceptance, pad the boundary by `_PADDING_MS` (100ms) each side, clamped so it never reaches
+   into a neighboring word's span — Whisper's word timestamps are frequently clipped tight against
+   the actual phoneme boundary, so an unpadded cut audibly clips the first/last sound.
+5. The cursor only advances past sentences that were actually matched, so a rejected sentence can't
+   cause the next sentence to match against words that belong to it (no cascading drift).
+
+**Known limitation / next step if cutting is still imprecise:** this is still fundamentally bounded
+by Whisper's own word-timestamp quality (decoder cross-attention, not forced alignment). If sentence
+boundaries are still noticeably off after the above, the next step is to replace the timestamp source
+itself — either WhisperX-style CTC (wav2vec2) refinement of Whisper's output, or a direct
+forced-alignment pass of the *known* script text against the audio (e.g. `torchaudio`'s
+`MMS_FA`/Wav2Vec2 CTC pipelines, already compatible with this service's pinned `torch`/`torchaudio`
+versions) — since dictation already knows the exact target text, this is a forced-alignment problem,
+not free transcription. A VAD pass (Silero VAD/webrtcvad) to snap boundaries to actual silence could
+also replace the fixed `_PADDING_MS` heuristic with something acoustically grounded.
+
 ## Run locally — detailed steps (Windows / PowerShell)
 
 Máy hiện chỉ có Python 3.14 cài sẵn (`py -0p`). `torch`/`pyannote.audio` có thể chưa có wheel cho

@@ -21,6 +21,9 @@ class WordTiming:
     word: str
     start_seconds: float
     end_seconds: float
+    # faster-whisper's per-word confidence (0-1); defaults to 1.0 for callers/tests that don't
+    # have a real ASR confidence to report, so a low value is always a deliberate signal.
+    probability: float = 1.0
 
 
 class SpeechToTextEngine(ABC):

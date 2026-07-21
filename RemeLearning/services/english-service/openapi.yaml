@@ -242,15 +242,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseDictationFolderList"
 
-  /api/v1/dictation/folders/{folderId}/lessons:
+  /api/v1/dictation/folders/{folderId}/lessons/{userId}:
     get:
       tags: [Dictation]
       summary: >
         The lessons (clips) inside one folder - light-weight, no scriptText/sentences, so the answer
-        only loads once the learner opens a specific lesson via GET /dictation/clips/{clipId}
+        only loads once the learner opens a specific lesson via GET /dictation/clips/{clipId} - each
+        joined with userId's own progress on it (sentenceCount, attemptCount, latestAccuracy; the
+        latter two null when never attempted)
       operationId: listDictationFolderLessons
       parameters:
         - name: folderId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
           in: path
           required: true
           schema: { type: string }
@@ -345,9 +351,10 @@ paths:
       tags: [Dictation]
       summary: >
         Grade a learner's typed transcript (for a library clip or an AI-practice clip) with a
-        word-level WER/diff scorer, record the misses, return the reference text + diff + immediate
-        AI suggestions + practice sentences, and publish the misses onto learning.gap.analyzed so the
-        recommendation pipeline turns them into study suggestions.
+        word-level WER/diff scorer, record the misses, return the reference text + diff + a
+        root-cause-classified mistake analysis (errorTable/rootCauses/actionAdvice, Lexicon vs.
+        Grammar vs. Phonology) + practice sentences, and publish the misses onto
+        learning.gap.analyzed so the recommendation pipeline turns them into study suggestions.
       operationId: submitDictationAttempt
       requestBody:
         required: true
@@ -785,12 +792,19 @@ components:
 
     DictationLessonSummary:
       type: object
-      description: One lesson (clip) inside a folder; deliberately light - no scriptText/sentences.
+      description: >
+        One lesson (clip) inside a folder; deliberately light - no scriptText/sentences. sentenceCount
+        stands in for a duration estimate (no audio-length data is stored). attemptCount/latestAccuracy
+        are the requesting learner's own progress on this clip, null when never attempted.
       properties:
         clipId: { type: integer, format: int64 }
         code: { type: string }
         title: { type: string }
         audioUrl: { type: string, description: "service-relative audio stream path" }
+        level: { type: string, nullable: true, description: "CEFR level (A1..C2), null if untagged" }
+        sentenceCount: { type: integer, description: "number of sentences in the script" }
+        attemptCount: { type: integer, nullable: true, description: "null if the learner has never attempted this clip" }
+        latestAccuracy: { type: number, format: double, nullable: true, description: "0..1 accuracy of the learner's most recent attempt; null if never attempted" }
 
     DictationSentence:
       type: object
@@ -873,6 +887,31 @@ components:
         actualWord: { type: string, nullable: true, description: "the learner's word for this slot; null for a MISSING slot" }
         expectedWord: { type: string, nullable: true, description: "the reference sentence's word for this slot; null for an EXTRA slot" }
 
+    DictationErrorCategory:
+      type: string
+      enum: [LEXICON, GRAMMAR, PHONOLOGY]
+      description: >
+        Root-cause classification for one dictation mistake: LEXICON (vocabulary/homophone/
+        collocation/slang), GRAMMAR (dropped inflection, wrong tense, unrecognized structure), or
+        PHONOLOGY (elision/linking/assimilation/weak forms of function words in connected speech).
+
+    DictationErrorEntry:
+      type: object
+      description: One row of the mistake-comparison table, root-classified.
+      properties:
+        original: { type: string, nullable: true }
+        transcribed: { type: string, nullable: true }
+        category: { $ref: "#/components/schemas/DictationErrorCategory" }
+        note: { type: string, nullable: true, description: "short note on why this was likely misheard/mistyped" }
+
+    DictationRootCauseGroup:
+      type: object
+      description: A root-cause explanation for one category, only present when it has misses.
+      properties:
+        category: { $ref: "#/components/schemas/DictationErrorCategory" }
+        summary: { type: string }
+        examples: { type: array, items: { type: string } }
+
     DictationAttemptResult:
       type: object
       properties:
@@ -882,7 +921,13 @@ components:
         diff:
           type: array
           items: { $ref: "#/components/schemas/WordDiff" }
-        aiSuggestions: { type: array, items: { type: string }, description: "immediate AI study tips (Vietnamese)" }
+        errorTable:
+          type: array
+          items: { $ref: "#/components/schemas/DictationErrorEntry" }
+        rootCauses:
+          type: array
+          items: { $ref: "#/components/schemas/DictationRootCauseGroup" }
+        actionAdvice: { type: array, items: { type: string }, description: "immediate AI study tips (Vietnamese)" }
         practiceSentences: { type: array, items: { type: string }, description: "AI practice sentences persisted for the AI section" }
 
     DictationHistoryEntry:
@@ -928,7 +973,13 @@ components:
         mistakes:
           type: array
           items: { $ref: "#/components/schemas/DictationMistake" }
-        aiSuggestions: { type: array, items: { type: string } }
+        errorTable:
+          type: array
+          items: { $ref: "#/components/schemas/DictationErrorEntry" }
+        rootCauses:
+          type: array
+          items: { $ref: "#/components/schemas/DictationRootCauseGroup" }
+        actionAdvice: { type: array, items: { type: string } }
         attemptedAt: { type: string, format: date-time }
 
     DictationPracticeItem:

@@ -18,6 +18,7 @@ import com.remelearning.english.dictation.domain.DictationAttempt;
 import com.remelearning.english.dictation.domain.DictationAttemptDetailRow;
 import com.remelearning.english.dictation.domain.DictationClip;
 import com.remelearning.english.dictation.domain.DictationClipSentence;
+import com.remelearning.english.dictation.domain.DictationLessonRow;
 import com.remelearning.english.dictation.domain.DictationMiss;
 import com.remelearning.english.dictation.domain.DictationPracticeItem;
 import com.remelearning.english.dictation.domain.FolderCount;
@@ -44,8 +45,6 @@ import com.remelearning.english.dictation.mapper.DictationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-
-import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -107,8 +106,10 @@ class DictationServiceImplTest {
 		when(dictationMapper.findClipById(42L)).thenReturn(DictationClip.builder()
 				.id(42L).code("c-1").scriptText("She was reluctant to admit it.").build());
 		simulateGeneratedAttemptId(500L);
-		when(dictationAnalyzer.analyzeAttempt(anyString(), anyList())).thenReturn(DictationAnalysis.builder()
-				.suggestions(List.of("Nghe lại từ 'reluctant'."))
+		when(dictationAnalyzer.analyzeAttempt(anyString(), anyString(), anyList())).thenReturn(DictationAnalysis.builder()
+				.errorTable(List.of())
+				.rootCauses(List.of())
+				.actionAdvice(List.of("Nghe lại từ 'reluctant'."))
 				.practiceSentences(List.of("She was reluctant to leave."))
 				.build());
 		when(dictationMapper.countMissesForWord(eq("user-1"), anyString())).thenReturn(1);
@@ -123,7 +124,7 @@ class DictationServiceImplTest {
 		// "reluctant" was omitted -> one miss, accuracy below 1.
 		assertThat(result.getReferenceText()).isEqualTo("She was reluctant to admit it.");
 		assertThat(result.getAccuracy()).isLessThan(1.0);
-		assertThat(result.getAiSuggestions()).containsExactly("Nghe lại từ 'reluctant'.");
+		assertThat(result.getActionAdvice()).containsExactly("Nghe lại từ 'reluctant'.");
 
 		ArgumentCaptor<List<DictationMiss>> missCaptor = ArgumentCaptor.forClass(List.class);
 		verify(dictationMapper).insertMisses(missCaptor.capture());
@@ -142,8 +143,8 @@ class DictationServiceImplTest {
 		when(dictationMapper.findClipById(42L)).thenReturn(DictationClip.builder()
 				.id(42L).code("c-1").scriptText("She was reluctant to admit it.").build());
 		simulateGeneratedAttemptId(501L);
-		when(dictationAnalyzer.analyzeAttempt(anyString(), anyList())).thenReturn(DictationAnalysis.builder()
-				.suggestions(List.of()).practiceSentences(List.of()).build());
+		when(dictationAnalyzer.analyzeAttempt(anyString(), anyString(), anyList())).thenReturn(DictationAnalysis.builder()
+				.errorTable(List.of()).rootCauses(List.of()).actionAdvice(List.of()).practiceSentences(List.of()).build());
 		when(dictationMapper.countMissesForWord(eq("user-1"), anyString())).thenReturn(1);
 
 		DictationSentenceMistakeRequest mistake = new DictationSentenceMistakeRequest();
@@ -177,8 +178,8 @@ class DictationServiceImplTest {
 		when(dictationMapper.findClipById(42L)).thenReturn(DictationClip.builder()
 				.id(42L).code("c-1").scriptText("She was reluctant to admit it.").build());
 		simulateGeneratedAttemptId(502L);
-		when(dictationAnalyzer.analyzeAttempt(anyString(), anyList())).thenReturn(DictationAnalysis.builder()
-				.suggestions(List.of()).practiceSentences(List.of()).build());
+		when(dictationAnalyzer.analyzeAttempt(anyString(), anyString(), anyList())).thenReturn(DictationAnalysis.builder()
+				.errorTable(List.of()).rootCauses(List.of()).actionAdvice(List.of()).practiceSentences(List.of()).build());
 
 		DictationAttemptRequest request = new DictationAttemptRequest();
 		request.setUserId("user-1");
@@ -217,15 +218,20 @@ class DictationServiceImplTest {
 	}
 
 	@Test
-	void listFolderLessonsMapsClipsWithoutScriptOrSentences() {
-		when(dictationMapper.findClipsByFolder("english-conversations")).thenReturn(List.of(
-				DictationClip.builder().id(5L).code("c-1").title("At home").scriptText("secret").build()));
+	void listFolderLessonsMapsRowsWithLearnerProgress() {
+		when(dictationMapper.findLessonSummariesByFolder("english-conversations", "user-1")).thenReturn(List.of(
+				DictationLessonRow.builder().clipId(5L).code("c-1").title("At home").level("A1")
+						.sentenceCount(6).attemptCount(2).latestAccuracy(0.75).build()));
 
-		List<DictationLessonSummaryDto> lessons = service.listFolderLessons("english-conversations");
+		List<DictationLessonSummaryDto> lessons = service.listFolderLessons("english-conversations", "user-1");
 
 		assertThat(lessons).hasSize(1);
 		assertThat(lessons.get(0).getClipId()).isEqualTo(5L);
 		assertThat(lessons.get(0).getAudioUrl()).isEqualTo("/api/v1/dictation/clips/5/audio");
+		assertThat(lessons.get(0).getLevel()).isEqualTo("A1");
+		assertThat(lessons.get(0).getSentenceCount()).isEqualTo(6);
+		assertThat(lessons.get(0).getAttemptCount()).isEqualTo(2);
+		assertThat(lessons.get(0).getLatestAccuracy()).isEqualTo(0.75);
 	}
 
 	@Test
@@ -622,12 +628,14 @@ class DictationServiceImplTest {
 	}
 
 	@Test
-	void submitAttemptPersistsAiSuggestionsAsJson() throws Exception {
+	void submitAttemptPersistsAiAnalysisAsJson() throws Exception {
 		when(dictationMapper.findClipById(42L)).thenReturn(DictationClip.builder()
 				.id(42L).code("c-1").scriptText("She was reluctant to admit it.").build());
 		simulateGeneratedAttemptId(600L);
-		when(dictationAnalyzer.analyzeAttempt(anyString(), anyList())).thenReturn(DictationAnalysis.builder()
-				.suggestions(List.of("Nghe lại từ 'reluctant'.", "Chú ý âm cuối 'admit'."))
+		when(dictationAnalyzer.analyzeAttempt(anyString(), anyString(), anyList())).thenReturn(DictationAnalysis.builder()
+				.errorTable(List.of())
+				.rootCauses(List.of())
+				.actionAdvice(List.of("Nghe lại từ 'reluctant'.", "Chú ý âm cuối 'admit'."))
 				.practiceSentences(List.of())
 				.build());
 		when(dictationMapper.countMissesForWord(eq("user-1"), anyString())).thenReturn(1);
@@ -641,8 +649,8 @@ class DictationServiceImplTest {
 
 		ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
 		verify(dictationMapper).updateAttemptAiSuggestions(eq(600L), jsonCaptor.capture());
-		List<String> persisted = objectMapper.readValue(jsonCaptor.getValue(), new TypeReference<List<String>>() { });
-		assertThat(persisted).containsExactly("Nghe lại từ 'reluctant'.", "Chú ý âm cuối 'admit'.");
+		DictationAnalysis persisted = objectMapper.readValue(jsonCaptor.getValue(), DictationAnalysis.class);
+		assertThat(persisted.getActionAdvice()).containsExactly("Nghe lại từ 'reluctant'.", "Chú ý âm cuối 'admit'.");
 	}
 
 	@Test
@@ -653,7 +661,7 @@ class DictationServiceImplTest {
 						.referenceText("She was reluctant to admit it.")
 						.userTranscript("She was to admit it.")
 						.accuracy(0.8).wer(0.2)
-						.aiSuggestions("[\"Nghe lại từ 'reluctant'.\"]")
+						.aiSuggestions("{\"errorTable\":[],\"rootCauses\":[],\"actionAdvice\":[\"Nghe lại từ 'reluctant'.\"],\"practiceSentences\":[]}")
 						.build());
 		when(dictationMapper.findMissesByAttemptId(500L)).thenReturn(List.of(
 				DictationMiss.builder().attemptId(500L).userId("user-1").clipId(42L)
@@ -666,7 +674,25 @@ class DictationServiceImplTest {
 		assertThat(detail.getMistakes()).hasSize(1);
 		assertThat(detail.getMistakes().get(0).getExpectedWord()).isEqualTo("reluctant");
 		assertThat(detail.getMistakes().get(0).getTag()).isEqualTo(WordDiffTag.MISSING);
-		assertThat(detail.getAiSuggestions()).containsExactly("Nghe lại từ 'reluctant'.");
+		assertThat(detail.getActionAdvice()).containsExactly("Nghe lại từ 'reluctant'.");
+	}
+
+	@Test
+	void getAttemptDetailReadsLegacyPlainStringArrayFormatAsActionAdvice() {
+		// Attempts persisted before the root-cause analysis shipped stored a plain JSON string array.
+		when(dictationMapper.findAttemptDetailByIdAndUserId(505L, "user-1")).thenReturn(
+				DictationAttemptDetailRow.builder()
+						.attemptId(505L).referenceText("Hi.").userTranscript("Hi.")
+						.accuracy(1.0).wer(0.0)
+						.aiSuggestions("[\"Nghe lại từ 'reluctant'.\"]")
+						.build());
+		when(dictationMapper.findMissesByAttemptId(505L)).thenReturn(List.of());
+
+		DictationAttemptDetailDto detail = service.getAttemptDetail("user-1", 505L);
+
+		assertThat(detail.getActionAdvice()).containsExactly("Nghe lại từ 'reluctant'.");
+		assertThat(detail.getErrorTable()).isEmpty();
+		assertThat(detail.getRootCauses()).isEmpty();
 	}
 
 	@Test
@@ -687,7 +713,7 @@ class DictationServiceImplTest {
 
 		DictationAttemptDetailDto detail = service.getAttemptDetail("user-1", 501L);
 
-		assertThat(detail.getAiSuggestions()).isEmpty();
+		assertThat(detail.getActionAdvice()).isEmpty();
 		assertThat(detail.getMistakes()).isEmpty();
 	}
 

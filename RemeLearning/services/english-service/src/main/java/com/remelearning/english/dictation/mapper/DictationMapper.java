@@ -5,6 +5,7 @@ import com.remelearning.english.dictation.domain.DictationAttemptDetailRow;
 import com.remelearning.english.dictation.domain.DictationClip;
 import com.remelearning.english.dictation.domain.DictationClipSentence;
 import com.remelearning.english.dictation.domain.DictationHistoryRow;
+import com.remelearning.english.dictation.domain.DictationLessonRow;
 import com.remelearning.english.dictation.domain.DictationMiss;
 import com.remelearning.english.dictation.domain.DictationPracticeItem;
 import com.remelearning.english.dictation.domain.FolderCount;
@@ -52,7 +53,9 @@ public interface DictationMapper {
 	List<FolderCount> findDistinctFolders();
 
 	/** Clips in one folder, ordered by code, for the lesson-browse listing within that folder. */
-	List<DictationClip> findClipsByFolder(@Param("folder") String folder);
+	/** Lessons in one folder joined with the given learner's own progress (sentence count,
+	 * attempt count, latest-attempt accuracy) - null progress fields mean never attempted. */
+	List<DictationLessonRow> findLessonSummariesByFolder(@Param("folder") String folder, @Param("userId") String userId);
 
 	// --- Clip sentences (sentence-mode dictation) ---
 

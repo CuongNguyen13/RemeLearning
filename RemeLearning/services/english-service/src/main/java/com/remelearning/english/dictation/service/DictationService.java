@@ -86,8 +86,9 @@ public interface DictationService {
 	/** The distinct clip folders (topic groupings), each with its lesson count, for folder->file browsing. */
 	List<DictationFolderDto> listFolders();
 
-	/** The lessons (clips) inside one folder, light-weight (no script), for the folder's lesson listing. */
-	List<DictationLessonSummaryDto> listFolderLessons(String folder);
+	/** The lessons (clips) inside one folder, light-weight (no script), joined with {@code userId}'s
+	 * own progress (attempt count, latest accuracy) for the folder's lesson listing. */
+	List<DictationLessonSummaryDto> listFolderLessons(String folder, String userId);
 
 	/**
 	 * Full detail for one clip - script + split sentences - shown once the learner opens it to

@@ -186,14 +186,15 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch dictation folders", ex));
 	}
 
-	/** Fetches the light-weight lesson listing for one dictation-library folder. */
-	public Mono<List<DictationLessonSummaryDto>> getDictationFolderLessons(String folderId) {
+	/** Fetches the light-weight lesson listing for one dictation-library folder, joined with
+	 * userId's own progress (sentence count, attempt count, latest accuracy) on each lesson. */
+	public Mono<List<DictationLessonSummaryDto>> getDictationFolderLessons(String folderId, String userId) {
 		return englishServiceClient.get()
-				.uri("/api/v1/dictation/folders/{folderId}/lessons", folderId)
+				.uri("/api/v1/dictation/folders/{folderId}/lessons/{userId}", folderId, userId)
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<DictationLessonSummaryDto>>>() {})
 				.map(ApiResponse::getData)
-				.doOnError(ex -> log.error("Failed to fetch dictation lessons for folderId={}", folderId, ex));
+				.doOnError(ex -> log.error("Failed to fetch dictation lessons for folderId={}, userId={}", folderId, userId, ex));
 	}
 
 	/** Fetches full detail (script + sentences, optionally translated) for one dictation clip, for sentence-mode practice. */

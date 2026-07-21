@@ -76,11 +76,25 @@
         ORDER BY folder
     </select>
 
-    <select id="findClipsByFolder" resultType="com.remelearning.english.dictation.domain.DictationClip">
-        SELECT id, code, title, skill, level, topic, exam_type, script_text, storage_key, source, folder, created_at
-        FROM dictation_clips
-        WHERE folder = #{folder}
-        ORDER BY code
+    <!-- Sentence count stands in for a duration estimate (no audio-length data is stored).
+         attempt_count/latest_accuracy come from the requesting learner's own attempts only,
+         with latest_accuracy picked by created_at DESC via array_agg so a clip the learner has
+         never attempted comes back null rather than 0. -->
+    <select id="findLessonSummariesByFolder" resultType="com.remelearning.english.dictation.domain.DictationLessonRow">
+        SELECT c.id AS clip_id, c.code AS code, c.title AS title, c.level AS level,
+               (SELECT COUNT(*) FROM dictation_clip_sentences s WHERE s.clip_id = c.id) AS sentence_count,
+               agg.attempt_count AS attempt_count,
+               agg.latest_accuracy AS latest_accuracy
+        FROM dictation_clips c
+        LEFT JOIN (
+            SELECT clip_id, COUNT(*) AS attempt_count,
+                   (ARRAY_AGG(accuracy ORDER BY created_at DESC))[1] AS latest_accuracy
+            FROM dictation_attempts
+            WHERE user_id = #{userId} AND clip_id IS NOT NULL
+            GROUP BY clip_id
+        ) agg ON agg.clip_id = c.id
+        WHERE c.folder = #{folder}
+        ORDER BY c.code
     </select>
 
     <!-- Upsert keyed on (clip_id, seq): re-running the importer updates sentence text without

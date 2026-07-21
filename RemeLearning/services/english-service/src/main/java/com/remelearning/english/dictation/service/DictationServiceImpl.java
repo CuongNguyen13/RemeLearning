@@ -23,6 +23,7 @@ import com.remelearning.english.dictation.domain.DictationAttempt;
 import com.remelearning.english.dictation.domain.DictationAttemptDetailRow;
 import com.remelearning.english.dictation.domain.DictationClip;
 import com.remelearning.english.dictation.domain.DictationClipSentence;
+import com.remelearning.english.dictation.domain.DictationLessonRow;
 import com.remelearning.english.dictation.domain.DictationMiss;
 import com.remelearning.english.dictation.domain.DictationPracticeItem;
 import com.remelearning.english.dictation.domain.FolderCount;
@@ -162,8 +163,8 @@ public class DictationServiceImpl implements DictationService {
 
 	// Light-weight lesson listing for one folder (no script/sentences - those load on demand per clip).
 	@Override
-	public List<DictationLessonSummaryDto> listFolderLessons(String folder) {
-		return dictationMapper.findClipsByFolder(folder).stream()
+	public List<DictationLessonSummaryDto> listFolderLessons(String folder, String userId) {
+		return dictationMapper.findLessonSummariesByFolder(folder, userId).stream()
 				.map(this::toLessonSummaryDto)
 				.toList();
 	}
@@ -250,17 +251,19 @@ public class DictationServiceImpl implements DictationService {
 		}
 
 		List<String> missedWords = distinctMissedWords(misses);
-		DictationAnalysis analysis = dictationAnalyzer.analyzeAttempt(target.referenceText(), missedWords);
+		DictationAnalysis analysis = dictationAnalyzer.analyzeAttempt(target.referenceText(), request.getUserTranscript(), score.getDiff());
 		persistPracticeSentences(request.getUserId(), analysis.getPracticeSentences());
-		dictationMapper.updateAttemptAiSuggestions(attempt.getId(), serializeSuggestions(analysis.getSuggestions()));
-		publishWeakPoints(target.recordingId(), request.getUserId(), missedWords, analysis.getSuggestions());
+		dictationMapper.updateAttemptAiSuggestions(attempt.getId(), serializeAnalysis(analysis));
+		publishWeakPoints(target.recordingId(), request.getUserId(), missedWords, analysis.getActionAdvice());
 
 		return DictationAttemptResultDto.builder()
 				.referenceText(target.referenceText())
 				.accuracy(score.getAccuracy())
 				.wer(score.getWer())
 				.diff(score.getDiff())
-				.aiSuggestions(analysis.getSuggestions())
+				.errorTable(analysis.getErrorTable())
+				.rootCauses(analysis.getRootCauses())
+				.actionAdvice(analysis.getActionAdvice())
 				.practiceSentences(analysis.getPracticeSentences())
 				.build();
 	}
@@ -297,6 +300,7 @@ public class DictationServiceImpl implements DictationService {
 						.tag(WordDiffTag.valueOf(miss.getTag()))
 						.build())
 				.toList();
+		DictationAnalysis analysis = deserializeAnalysis(row.getAiSuggestions());
 		return DictationAttemptDetailDto.builder()
 				.attemptId(row.getAttemptId())
 				.title(row.getTitle())
@@ -308,7 +312,9 @@ public class DictationServiceImpl implements DictationService {
 				.accuracy(row.getAccuracy())
 				.wer(row.getWer())
 				.mistakes(mistakes)
-				.aiSuggestions(deserializeSuggestions(row.getAiSuggestions()))
+				.errorTable(analysis.getErrorTable())
+				.rootCauses(analysis.getRootCauses())
+				.actionAdvice(analysis.getActionAdvice())
 				.attemptedAt(row.getCreatedAt())
 				.build();
 	}
@@ -561,8 +567,8 @@ public class DictationServiceImpl implements DictationService {
 
 	// Publishes each missed word as a vocabulary weak point onto learning.gap.analyzed; the
 	// forgetting score saturates with the learner's running miss count for that word.
-	private void publishWeakPoints(String recordingId, String userId, List<String> missedWords, List<String> suggestions) {
-		String recommendation = suggestions.isEmpty() ? null : suggestions.get(0);
+	private void publishWeakPoints(String recordingId, String userId, List<String> missedWords, List<String> actionAdvice) {
+		String recommendation = actionAdvice.isEmpty() ? null : actionAdvice.get(0);
 		List<WeakPointPayload> weakPoints = new ArrayList<>();
 		for (String word : missedWords) {
 			int missCount = dictationMapper.countMissesForWord(userId, word);
@@ -581,11 +587,11 @@ public class DictationServiceImpl implements DictationService {
 	// clips into one continuous audio file, and persists the whole passage (rendered as
 	// "Speaker: line" per turn, or plain text for a single-speaker monologue) as one new practice
 	// item, along with its resolved level/examType/topic and (if generated) translation. The TTS
-	// audio for each line is synthesized from the EXACT SAME text that gets persisted as the
-	// graded/displayed sentence (including any "Speaker: " prefix) - previously the audio spoke only
-	// the bare line while the graded text carried the prefix, so multi-speaker audio never said the
-	// name the learner was graded against; using one shared `lineText` for both fixes that. Any
-	// TTS/storage failure propagates so the caller can leave prior pending items intact.
+	// audio is synthesized from `lineText` (including the "Speaker: " prefix in multi-speaker
+	// dialogues) so the spoken audio matches the exact text the learner is graded against; the FE
+	// strips the "Speaker: " prefix back off before comparing the learner's typed answer (see
+	// stripSpeakerLabel in useSentenceRunner.ts).
+	// Any TTS/storage failure propagates so the caller can leave prior pending items intact.
 	private void synthesizeDialoguePracticeItem(String userId, DialogueGenerationResult dialogue, String level, String examType) {
 		List<DictationDialogueLine> lines = dialogue.lines();
 		Map<String, String> speakerVoices = assignVoicesToSpeakers(lines);
@@ -657,12 +663,16 @@ public class DictationServiceImpl implements DictationService {
 				.build();
 	}
 
-	private DictationLessonSummaryDto toLessonSummaryDto(DictationClip clip) {
+	private DictationLessonSummaryDto toLessonSummaryDto(DictationLessonRow row) {
 		return DictationLessonSummaryDto.builder()
-				.clipId(clip.getId())
-				.code(clip.getCode())
-				.title(clip.getTitle())
-				.audioUrl(CLIP_AUDIO_URL.formatted(clip.getId()))
+				.clipId(row.getClipId())
+				.code(row.getCode())
+				.title(row.getTitle())
+				.audioUrl(CLIP_AUDIO_URL.formatted(row.getClipId()))
+				.level(row.getLevel())
+				.sentenceCount(row.getSentenceCount())
+				.attemptCount(row.getAttemptCount())
+				.latestAccuracy(row.getLatestAccuracy())
 				.build();
 	}
 
@@ -733,26 +743,34 @@ public class DictationServiceImpl implements DictationService {
 				storageClient.read(storageKey), storageClient.size(storageKey), contentType, baseName + extension);
 	}
 
-	// Serializes the AI suggestions to a JSON array string for the ai_suggestions column.
-	private String serializeSuggestions(List<String> suggestions) {
+	// Serializes the full AI analysis (error table + root causes + advice + practice sentences) to
+	// JSON for the ai_suggestions column - the column name predates this richer shape.
+	private String serializeAnalysis(DictationAnalysis analysis) {
 		try {
-			return objectMapper.writeValueAsString(suggestions);
+			return objectMapper.writeValueAsString(analysis);
 		} catch (JsonProcessingException ex) {
-			throw new IllegalStateException("Failed to serialize AI suggestions", ex);
+			throw new IllegalStateException("Failed to serialize AI analysis", ex);
 		}
 	}
 
-	// Deserializes the ai_suggestions column back into a list; empty (not an error) for null/blank,
-	// which covers attempts submitted before this column existed.
-	private List<String> deserializeSuggestions(String aiSuggestionsJson) {
+	// Deserializes the ai_suggestions column back into a DictationAnalysis. Empty (not an error) for
+	// null/blank. Attempts stored before this richer shape shipped hold a plain JSON string array
+	// (the old aiSuggestions format) - those are read back as actionAdvice with no error-table/
+	// root-causes, never throwing, so old history entries still open.
+	private DictationAnalysis deserializeAnalysis(String aiSuggestionsJson) {
 		if (aiSuggestionsJson == null || aiSuggestionsJson.isBlank()) {
-			return List.of();
+			return DictationAnalysis.builder().errorTable(List.of()).rootCauses(List.of()).actionAdvice(List.of()).practiceSentences(List.of()).build();
 		}
 		try {
-			return objectMapper.readValue(aiSuggestionsJson, new TypeReference<List<String>>() { });
+			return objectMapper.readValue(aiSuggestionsJson, DictationAnalysis.class);
 		} catch (JsonProcessingException ex) {
-			log.warn("Failed to deserialize AI suggestions, returning empty list", ex);
-			return List.of();
+			try {
+				List<String> legacySuggestions = objectMapper.readValue(aiSuggestionsJson, new TypeReference<List<String>>() { });
+				return DictationAnalysis.builder().errorTable(List.of()).rootCauses(List.of()).actionAdvice(legacySuggestions).practiceSentences(List.of()).build();
+			} catch (JsonProcessingException legacyEx) {
+				log.warn("Failed to deserialize AI analysis, returning empty analysis", legacyEx);
+				return DictationAnalysis.builder().errorTable(List.of()).rootCauses(List.of()).actionAdvice(List.of()).practiceSentences(List.of()).build();
+			}
 		}
 	}
 

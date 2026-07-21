@@ -1,5 +1,7 @@
 package com.remelearning.english.dictation.dto;
 
+import com.remelearning.english.dictation.analyzer.DictationErrorEntry;
+import com.remelearning.english.dictation.analyzer.DictationRootCauseGroup;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -20,6 +22,8 @@ public class DictationAttemptDetailDto {
 	private double accuracy;
 	private double wer;
 	private List<DictationMistakeDto> mistakes;
-	private List<String> aiSuggestions;
+	private List<DictationErrorEntry> errorTable;
+	private List<DictationRootCauseGroup> rootCauses;
+	private List<String> actionAdvice;
 	private Instant attemptedAt;
 }
