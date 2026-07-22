@@ -2,11 +2,17 @@
 
 `english-service` (Java/Spring Boot) is a modular monolith covering three analysis domains —
 `vocabulary`, `grammar`, `pronunciation` (each `com.remelearning.english.<domain>`) — plus a fourth,
-cross-cutting `practice` package for redo-exercises, and a fifth, `dictation`, for listen-and-type
+cross-cutting `practice` package for redo-exercises, a fifth, `dictation`, for listen-and-type
 practice generated from a learner's most-forgotten vocabulary/grammar items (see
 [dictation-practice.md](dictation-practice.md)) - unlike the other four, it is pull-based (triggered
 by the FE, no Kafka consumer of its own) and reuses `vocabulary`/`grammar`'s weak-point services
-in-process rather than adding a new inter-service call. Only `vocabulary` owns the
+in-process rather than adding a new inter-service call - and four more "Học &amp; Luyện tập với AI"
+`learn` packages (`vocabulary.learn`, `grammar.learn`, `listening`, `speaking`), each generating one
+AI practice item (Gemini text, plus Supertonic TTS for listening/speaking) and grading a submitted
+attempt by reusing `practice.service.PracticeService#redo` in-process, exactly like `dictation`
+reuses the domain weak-point services - see [vocabulary-learn.md](vocabulary-learn.md),
+[grammar-learn.md](grammar-learn.md), [listening-learn.md](listening-learn.md), and
+[speaking-learn.md](speaking-learn.md). Only `vocabulary` owns the
 `TranscriptReadyConsumer`/transcript persistence: the `transcripts`/`transcript_segments` tables are
 a cross-domain concern written once, and `grammar`/`pronunciation` read them back via the shared
 `GET /api/v1/transcripts/{recordingId}` endpoint instead of re-ingesting `transcript.ready`. All
@@ -31,7 +37,13 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 [english-learning-gap-analyzed-grammar.md](english-learning-gap-analyzed-grammar.md),
 [english-learning-gap-analyzed-pronunciation.md](english-learning-gap-analyzed-pronunciation.md),
 [practice-redo.md](practice-redo.md) (mistake-history seeding + redo-exercise grading),
-[dictation-practice.md](dictation-practice.md) (session generation + transcript grading).
+[dictation-practice.md](dictation-practice.md) (session generation + transcript grading),
+[vocabulary-learn.md](vocabulary-learn.md), [grammar-learn.md](grammar-learn.md),
+[listening-learn.md](listening-learn.md), and [speaking-learn.md](speaking-learn.md) (the four
+"Học &amp; Luyện tập với AI" `learn` skills: AI-generated practice item + graded attempt).
+
+- [Vocabulary library: topic word bank + Section practice](vocabulary-library.md) - extends the
+  vocabulary skill with a persistent topic word bank and Leitner-lite in-session repetition.
 
 ## 1. Kafka consumers (ingestion)
 
@@ -229,6 +241,26 @@ A fourth flow, `GET /api/v1/dictation/history/{userId}/{attemptId}`, returns ful
 attempt (reference text, transcript, a flat mistake list, and the AI suggestions persisted at submit
 time) — see [dictation-practice.md](dictation-practice.md) section 4.
 
+## 5. "Học & Luyện tập với AI" learn skills (`vocabulary.learn`, `grammar.learn`, `listening`, `speaking`)
+
+Full detail in [vocabulary-learn.md](vocabulary-learn.md), [grammar-learn.md](grammar-learn.md),
+[listening-learn.md](listening-learn.md), [speaking-learn.md](speaking-learn.md); summary below. All
+four follow one shape: `generate` an AI practice item targeting the learner's own top weak points (or
+an explicit focus list), then `submit` an attempt that grades it and feeds the result back into
+`practice.service.PracticeService#redo` — the same Java-scoring-engine + `learning.gap.analysis.
+requested` mechanism section 3 documents, not a bespoke publisher per skill.
+
+| Skill | Generator | Extra generate-time call | Submit scoring | Weak-point category |
+|---|---|---|---|---|
+| `vocabulary.learn` | `LlmVocabPracticeGenerator` | — | pure `VocabAttemptScorer` | `vocabulary` (existing table) |
+| `grammar.learn` | `LlmGrammarPracticeGenerator` | — | pure `GrammarAttemptScorer` | `grammar` (existing table) |
+| `listening` | `LlmListeningPracticeGenerator` | Supertonic TTS via `DialogueAudioSynthesizer` (multi-speaker) | MCQ/KEYWORD pure scoring + OPEN via `LlmOpenAnswerGrader` (another LLM call) | `listening` (new category — see below) |
+| `speaking` | `LlmSpeakingPracticeGenerator` | Supertonic TTS via `TtsClient` (single voice) | ai-service wav2vec2 GOP via `PronunciationScoringClient` (multipart upload) | `pronunciation` (existing table, reused) |
+
+All four generators are Gemini-only (no rule-based mode) with a static-template fallback on any LLM
+call/parse failure, so `generate` never hard-fails. None of the four packages has its own Kafka
+consumer/producer — they only reach Kafka indirectly through `PracticeService#redo`.
+
 ## Notes
 
 - Idempotency keys: `recording_id` for transcripts, `(user_id, item_id)` for weak points and for
@@ -249,3 +281,14 @@ time) — see [dictation-practice.md](dictation-practice.md) section 4.
 - The diagram in section 4 above predates the `dictation` package's rewrite around a fixed real-audio
   library (see [dictation-practice.md](dictation-practice.md) for the current, accurate flow,
   including rev 2's folder -> file browsing and sentence-mode clip detail).
+- Like `dictation`, none of the four `learn` skills (section 5) has its own Kafka consumer/producer —
+  request flow is triggered synchronously by the FE (through bff-service) and reaches Kafka only via
+  `PracticeService#redo`'s bundled `learning.gap.analysis.requested` publish.
+- **Gap surfaced while documenting section 5:** `LearningCategories.LISTENING` ("listening") is a
+  valid category on `PracticeAttemptRequest`, but `WeakPointDispatcherImpl.dispatch` (called from
+  `WeakPointScoringOrchestrator` during `PracticeService#redo`) only switches on
+  `"vocabulary"`/`"grammar"`/`"pronunciation"` — a `"listening"` attempt falls through to
+  `default -> log.warn(...)` and is silently dropped, so no listening-specific weak-point table is
+  ever written (none exists today, matching this gap). `mistake_history` and the
+  `learning.gap.analysis.requested` re-publish still happen either way, since both are
+  category-agnostic. See [listening-learn.md](listening-learn.md)'s Notes for detail.

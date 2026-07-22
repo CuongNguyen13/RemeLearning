@@ -13,6 +13,20 @@ an exercise. `dictation` is pull-based, not event-driven: it reads `vocabulary`/
 tables in-process to pick sentences, calls out to an LLM and Google Cloud TTS, and stores generated
 audio in S3/MinIO.
 
+**"Học & Luyện tập với AI" — four new "learn" skill packages.** `vocabulary/learn`, `grammar/learn`
+(each nested under their existing domain package), plus two brand-new top-level domains,
+`listening` and `speaking`, add an AI-generate-then-grade loop per skill: generate an AI practice
+item (Gemini text, and for `listening`/`speaking` also Supertonic TTS audio via shared helpers in
+`learn/common/`), let the learner submit an attempt, grade it with a pure in-process scorer (or, for
+`speaking`, ai-service's wav2vec2 GOP model), and — instead of building a fourth weak-point pipeline —
+feed every graded item straight into the **existing** `PracticeService.redo(...)` call used by
+manual redo exercises (`mistake_history`/`WeakPointScoringEngine`/`learning.gap.analysis.requested`,
+see `PracticeFlow` below). `vocabulary`/`grammar` route into their own pre-existing weak-point tables
+this way; `speaking` reuses `pronunciation_weak_points` (category `"pronunciation"`); `listening`
+introduces a brand-new category, `"listening"` (`LearningCategories.LISTENING`), that has **no**
+matching weak-point table — see the `ListeningLearnFlow`/`SpeakingLearnFlow`/`VocabLearnFlow`/
+`GrammarLearnFlow` subgraphs and the note below the diagram.
+
 ```mermaid
 ---
 config:
@@ -76,7 +90,7 @@ flowchart TD
         StreamAudio["GET /clips/{id}/audio -> StorageClient.read stream (mp3/wav)"]
 
         ListFolders["GET /dictation/folders (rev 2)<br/>findDistinctFolders -> List[DictationFolderDto]{folderId, name, lessonCount}"]
-        ListFolderLessons["GET /dictation/folders/{folderId}/lessons (rev 2)<br/>findClipsByFolder -> List[DictationLessonSummaryDto] (no script)"]
+        ListFolderLessons["GET /dictation/folders/{folderId}/lessons/{userId} (rev 3)<br/>findLessonSummariesByFolder (joins per-user attempt agg) -> List[DictationLessonSummaryDto] (no script)"]
         GetClipDetail["GET /dictation/clips/{clipId} (rev 2)<br/>findClipById + findSentencesByClipId -> DictationClipDetailDto{scriptText, sentences[]}"]
         AlignSentences["ensureSentencesAligned (lazy, only if a sentence is missing startMs/endMs)<br/>StorageClient.read(audio) -> SentenceAlignmentClient.align -> ai-service POST /api/v1/dictation/align-sentences<br/>-> updateSentenceTimestamps per matched sentence; failures/no-match just leave nulls"]
 
@@ -84,12 +98,79 @@ flowchart TD
         ScoreDictation["DictationScorer.score(referenceText, userTranscript)<br/>word-level Levenshtein -> WER<br/>(rev 2: FE grades per-sentence client-side first, then reassembles the full transcript here)"]
         ScoreSentenceMistakes["rev 3: DictationScorer.score(expectedText, attemptedText) per sentenceMistakes[] entry<br/>-> extra missing/substituted words merged into the same miss list"]
         InsertAttempt["insertAttempt + insertMisses (missing/substituted words from userTranscript's diff, plus any from ScoreSentenceMistakes)"]
-        Analyze["DictationAnalyzer.analyzeAttempt<br/>rule-based, or Gemini -> suggestions + practice sentences"]
-        PublishGap["DictationGapEventPublisher -> learning.gap.analyzed<br/>(missed words as vocabulary weak points)"]
+        Analyze["DictationAnalyzer.analyzeAttempt(referenceText, userTranscript, diff)<br/>rule-based heuristic, or Gemini -> root-cause-classified errorTable (LEXICON/GRAMMAR/PHONOLOGY) + rootCauses + actionAdvice + practice sentences"]
+        PublishGap["DictationGapEventPublisher -> learning.gap.analyzed<br/>toLearningCategory: LEXICON-&gt;vocabulary, GRAMMAR-&gt;grammar, PHONOLOGY-&gt;pronunciation<br/>(unclassified word, e.g. a sentence-mode retry miss -> vocabulary)"]
 
         AiGen["POST /ai-practice/{userId}/generate<br/>{level?, examType?, translationLang?} -> resolveLevel/resolveExamType (concrete value, RANDOM from a fixed CEFR pool<br/>A1/A2/B1/B2/C1 or the library's own distinct exam types w/ TOEIC/IELTS/TOEFL/General fallback, or unset)<br/>-> pending items' text (or top missed words if none pending) + resolved level/examType/translationLang -> LlmDictationDialogueGenerator (Gemini)<br/>-> one monologue/multi-speaker dialogue with a topic label + parallel per-line translation (only if translationLang != en)<br/>-> random voice per speaker -> Supertonic (ai-service) per line, synthesized from the SAME text persisted as the graded sentence<br/>-> WavAudioMerger -> one merged file -> StorageClient.write -> replaces prior pending items"]
         AiGenFromAttempt["POST /dictation/history/{userId}/{attemptId}/ai-practice<br/>{translationLang?} -> one attempt's own missed words -> same LlmDictationDialogueGenerator as AiGen (level/examType left unset)<br/>-> Supertonic (ai-service) -> StorageClient.write"]
         GetAiPracticeDetail["GET /dictation/ai-practice/items/{practiceItemId}/detail<br/>findPracticeItemById + splitIntoSentences(sentenceText, translationText) (zips translation per sentence)<br/>-> DictationPracticeItemDetailDto{scriptText, level, examType, topic, sentences[]} (startMs/endMs always null, one merged audio file)"]
+    end
+
+    subgraph VocabLearnFlow["Vocabulary learn (package vocabulary.learn)"]
+        VLGenReq["POST /api/v1/learn/vocabulary/{userId}/generate<br/>{level?, examType?, focusItems?}"]
+        VLResolveWords["resolveTargetWords: focusItems, else learner's own<br/>top vocabularyWeakPointService weak points (limit 8)"]
+        VLGenerate["VocabPracticeGenerator.generate(words, level, examType)<br/>LLM (Gemini) -> GeneratedVocabPractice{topic, items[]}<br/>each item: CLOZE / MCQ / MATCHING"]
+        VLInsertItem["insertItem"]
+        VLSubmitReq["POST /api/v1/learn/vocabulary/attempts<br/>{userId, practiceItemId, answers[]}"]
+        VLScore["VocabAttemptScorer.score(questions, answers)<br/>pure per-question exact-match -> {accuracy, perQuestionCorrect[]}"]
+        VLInsertAttempt["insertAttempt"]
+        VLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct target word<br/>itemId=vocab:&lt;word&gt;, category=vocabulary"]
+    end
+
+    subgraph GrammarLearnFlow["Grammar learn (package grammar.learn) - structural clone of VocabLearnFlow"]
+        GLGenReq["POST /api/v1/learn/grammar/{userId}/generate<br/>{level?, examType?, focusItems?}"]
+        GLResolveRules["resolveTargetRules: focusItems, else learner's own<br/>top grammarWeakPointService weak points (limit 8)"]
+        GLGenerate["GrammarPracticeGenerator.generate(rules, level, examType)<br/>LLM (Gemini) -> GeneratedGrammarPractice{topic, items[]}<br/>each item: ERROR_CORRECTION / FILL_TENSE / TRANSFORM / MCQ"]
+        GLInsertItem["insertItem"]
+        GLSubmitReq["POST /api/v1/learn/grammar/attempts<br/>{userId, practiceItemId, answers[]}"]
+        GLScore["GrammarAttemptScorer.score(questions, answers)<br/>pure per-question exact-match -> {accuracy, perQuestionCorrect[]}"]
+        GLInsertAttempt["insertAttempt"]
+        GLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct target rule<br/>itemId=grammar:&lt;rule&gt;, category=grammar"]
+    end
+
+    subgraph ListeningLearnFlow["Listening learn (package listening, brand-new domain)"]
+        LLGenReq["POST /api/v1/learn/listening/{userId}/generate<br/>{level?, examType?, translationLang?, focusItems?}"]
+        LLResolveKw["resolveTargetKeywords: focusItems, else the learner's own past<br/>wrong KEYWORD answers (own attempt history - no weak-point table)"]
+        LLGenerate["ListeningPracticeGenerator.generate(keywords, level, examType, translationLang)<br/>LLM (Gemini) -> transcript + MCQ/KEYWORD/OPEN questions + optional translation"]
+        LLSynthesize["DialogueAudioSynthesizer.synthesize(lines, ttsLang)<br/>Supertonic TTS per line, merged -> {transcriptText, translationText, audioBytes}"]
+        LLInsertItem["insertItem + StorageClient.write(audio) -> storageKey"]
+        LLSubmitReq["POST /api/v1/learn/listening/attempts<br/>{userId, practiceItemId, answers[]}"]
+        LLScoreClosed["ListeningQuestionScoring.scoreClosed<br/>MCQ exact-match, or KEYWORD WER (like DictationScorer)"]
+        LLScoreOpen["OpenAnswerGrader.grade(transcript, prompt, modelAnswer, submitted)<br/>LLM (Gemini) -> {score 0..1, feedback}"]
+        LLInsertAttempt["insertAttempt (answersJson + resultsJson + score)"]
+        LLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct label<br/>(KEYWORD answer, or MCQ/OPEN's skill) - itemId=listening:&lt;label&gt;, category=listening"]
+    end
+
+    subgraph SpeakingLearnFlow["Speaking learn (package speaking, brand-new domain)"]
+        SLGenReq["POST /api/v1/learn/speaking/{userId}/generate<br/>{level?, examType?, focusItems?}"]
+        SLResolveWords["resolveTargetWords: focusItems, else learner's own<br/>top pronunciationWeakPointService weak points (limit 8)"]
+        SLGenerate["SpeakingPracticeGenerator.generate(words, level, examType)<br/>LLM (Gemini) -> {topic, targetText, translation}"]
+        SLSynthesizeSample["TtsClient.synthesize(targetText, 1 voice)<br/>Supertonic -> sample audio -> StorageClient.write -> storageKey"]
+        SLSubmitReq["POST /api/v1/learn/speaking/{userId}/attempts (multipart)<br/>{practiceItemId, audio}"]
+        SLStoreAudio["StorageClient.write(learner audio)<br/>speaking/attempts/&lt;userId&gt;/&lt;uuid&gt;.wav"]
+        SLScore["PronunciationScoringClient.score(audio, targetText, lang)<br/>-&gt; ai-service GOP endpoint (see note below)<br/>-&gt; {overall, words[{word, score, phonemes[{ipa, score}]}], transcript, weakPhonemes[]}"]
+        SLInsertAttempt["insertAttempt (overallScore + wordScoresJson + transcript + weakPhonemesJson)"]
+        SLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct word<br/>(score &gt;= 0.6 = correct) - itemId=pronunciation:&lt;word&gt;, category=pronunciation"]
+    end
+
+    subgraph VocabularyLibraryFlow["Vocabulary library (package vocabulary.library) - extends VocabLearnFlow"]
+        LibStartReq["POST /.../library/{userId}/topics/{topicId}/sections<br/>{sectionSize?}"]
+        LibCountCheck{"library word count for topic &lt; sectionSize?"}
+        LibGenerate["LlmLibraryWordGenerator.generate(topic, existingWords, 15)<br/>LLM (Gemini) -> GeneratedLibraryWord[]{word, wordType, meaningVi, exampleEn}<br/>(empty list, not a template, on call/parse failure)"]
+        LibInsertWord["insert per generated word"]
+        LibTts["TtsClient.synthesize(word, lang=en) -> wav bytes<br/>(once per new word, never at Section-runtime)"]
+        LibStorageWrite["StorageClient.write(vocab-library/{topicId}/{wordId}.wav)<br/>-> updateAudioStorageKey(storageKey)"]
+        LibPickWords["findNotYetMasteredByTopicId (+ findRandomByTopicIdExcluding fallback)"]
+        LibQueueInit["SectionQueue.initial(wordIds)<br/>-> SectionQueueEntry[]{wordId, streak=0, introShown=false} (shuffled)"]
+        LibInsertSection["insertAttempt -> {status=IN_PROGRESS, libraryWordIdsJson, queueStateJson}"]
+
+        LibAnswerReq["POST /.../library/sections/{sectionId}/answers<br/>{submittedAnswer?}"]
+        LibScore["SectionAnswerScoring.scoreClosed (WER/exact-match),<br/>or OpenAnswerGrader.grade (LLM, TRANSLATE_EN_TO_VI only)"]
+        LibInsertAnswer["insertAnswer"]
+        LibApplyQueue["SectionQueue.applyResult(queue, correct)<br/>-> updated SectionQueueEntry[] (streak++/reset, requeue +6/+2, drop if streak==2)"]
+        LibUpdateQueueState["updateAttemptQueueState -> updated queue_state JSON"]
+        LibComplete["completeAttempt('COMPLETED' | 'ABANDONED' if finished early) when queue empty"]
+        LibFeed["feedWeakPoints: one PracticeAttemptRequest per<br/>vocabulary_section_answers row (NOT deduped by word)"]
     end
 
     subgraph Storage["reme_english DB"]
@@ -106,6 +187,18 @@ flowchart TD
         T11[("dictation_attempts")]
         T12[("dictation_practice_items")]
         T13[("dictation_clip_sentences")]
+        T14[("vocab_practice_items")]
+        T15[("vocab_practice_attempts")]
+        T16[("grammar_practice_items")]
+        T17[("grammar_practice_attempts")]
+        T18[("listening_practice_items")]
+        T19[("listening_attempts")]
+        T20[("speaking_practice_items")]
+        T21[("speaking_attempts")]
+        T22[("vocabulary_topics")]
+        T23[("vocabulary_library_words")]
+        T24[("vocabulary_section_attempts")]
+        T25[("vocabulary_section_answers")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -114,7 +207,7 @@ flowchart TD
         GetWeakG["GET /api/v1/grammar/weak-points/{userId}[/grouped]<br/>-> List or Map[GrammarType, List]"]
         GetWeakP["GET /api/v1/pronunciation/weak-points/{userId}[/grouped]<br/>-> List or Map[PronunciationType, List]"]
         GetDictationHistory["GET /api/v1/dictation/history/{userId}<br/>-> List[DictationHistoryEntryDto]{attemptId, clipId, title, skill,<br/>level, examType, accuracy, wer, attemptedAt, attemptCount, practiceType}"]
-        GetAttemptDetail["GET /api/v1/dictation/history/{userId}/{attemptId}<br/>findAttemptDetailByIdAndUserId + findMissesByAttemptId<br/>-> DictationAttemptDetailDto{referenceText, userTranscript, mistakes[], aiSuggestions[]}"]
+        GetAttemptDetail["GET /api/v1/dictation/history/{userId}/{attemptId}<br/>findAttemptDetailByIdAndUserId + findMissesByAttemptId<br/>-> DictationAttemptDetailDto{referenceText, userTranscript, mistakes[], errorTable[], rootCauses[], actionAdvice[]}"]
     end
 
     subgraph Output["Output (to ai-service via Kafka)"]
@@ -158,6 +251,7 @@ flowchart TD
     DispatchDomain -->|category=vocabulary| T3
     DispatchDomain -->|category=grammar| T4
     DispatchDomain -->|category=pronunciation| T5
+    DispatchDomain -->|category=listening| NoDispatch["WeakPointDispatcherImpl: no case for 'listening'<br/>-> log.warn, computed score dropped<br/>(mistake_history/item_difficulty_stats above are still updated)"]
     RecordAttempt --> BuildHistory
     T6 --> BuildHistory
     BuildHistory --> PublishAR --> AREvent
@@ -206,6 +300,53 @@ flowchart TD
     AiGenFromAttempt --> T12
 
     T12 --> GetAiPracticeDetail
+
+    VLGenReq --> VLResolveWords --> VLGenerate --> VLInsertItem --> T14
+    VLSubmitReq --> VLScore --> VLInsertAttempt --> T15
+    VLScore --> VLFeed
+    VLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    VLFeed -.same.-> LockPrior
+
+    GLGenReq --> GLResolveRules --> GLGenerate --> GLInsertItem --> T16
+    GLSubmitReq --> GLScore --> GLInsertAttempt --> T17
+    GLScore --> GLFeed
+    GLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    GLFeed -.same.-> LockPrior
+
+    LLGenReq --> LLResolveKw --> LLGenerate --> LLSynthesize --> LLInsertItem --> T18
+    LLSubmitReq --> LLScoreClosed
+    LLSubmitReq --> LLScoreOpen
+    LLScoreClosed --> LLInsertAttempt --> T19
+    LLScoreOpen --> LLInsertAttempt
+    LLInsertAttempt --> LLFeed
+    LLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    LLFeed -.same.-> LockPrior
+
+    SLGenReq --> SLResolveWords --> SLGenerate --> SLSynthesizeSample --> T20
+    SLSubmitReq --> SLStoreAudio --> SLScore --> SLInsertAttempt --> T21
+    SLScore --> SLFeed
+    SLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    SLFeed -.same.-> LockPrior
+
+    T22 --> LibStartReq
+    LibStartReq --> LibCountCheck
+    LibCountCheck -->|yes, under-stocked| LibGenerate --> LibInsertWord --> T23
+    LibInsertWord --> LibTts --> LibStorageWrite --> T23
+    LibCountCheck -->|no| LibPickWords
+    LibStorageWrite --> LibPickWords
+    T23 --> LibPickWords
+    LibPickWords --> LibQueueInit --> LibInsertSection --> T24
+
+    LibAnswerReq --> LibScore
+    T24 --> LibScore
+    LibScore --> LibInsertAnswer --> T25
+    LibInsertAnswer --> LibApplyQueue --> LibUpdateQueueState --> T24
+    LibApplyQueue -->|queue empty| LibComplete --> T24
+    LibComplete --> LibFeed
+    T25 --> LibFeed
+    LibFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    LibFeed -.same.-> LockPrior
+    LibFeed -.shares vocab:&lt;word&gt; itemId, same table.-> T3
 ```
 
 ## Data shape at each stage
@@ -235,18 +376,57 @@ flowchart TD
 | `DictationClipDto` | `{clipId, code, title, skill, level, topic, examType, audioUrl}` | REST response for browse/session; omits the script |
 | `dictation_clip_sentences` row (rev 2, translation rev 7) | `{id, clip_id, seq, text, start_ms?, end_ms?, translation?, created_at}` | one row per script line, upserted on `(clip_id, seq)`; `start_ms`/`end_ms` stay null until `GetClipDetail`'s lazy AI-alignment step matches that sentence; `translation` (rev 7) stays null until `ensureSentencesTranslated` fills it for a requested non-"en" `translationLang` |
 | `DictationFolderDto` (rev 2) | `{folderId, name, lessonCount}` | REST response for `GET /dictation/folders` |
-| `DictationLessonSummaryDto` (rev 2) | `{clipId, code, title, audioUrl}` | REST response for `GET /dictation/folders/{folderId}/lessons`; no script |
+| `DictationLessonSummaryDto` (rev 3) | `{clipId, code, title, audioUrl, level, sentenceCount, attemptCount?, latestAccuracy?}` | REST response for `GET /dictation/folders/{folderId}/lessons/{userId}`; no script. `sentenceCount` stands in for a duration estimate; `attemptCount`/`latestAccuracy` are the requesting learner's own progress, null when never attempted |
 | `DictationClipDetailDto` (rev 2, translation rev 7) | `{clipId, code, title, audioUrl, scriptText, sentences: [{index, text, startMs?, endMs?, translation?}]}` | REST response for `GET /dictation/clips/{clipId}?translationLang=`; the only rev-2 endpoint that exposes the script, and only for the one clip opened; `translation` lazily filled the same way `startMs`/`endMs` are, gated on `translationLang` being present and not "en" |
 | `DictationAttemptRequest` | `{userId, clipId? | practiceItemId?, userTranscript, sentenceMistakes?: [{sentenceIndex, expectedText, attemptedText}]}` | REST request body; exactly one of clipId/practiceItemId; `sentenceMistakes` (rev 3) only sent for sentence-mode retries, scored separately and merged into the same miss list as `userTranscript`'s diff |
 | `DictationScoreResult` (in-memory) | `{accuracy, wer, diff: [{tag: CORRECT|SUBSTITUTED|MISSING|EXTRA, actualWord, expectedWord}]}` | output of `DictationScorer.score`, a pure word-level Levenshtein alignment |
 | `dictation_misses` row | `{id, attempt_id, user_id, clip_id, expected_word, actual_word, tag, created_at}` | one row per wrong word; drives AI analysis + the published forgetting score |
-| `dictation_attempts` row | `{id, clip_id?, practice_item_id?, user_id, user_transcript, accuracy, wer, ai_suggestions?, created_at}` | one row per graded submission, full history kept; `ai_suggestions` (new) is a JSON-encoded array of the suggestions generated at submit time, null for attempts made before this column existed |
+| `dictation_attempts` row | `{id, clip_id?, practice_item_id?, user_id, user_transcript, accuracy, wer, ai_suggestions?, created_at}` | one row per graded submission, full history kept; `ai_suggestions` is a JSON-encoded `DictationAnalysis` (`errorTable`/`rootCauses`/`actionAdvice`/`practiceSentences`) generated at submit time - column name predates this shape; attempts from before it shipped stored a plain string array, read back as `actionAdvice` with empty `errorTable`/`rootCauses`; null for attempts made before the column existed |
 | `dictation_practice_items` row | `{id, user_id, sentence_text, source, storage_key?, level?, exam_type?, topic?, translation_text?, created_at}` | `AiGenFromAttempt`: one row per generated passage (level/exam_type left null - no facet selector on this entry point); `AiGen` (rev 5, taxonomy rev 7): one row for the whole generated dialogue passage (`sentence_text` = full passage, `"Speaker: line"` per turn if multi-speaker); `level`/`exam_type`/`topic` (rev 7) = the resolved facets (concrete or RANDOM-resolved) plus the LLM's own topic label; `translation_text` (rev 7) is the parallel per-line translation, populated only when `translationLang` was requested and isn't "en"; `storage_key` set once Supertonic audio synthesized/merged |
 | `GenerateAiPracticeRequest` (rev 7) | `{level?, examType?, translationLang?}` | REST request body for `AiGen`; `level`/`examType` each accept a concrete value, the literal `"RANDOM"` (server resolves it - level from `A1,A2,B1,B2,C1`, examType from the library's own distinct exam types, falling back to `TOEIC,IELTS,TOEFL,General`), or unset (no preference, LLM's own default) |
 | `DictationPracticeItemDetailDto` (rev 6, taxonomy+translation rev 7) | `{practiceItemId, audioUrl, scriptText, level?, examType?, topic?, sentences: [{index, text, startMs: null, endMs: null, translation?}]}` | REST response for `GetAiPracticeDetail`; `sentences` split in-memory from `sentence_text`/`translation_text` in parallel (one per dialogue line, or by sentence-ending punctuation for a monologue) - mirrors `DictationClipDetailDto` but timings are always null since the passage is one merged audio file |
-| `DictationAttemptResultDto` | `{referenceText, accuracy, wer, diff[], aiSuggestions[], practiceSentences[]}` | REST grading response; only point `script_text` is exposed |
-| published `learning.gap.analyzed` | `{recording_id: "dictation-clip-<id>", user_id, weak_points: [{item_id: "dictation:<word>", category: "vocabulary", label, forgetting_score}]}` | dictation misses fed into the existing recommendation pipeline |
+| `DictationAttemptResultDto` | `{referenceText, accuracy, wer, diff[], errorTable: [{original, transcribed, category: LEXICON\|GRAMMAR\|PHONOLOGY, note?}], rootCauses: [{category, summary, examples[]}], actionAdvice[], practiceSentences[]}` | REST grading response; `rootCauses` only lists categories that actually occurred; only point `script_text` is exposed |
+| published `learning.gap.analyzed` | `{recording_id: "dictation-clip-<id>", user_id, weak_points: [{item_id: "dictation:<word>", category: vocabulary\|grammar\|pronunciation, label, forgetting_score, recommendation: actionAdvice[0]}]}` | **category is per-word, not always `"vocabulary"`**: `toLearningCategory` maps each missed word's `errorTable` root-cause (`LEXICON`/`GRAMMAR`/`PHONOLOGY`) to `vocabulary`/`grammar`/`pronunciation`; a word with no `errorTable` entry (e.g. a sentence-mode-retry miss, which never goes through `DictationAnalyzer`) defaults to `vocabulary`; dictation misses fed into the existing recommendation pipeline this way |
 | `DictationHistoryEntryDto.practiceType` | `LIBRARY \| AI_PRACTICE` | derived in Java from `clipId` being present/null - not a DB column - so the FE can badge each history row |
+| `GenerateVocabPracticeRequest` / `GenerateGrammarPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body; `focusItems` (explicit words/rules from a "Luyện ngay" deep-link) wins over the learner's own weak points |
+| `vocab_practice_items` / `grammar_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_words\|target_rules (JSON string[]), items (JSON `VocabQuestionItem[]`\|`GrammarQuestionItem[]`), created_at}` | one row per generated set; `items` holds the full graded content (prompt/type/options/answer/translation), never sent back on `getItem`/`listItems` (see `VocabQuestionDto`/`GrammarQuestionDto` below) |
+| `VocabQuestionItem` | `{targetWord, type: CLOZE\|MCQ\|MATCHING, prompt, options?, answer, translation}` | `options` null for `CLOZE`; JSON element of `vocab_practice_items.items` |
+| `GrammarQuestionItem` | `{targetRule, type: ERROR_CORRECTION\|FILL_TENSE\|TRANSFORM\|MCQ, prompt, options?, answer, translation}` | `options` only for `MCQ`; JSON element of `grammar_practice_items.items` |
+| `VocabQuestionDto` / `GrammarQuestionDto` (REST) | `{index, prompt, type, options?}` | `getItem`/`listItems` response - omits `answer`/`translation` so the learner can't see the key before submitting |
+| `SubmitVocabAttemptRequest` / `SubmitGrammarAttemptRequest` | `{userId, practiceItemId, answers: string[]}` | REST request body, one answer per question index |
+| `VocabScoreResult` / `GrammarScoreResult` (in-memory) | `{accuracy, perQuestionCorrect: boolean[]}` | pure exact-match scorer, no partial credit |
+| `vocab_practice_attempts` / `grammar_practice_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), score, created_at}` | one row per submission, full history kept |
+| `VocabAttemptResultDto` / `GrammarAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, translation}], actionAdvice[]}` | REST grading response |
+| `PracticeAttemptRequest` fed from vocabulary/grammar learn | `{itemId: "vocab:<word>"\|"grammar:<rule>", category: "vocabulary"\|"grammar", label, correct}` | one per distinct target word/rule in the submitted attempt (dedup by lower-cased label), passed straight into `PracticeService.redo(...)` - **not** a new event, reuses `PracticeFlow`'s existing scoring/dispatch |
+| `GenerateListeningPracticeRequest` | `{level?, examType?, translationLang?, focusItems?}` | REST request body |
+| `listening_practice_items` row | `{id, user_id, level?, exam_type?, topic, transcript, translation?, questions (JSON `ListeningQuestionItem[]`), storage_key?, created_at}` | one row per generated passage; audio synthesized synchronously in the same call, `storage_key` set before the row is returned |
+| `ListeningQuestionItem` | `{type: MCQ\|KEYWORD\|OPEN, skill, prompt, options?, answer, explanation}` | `skill` (e.g. "main-idea"/"detail"/"attitude"/"keyword") doubles as the weak-point label for non-`KEYWORD` questions; `options` only for `MCQ`; `answer` is the correct option (`MCQ`), expected phrase (`KEYWORD`, scored by WER), or model answer (`OPEN`, used as the LLM grading reference) |
+| `SubmitListeningAttemptRequest` | `{userId, practiceItemId, answers: string[]}` | REST request body |
+| `OpenAnswerGrade` (in-memory) | `{score: 0..1, feedback}` | `OpenAnswerGrader` (LLM) output for `OPEN` questions only; `MCQ`/`KEYWORD` are scored by the pure `ListeningQuestionScoring.scoreClosed` instead |
+| `listening_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), results (JSON `ListeningAttemptQuestionResultDto[]`), score, created_at}` | `score` = mean of all `subScore`s (each question's own 0..1) |
+| `ListeningAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, subScore, explanation}], transcript, translation?, actionAdvice[]}` | REST grading response; `transcript`/`translation` returned **only** on this response, not on `getItem`/`listItems` (those would leak the answer) |
+| `PracticeAttemptRequest` fed from listening learn | `{itemId: "listening:<label>", category: "listening", label, correct}` | one per distinct label (KEYWORD's `answer`, or MCQ/OPEN's `skill`); **`category = "listening"` has no matching consumer in `WeakPointDispatcherImpl`** - `mistake_history`/`item_difficulty_stats`/the review queue and `learning.gap.analysis.requested`'s `history[]` still pick it up (all category-agnostic), but no `listening_weak_points` table exists and the Java-computed score for it is simply logged and dropped - see the note below |
+| `GenerateSpeakingPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body |
+| `speaking_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_text, translation?, storage_key?, created_at}` | one row per generated sentence/passage; `storage_key` is the Supertonic **sample** (model) recording, synthesized with one fixed voice (unlike listening's multi-speaker dialogue) |
+| `SpeakingAttemptRequest` (multipart) | `{userId (path), practiceItemId, audio (multipart file)}` | REST request; audio persisted to `StorageClient` before scoring, so a scoring failure still leaves the recording retrievable |
+| `PronunciationScore` (in-memory, from ai-service) | `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weakPhonemes: string[]}` | decoded from ai-service's `POST /api/v1/pronunciation/score` JSON response via `PronunciationScoringClient` (`common.ai.pronunciation`) - see the ai-service GOP note below |
+| `speaking_attempts` row | `{id, practice_item_id, user_id, audio_storage_key, overall_score, word_scores (JSON `WordScoreDto[]`), transcript?, weak_phonemes (JSON string[]), created_at}` | one row per recorded submission |
+| `SpeakingAttemptResultDto` | `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weakPhonemes[], actionAdvice[]}` | REST grading response |
+| `PracticeAttemptRequest` fed from speaking learn | `{itemId: "pronunciation:<word>", category: "pronunciation", label, correct: score >= 0.6}` | one per distinct word in `words[]`; reuses `pronunciation_weak_points` (the same table ai-service's original forgetting-pattern pipeline and `english-service`'s own `pronunciation.kafka` consumer write to) - no new table, unlike `listening` |
+| `vocabulary_topics` row | `{id, name, description?, created_at}` | fixed topic list (Du lịch, Công việc, Đời sống hàng ngày, Ẩm thực, Công nghệ, Sức khỏe, Giáo dục, Môi trường), seeded once, not learner-specific |
+| `GeneratedLibraryWord` | `{word, wordType, meaningVi, exampleEn}` | LLM JSON, one per new word `LlmLibraryWordGenerator` asks Gemini for when a topic is under-stocked; empty list (not a template) on any call/parse failure |
+| `vocabulary_library_words` row | `{id, topic_id, word, word_type, meaning_vi, example_en, audio_storage_key?, created_at}` | one row per generated word; `audio_storage_key` set right after synthesis, so a TTS failure still leaves the word itself usable (just no audio) |
+| `SectionStartRequest` | `{sectionSize?}` | REST request body; defaults to 10 words |
+| `SectionQueueEntry` (JSON in `queue_state`) | `{wordId, streak, introShown, pendingExerciseType?}` | one entry per word still in play; `SectionQueue.initial` builds the starting list (shuffled, `streak=0`, `introShown=false`) |
+| `vocabulary_section_attempts` row | `{id, user_id, topic_id, status: IN_PROGRESS\|COMPLETED\|ABANDONED, section_size, library_word_ids_json, queue_state_json, created_at, completed_at?}` | `queue_state_json` is the live `SectionQueueEntry[]`, rewritten on every answer until the queue empties or the learner quits early (`ABANDONED`) |
+| `SectionCardDto` | `{cardKind: INTRO\|QUIZ, word?, meaningVi?, exampleEn?, audioUrl?, exerciseType?, progress}` | REST response for both start-section and the next-card half of submit-answer; `SectionCardBuilder` omits any field that would leak the answer for the card's `exerciseType` (e.g. no `audioUrl` on CLOZE/MCQ) |
+| `SubmitSectionAnswerRequest` | `{submittedAnswer?}` | REST request body; absent for exercise types with no free-text answer |
+| `SectionAnswerScore` (in-memory) | `{score, correct}` | `SectionAnswerScoring.scoreClosed` (WER or exact-match) for every exercise type except `TRANSLATE_EN_TO_VI` |
+| `OpenAnswerGrade` (in-memory) | `{score, feedback}` | `OpenAnswerGrader.grade` (LLM) output, `TRANSLATE_EN_TO_VI` only - same grader `listening`'s `OPEN` questions use |
+| `vocabulary_section_answers` row | `{id, section_attempt_id, library_word_id, exercise_type, submitted_answer?, score, correct, created_at}` | one row per answer submitted, full in-session repetition history kept (a word can appear more than once per section) |
+| `SectionQueueEntry` (post-`applyResult`) | `{wordId, streak, introShown, pendingExerciseType?}` | `SectionQueue.applyResult` drops the word (mastered) at `streak==2`, else requeues it `+6` cards on a correct-not-yet-mastered answer or `+2` cards (streak reset to `0`) on a wrong one |
+| `SectionAnswerResultDto` | `{correct, correctAnswer?, completed, nextCard?, progress}` | REST grading response; `nextCard` is null once `completed=true` |
+| `PracticeAttemptRequest` fed from vocabulary library | `{itemId: "vocab:<word>", category: "vocabulary", label, correct}` | one per `vocabulary_section_answers` row for the completed/abandoned attempt, **NOT** deduped by word (unlike `VocabLearnFlow`'s `VLFeed`) - a word answered 3 times in one Section produces 3 requests, so a same-batch repeat sets `recurredInBatch=true` in `WeakPointScoringEngine`, the entire point of in-session repetition; shares `vocabulary_weak_points` with `VocabLearnFlow` (same `item_id` scheme), no second mastery table |
 
 ## Where data comes from / where it can go next
 
@@ -372,3 +552,97 @@ flowchart TD
   is present and not `"en"` (the content's own language); for the library this is lazy-filled via
   `ensureSentencesTranslated` (mirroring `ensureSentencesAligned`'s shape), for AI-practice it's
   generated inline as part of the same Gemini call that writes the passage.
+- **New: four "Học & Luyện tập với AI" learn skills (`VocabLearnFlow`/`GrammarLearnFlow`/
+  `ListeningLearnFlow`/`SpeakingLearnFlow` above), reusing `PracticeService.redo(...)` instead of a
+  new pipeline.** `vocabulary/learn` and `grammar/learn` are structural clones of each other
+  (generate an AI practice set targeting the learner's own weak points -> grade a submitted attempt
+  with a pure in-memory scorer -> feed each graded word/rule into `PracticeService.redo(...)`).
+  `listening` and `speaking` are brand-new top-level domains that follow the same generate/grade/feed
+  shape but with heavier generation (Gemini dialogue + Supertonic TTS for `listening`; Gemini sentence
+  + one-voice Supertonic sample for `speaking`) and, for `speaking`, LLM-based grading replaced by
+  ai-service's wav2vec2 GOP model instead of a pure-Java scorer. All four call
+  `practiceService.redo(...)` as a **direct in-process method call**, not a second HTTP round-trip to
+  `POST /api/v1/practice/redo` - so they get `mistake_history`, `WeakPointScoringEngine`, and the
+  bundled `learning.gap.analysis.requested` re-publish for free, exactly like a manual redo exercise.
+- **`category = "listening"` is new and has no dedicated weak-point table.** Unlike `vocabulary`/
+  `grammar`/`pronunciation` (each backed by its own `*_weak_points` table and Kafka consumer),
+  `LearningCategories.LISTENING` (`RemeLearning/common/.../constants/LearningCategories.java`) has no
+  matching branch in `WeakPointDispatcherImpl.dispatch` - a `listening` attempt still updates
+  `mistake_history`/`item_difficulty_stats` (category-agnostic) and still surfaces in the learner's
+  `mistake_history`-driven review queue and in `learning.gap.analysis.requested`'s `history[]`, but the
+  Java-computed weak score itself is discarded (`log.warn("Unknown category ...")`), and `dictation`'s
+  `learning.gap.analyzed` republish / ai-service's original forgetting pipeline never emit `"listening"`
+  either, so **no Kafka consumer anywhere persists a `listening` weak point today**. Per
+  `V14__listening_practice.sql`'s own migration comment, target-word/keyword selection for regenerating
+  listening practice is instead read straight from this service's own `listening_attempts`/
+  `listening_practice_items` history (`ListeningLearnServiceImpl.resolveTargetKeywords`), the same way
+  `dictation` mines its own miss table rather than a shared weak-point table. If a `listening_weak_points`
+  table is ever added, `WeakPointDispatcherImpl` would need a new `"listening"` case wired to it.
+- **New: `vocabulary.library` (topic word bank + Leitner-lite Section practice), extending
+  `VocabLearnFlow` above.** Three transformations distinct from call order (see
+  [../sequence/English_service/vocabulary-library.md](../sequence/English_service/vocabulary-library.md)
+  for the call-order view):
+
+  ```mermaid
+  flowchart LR
+      LLMJson["GeneratedLibraryWord<br/>(LLM JSON)"] --> LibRow["vocabulary_library_words row"]
+      LibRow --> TtsBytes["synthesized .wav bytes<br/>(TtsClient)"]
+      TtsBytes --> StorageKey["storage key<br/>(vocab-library/{topicId}/{wordId}.wav)"]
+  ```
+
+  ```mermaid
+  flowchart LR
+      QState1["queue_state JSON<br/>(SectionQueueEntry[])"] --> Apply["SectionQueue.applyResult"]
+      Apply --> QState2["updated queue_state JSON"]
+  ```
+
+  ```mermaid
+  flowchart LR
+      Answers["vocabulary_section_answers rows"] --> Attempts["PracticeAttemptRequest[]<br/>(one per answer, unfiltered)"]
+      Attempts --> Engine["WeakPointScoringEngine"]
+  ```
+
+  A library word is generated once per topic-under-stock event (Gemini JSON -> a persisted row, then
+  a one-time TTS pass to attach playable audio), not once per Section start. A Section's queue state
+  is pure in-memory JSON round-tripped through `vocabulary_section_attempts.queue_state_json` on every
+  answer - `SectionQueue.applyResult` is a pure function, the DB is only ever a snapshot of its
+  before/after state. Grading feeds `PracticeService#redo` exactly like `VocabLearnFlow`'s `VLFeed`,
+  except **unfiltered by word** - every `vocabulary_section_answers` row becomes its own
+  `PracticeAttemptRequest`, so a word drilled three times in one Section produces three requests
+  batched into the same `redo` call, letting `WeakPointScoringEngine`'s same-batch recurrence boost
+  see the in-session repetition the whole Section design exists to create.
+- **Dictation's published `learning.gap.analyzed` no longer always uses category `"vocabulary"`.**
+  `DictationServiceImpl.publishWeakPoints`/`toLearningCategory` now map each missed word's
+  `DictationAnalyzer`-assigned root cause - `LEXICON`/`GRAMMAR`/`PHONOLOGY` (the same `errorTable`
+  categories `DictationAttemptResultDto` returns) - onto `LearningCategories.VOCABULARY`/`GRAMMAR`/
+  `PRONUNCIATION` respectively, so a dictation session's misses now fan out across all three existing
+  domain consumers/tables instead of only ever landing in `vocabulary_weak_points`. A word with no
+  `errorTable` entry (only possible for a sentence-mode-retry miss, scored via `ScoreSentenceMistakes`
+  rather than `DictationAnalyzer`) still defaults to `vocabulary`, preserving the old behavior for that
+  one case. This is a pure category-routing change - the published event's shape, the
+  `learning.gap.analyzed` topic, and the downstream consumer fan-out are otherwise unchanged.
+- **ai-service's pronunciation-scoring stage (`app/pronunciation/`), consumed by `SpeakingLearnFlow`
+  above.** Mirrors the style of ai-service's own STT/forgetting-score pipeline documented in
+  [ai-service-data-flow.md](ai-service-data-flow.md), but that file does not yet cover this new
+  endpoint - summarized here since `speaking`'s `SLScore` step is its only caller today.
+  `POST /api/v1/pronunciation/score` (multipart: learner `audio` + `expected_text`, `lang`) runs: (1)
+  **G2P** (`app/pronunciation/g2p.py`, `g2p_en` backed) turns `expected_text` into its expected ARPAbet
+  phoneme sequence, one `WordPhonemes{word, phones[]}` per word (stress digits stripped - GOP scores
+  phone identity, not lexical stress); (2) the audio (already-converted 16kHz mono WAV) is run through
+  **`facebook/wav2vec2-lv-60-espeak-cv-ft`** (`app/pronunciation/gop_model.py`, `Wav2Vec2ForCTC`) to get
+  per-~20ms-frame log-probabilities over its own phoneme vocabulary (`log_probs[T, V]`) - deliberately
+  bypassing `Wav2Vec2Processor`'s phonemizer/espeak-ng-dependent tokenizer, using only the acoustic
+  logits plus a raw `vocab.json` id->label map; (3) the **GOP scorer** (`app/pronunciation/gop_scorer.py`,
+  a simplified GOP - see its module docstring for the tradeoff vs. textbook forced-alignment GOP)
+  greedy-decodes the model's own most-likely phone per frame and collapses repeats into segments, then
+  Wagner-Fischer edit-distance-aligns that recognized sequence against the expected phone sequence
+  (same algorithm `DictationScorer.java` uses for words, applied to phones); each aligned expected
+  phone is scored by the mean posterior *of that expected phone* over its aligned frames (a phone with
+  no alignment match scores 0); (4) per-word scores are the mean of their phones' scores, `overall` is
+  the mean across all phones, and phones below `WEAK_PHONEME_THRESHOLD` (0.4) are surfaced in
+  `weak_phonemes` (deduplicated). Separately (not part of GOP scoring itself), the same Whisper engine
+  `/api/v1/upload` uses re-transcribes the audio to a plain word-level `transcript`, so the learner can
+  compare what they actually said against what they meant to say. The endpoint's JSON response (`PronunciationScoreResponse` -
+  `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weak_phonemes[]}`) is decoded
+  Java-side by `common.ai.pronunciation.aiservice.AiServicePronunciationScoringClient`, the concrete
+  `PronunciationScoringClient` `SpeakingLearnServiceImpl` calls.

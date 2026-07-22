@@ -5,6 +5,11 @@ pronunciation — each its own package (`com.remelearning.english.<domain>`). Me
 three separate services (`vocabulary-service`, `grammar-service`, `pronunciation-service`) since all
 three just analyze different `category` values of the same `learning.gap.analyzed` event.
 
+On top of the three analysis domains, four "Học & Luyện tập với AI" **learn** skills now generate and
+grade practice content on demand: `vocabulary.learn`, `grammar.learn` (both under their existing
+domain package), plus two entirely new domain packages, `listening` and `speaking`. See the
+[Learn skills](#learn-skills-học--luyện-tập-với-ai) section below.
+
 - Port: **8085** (kept from the original `vocabulary-service`)
 - Database: `reme_english`
 
@@ -66,6 +71,88 @@ learner made along the way — scored the same way as the main transcript and fo
 [`docs/API.md`](../../../docs/API.md) and
 [`docs/sequence/English_service/dictation-practice.md`](../../../docs/sequence/English_service/dictation-practice.md).
 
+## Learn skills ("Học & Luyện tập với AI")
+
+Four skills — vocabulary, grammar, listening, speaking — generate one AI practice item on demand and
+grade the learner's attempt against it. `vocabulary`/`grammar` live inside their existing domain
+package as a `learn` sub-package; `listening`/`speaking` are brand-new top-level domain packages
+(`com.remelearning.english.listening`, `com.remelearning.english.speaking`), following the same
+controller/service/mapper/domain/dto/generator/scoring layout as the analysis domains. All four reuse
+`english.practice.service.PracticeService.redo(...)` to grade and feed weak points back into the
+existing pipeline — there is no separate "weak-point feeder" per skill.
+
+| Skill | Package | Migration | Controller | Base path |
+|---|---|---|---|---|
+| Vocabulary | `english.vocabulary.learn` | `V12__vocab_practice.sql` (`vocab_practice_items`, `vocab_practice_attempts`) | `VocabLearnController` | `/api/v1/learn/vocabulary` |
+| Grammar | `english.grammar.learn` | `V13__grammar_practice.sql` (`grammar_practice_items`, `grammar_practice_attempts`) | `GrammarLearnController` | `/api/v1/learn/grammar` |
+| Listening | `english.listening` (new domain) | `V14__listening_practice.sql` (`listening_practice_items`, `listening_attempts`) | `ListeningLearnController` | `/api/v1/learn/listening` |
+| Speaking | `english.speaking` (new domain) | `V15__speaking_practice.sql` (`speaking_practice_items`, `speaking_attempts`) | `SpeakingLearnController` | `/api/v1/learn/speaking` |
+
+Shared backbone, in the new `english.learn.common` package (used by all four generators/scorers):
+- `AiContentClient` — thin wrapper around `common`'s `LlmClient`: strips Gemini's occasional
+  ` ```json ` code fences and parses the response as JSON (`completeJson`), or returns raw text
+  (`complete`), throwing `AiContentException` on any call/parse failure. Collapses plumbing that used
+  to be duplicated per generator (mirrors dictation's older `LlmDictationAnalyzer`/
+  `LlmDictationDialogueGenerator`, which still have their own copies).
+- `DialogueAudioSynthesizer` (+ `DialogueLine`/`SynthesizedDialogue`) — generalizes multi-speaker
+  Supertonic TTS synthesis (one random voice per distinct speaker, lines merged via dictation's
+  existing `WavAudioMerger`) for any learn skill that needs voiced audio; currently used by
+  `listening`. Dictation deliberately keeps its own already-tested, separate TTS/dialogue code path
+  rather than being migrated onto this shared version.
+
+Per-skill notes:
+- **Vocabulary** (`POST /api/v1/learn/vocabulary/{userId}/generate`) — AI-generated question set per
+  target word, one of three shapes (`VocabQuestionType`): `CLOZE` (fill the blank in a context
+  sentence), `MCQ` (pick the correct word among options), `MATCHING` (pick the correct meaning among
+  options). Falls back to the learner's own top vocabulary weak points when `focusItems` is omitted,
+  then to a generic level-appropriate set if the learner has none yet. Grading
+  (`POST /attempts`) reuses `vocabulary_weak_points`/its existing Kafka consumer via
+  `PracticeService.redo` — no new weak-point table.
+- **Grammar** (`POST /api/v1/learn/grammar/{userId}/generate`) — same shape, one of four question
+  types (`GrammarQuestionType`): `ERROR_CORRECTION` (rewrite a sentence with a grammar mistake),
+  `FILL_TENSE` (put the bracketed verb in the correct tense/form), `TRANSFORM` (rewrite per an
+  instruction, same meaning), `MCQ` (pick the correct structure). Reuses `grammar_weak_points` via
+  `PracticeService.redo` — no new weak-point table.
+- **Listening** — a new domain, no pre-existing table to fall back to. Generation
+  (`POST /api/v1/learn/listening/{userId}/generate`) produces a Gemini transcript + questions, then
+  synthesizes multi-speaker audio via `DialogueAudioSynthesizer`; the transcript/translation and audio
+  (`GET /items/{itemId}/audio`) stay hidden from the practice-item response until the attempt is
+  submitted. Three question shapes (`ListeningQuestionType`): `MCQ` (main idea/detail/attitude, 4
+  options), `KEYWORD` (fill the missed word/phrase, scored by WER like dictation), `OPEN` (free-text,
+  LLM-graded 0..1 against a model answer). Because no english-service Kafka consumer persists a
+  per-domain "listening" weak-point row today (category `listening` still just flows through the
+  existing `learning.gap.analyzed` pipeline with no dedicated table), regeneration target-keyword
+  selection reads this skill's own attempt history instead — the same pattern dictation uses for its
+  own miss table.
+- **Speaking** — also a new domain. Generation produces a target sentence/passage plus a Supertonic
+  sample (model) recording (`GET /items/{itemId}/sample-audio`). Grading
+  (`POST /api/v1/learn/speaking/{userId}/attempts`) is multipart (learner's recorded audio +
+  `practiceItemId`), scored via `common`'s `PronunciationScoringClient`
+  (`common.ai.pronunciation`) calling ai-service's wav2vec2 GOP-scoring endpoint, and feeds the
+  existing `pronunciation_weak_points` table/Kafka consumer via `PracticeService.redo` — no new
+  weak-point table.
+
+## Vocabulary Library
+
+`com.remelearning.english.vocabulary.library` extends the vocabulary **learn** skill above with a
+persistent, topic-organized word bank plus a Duolingo/Anki-style "Section" practice mode (a queue of
+words drilled with intra-session repetition — a word leaves the queue once answered correctly twice
+in a row; a wrong answer resets its streak and requeues it sooner than a correct-but-not-yet-mastered
+answer does). Six new endpoints under `VocabularyLibraryController`
+(`/api/v1/learn/vocabulary/library`): browsing the fixed topic list, starting a Section
+(`POST /{userId}/topics/{topicId}/sections`, generating new library words via Gemini + Supertonic TTS
+whenever a topic is under-stocked), submitting an answer (`POST /sections/{sectionId}/answers`), and
+finishing a Section early (`POST /sections/{sectionId}/finish`). Migration:
+`V16__vocabulary_library.sql` (`vocabulary_topics`, `vocabulary_library_words`,
+`vocabulary_section_attempts`, `vocabulary_section_answers`). Library words share one mastery record
+per word with the ad-hoc "Học & Luyện tập" flow (`vocabulary_weak_points`, keyed by
+`item_id = "vocab:" + word`) — no second mastery table — and grading feeds
+`PracticeService.redo(...)` exactly like the other learn skills, except attempts are **not** deduped
+by word, so a word drilled multiple times in one Section lets `WeakPointScoringEngine`'s
+same-batch recurrence boost see the in-session repetition. See
+[`docs/sequence/English_service/vocabulary-library.md`](../../../docs/sequence/English_service/vocabulary-library.md)
+and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-service-data-flow.md).
+
 ## Kafka
 
 - `TranscriptReadyConsumer` (`vocabulary` domain only) — consumes `transcript.ready`, persists
@@ -98,6 +185,12 @@ or `ZEN_API_KEY`/`ZEN_MODEL` (zen, opencode.ai's OpenAI-compatible endpoint, def
 - `vocabulary` was built first and is the reference layout for `grammar`/`pronunciation` (and for the
   other single-domain services in this repo) — see `CLAUDE.md` for the full package-by-package
   breakdown.
+- The four "Learn" skills (`vocabulary.learn`, `grammar.learn`, `listening`, `speaking`) are additive
+  on top of that layout: `vocabulary.learn`/`grammar.learn` nest inside their existing domain package,
+  while `listening`/`speaking` are new sibling domain packages that clone the same
+  controller/service/mapper/domain/dto layout. All four share `english.learn.common`
+  (`AiContentClient`, `DialogueAudioSynthesizer`) and reuse `english.practice.service.PracticeService.
+  redo(...)` for grading/weak-point feedback instead of a per-skill feeder.
 - `Boot4CompatConfig` (in `english/config/`) works around a local dependency gap between Boot 4 and
   `mybatis-spring-boot-starter:3.0.4` — see the gotcha in `CLAUDE.md` before assuming a new bug if you
   hit `UnsatisfiedDependencyException` for `SqlSessionFactory`/`KafkaTemplate`/`ObjectMapper`/
