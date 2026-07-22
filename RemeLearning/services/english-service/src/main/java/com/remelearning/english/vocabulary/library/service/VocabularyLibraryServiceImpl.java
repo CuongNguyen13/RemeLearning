@@ -172,9 +172,17 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 				.nextCard(buildCard(attempt, updated)).progress(progressFor(updated, attempt.getSectionSize())).build();
 	}
 
+	// Explicit early-quit: marks the attempt ABANDONED (not COMPLETED) but still feeds whatever
+	// answers were persisted so far into the weak-point pipeline - partial progress still counts.
 	@Override
+	@Transactional
 	public SectionAnswerResultDto finishSection(Long sectionId) {
-		throw new UnsupportedOperationException("Implemented in Task 10");
+		VocabularySectionAttempt attempt = requireInProgressAttempt(sectionId);
+		sectionMapper.completeAttempt(sectionId, SectionStatus.ABANDONED.name());
+		feedWeakPoints(attempt.getUserId(), attempt.getId());
+		List<SectionQueueEntry> queue = readQueue(attempt.getQueueStateJson());
+		return SectionAnswerResultDto.builder().completed(true).nextCard(null)
+				.progress(progressFor(queue, attempt.getSectionSize())).build();
 	}
 
 	@Override
@@ -312,15 +320,45 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 		return attempt;
 	}
 
-	// Temporary body for this task - Task 10 replaces this with the real weak-point feed.
+	// Marks the attempt COMPLETED (all words mastered) and feeds every persisted answer for the
+	// section into the weak-point pipeline before returning the final result.
 	private SectionAnswerResultDto completeSection(VocabularySectionAttempt attempt, boolean lastCorrect,
 			String lastCorrectAnswer, double lastScore) {
 		sectionMapper.completeAttempt(attempt.getId(), SectionStatus.COMPLETED.name());
+		feedWeakPoints(attempt.getUserId(), attempt.getId());
 		return SectionAnswerResultDto.builder()
 				.correct(lastCorrect).correctAnswer(lastCorrectAnswer).score(lastScore).completed(true).nextCard(null)
 				.progress(SectionProgressDto.builder().totalWords(attempt.getSectionSize())
 						.wordsMastered(attempt.getSectionSize()).wordsRemaining(0).build())
 				.build();
+	}
+
+	// Feeds EVERY persisted answer for this section (including repeats of the same word) into the
+	// existing weak-point/spaced-repetition pipeline in one batch - deliberately not deduped by word
+	// (see this task's plan note): PracticeServiceImpl.redo detects a repeated itemId within the
+	// same attempts list to set recurredInBatch, which is exactly the recurrence signal this
+	// feature's in-session repetition is designed to produce. A no-answer early finish (empty list)
+	// is a no-op, matching VocabLearnServiceImpl's feedWeakPoints.
+	private void feedWeakPoints(String userId, Long sectionAttemptId) {
+		List<com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer> answers =
+				sectionMapper.findAnswersByAttemptId(sectionAttemptId);
+		if (answers.isEmpty()) {
+			return;
+		}
+		List<PracticeAttemptRequest> attempts = new ArrayList<>();
+		for (com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer answer : answers) {
+			VocabularyLibraryWord word = requireWord(answer.getLibraryWordId());
+			PracticeAttemptRequest attempt = new PracticeAttemptRequest();
+			attempt.setItemId(ITEM_ID_PREFIX + word.getWord().toLowerCase());
+			attempt.setCategory(LearningCategories.VOCABULARY);
+			attempt.setLabel(word.getWord());
+			attempt.setCorrect(answer.isCorrect());
+			attempts.add(attempt);
+		}
+		PracticeRedoRequest request = new PracticeRedoRequest();
+		request.setUserId(userId);
+		request.setAttempts(attempts);
+		practiceService.redo(request);
 	}
 
 	private VocabularyTopic requireTopic(Long topicId) {

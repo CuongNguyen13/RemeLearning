@@ -230,6 +230,66 @@ class VocabularyLibraryServiceImplTest {
 				.isInstanceOf(BusinessException.class);
 	}
 
+	@Test
+	void completingASectionFeedsEveryAnswerIncludingRepeatsIntoThePracticeRedoPipeline() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary")
+				.wordType(VocabularyType.NOUN).meaningVi("lịch trình").exampleEn("An itinerary for the trip.").build();
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.IN_PROGRESS).sectionSize(1)
+						.queueStateJson(toJson(List.of(com.remelearning.english.vocabulary.library.domain.SectionQueueEntry.builder()
+								.libraryWordId(10L).streak(1).introShown(true)
+								.pendingExerciseType(com.remelearning.english.vocabulary.library.domain.SectionExerciseType.CLOZE).build())))
+						.correctCount(1).totalAnswers(1).build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+		when(sectionMapper.findAnswersByAttemptId(100L)).thenReturn(List.of(
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer.builder()
+						.libraryWordId(10L).exerciseType(com.remelearning.english.vocabulary.library.domain.SectionExerciseType.CLOZE)
+						.correct(false).score(0.0).build(),
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer.builder()
+						.libraryWordId(10L).exerciseType(com.remelearning.english.vocabulary.library.domain.SectionExerciseType.MCQ)
+						.correct(true).score(1.0).build()));
+
+		SubmitSectionAnswerRequest request = new SubmitSectionAnswerRequest();
+		request.setSubmittedAnswer("itinerary");
+		service.submitAnswer(100L, request);
+
+		ArgumentCaptor<com.remelearning.english.practice.dto.PracticeRedoRequest> captor =
+				ArgumentCaptor.forClass(com.remelearning.english.practice.dto.PracticeRedoRequest.class);
+		verify(practiceService).redo(captor.capture());
+		assertThat(captor.getValue().getUserId()).isEqualTo("user-1");
+		assertThat(captor.getValue().getAttempts()).hasSize(2);
+		assertThat(captor.getValue().getAttempts().get(0).getItemId()).isEqualTo("vocab:itinerary");
+		assertThat(captor.getValue().getAttempts()).extracting(a -> a.isCorrect()).containsExactly(false, true);
+	}
+
+	@Test
+	void finishSectionMarksAbandonedAndStillFeedsWeakPointsFromWhatWasAnswered() {
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.IN_PROGRESS).sectionSize(5)
+						.queueStateJson(toJson(List.of(com.remelearning.english.vocabulary.library.domain.SectionQueueEntry.builder()
+								.libraryWordId(10L).streak(0).introShown(true).build())))
+						.build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+		when(sectionMapper.findAnswersByAttemptId(100L)).thenReturn(List.of());
+
+		SectionAnswerResultDto result = service.finishSection(100L);
+
+		assertThat(result.isCompleted()).isTrue();
+		assertThat(result.getNextCard()).isNull();
+		verify(sectionMapper).completeAttempt(100L, "ABANDONED");
+		verify(practiceService, never()).redo(any());
+	}
+
+	@Test
+	void finishSectionThrowsNotFoundForAnUnknownSection() {
+		when(sectionMapper.findAttemptById(999L)).thenReturn(null);
+
+		assertThatThrownBy(() -> service.finishSection(999L)).isInstanceOf(BusinessException.class);
+	}
+
 	private String toJson(Object value) {
 		try {
 			return objectMapper.writeValueAsString(value);
