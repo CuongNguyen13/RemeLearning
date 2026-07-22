@@ -14,10 +14,39 @@ import com.remelearning.bff.dto.DictationLessonSummaryDto;
 import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
+import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
+import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
+import com.remelearning.bff.dto.GrammarAttemptDetailDto;
+import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.GrammarAttemptResultDto;
+import com.remelearning.bff.dto.GrammarPracticeItemDto;
+import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
 import com.remelearning.bff.dto.LearnerOverviewResponse;
+import com.remelearning.bff.dto.ListeningAttemptDetailDto;
+import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningPracticeItemDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.RecommendationDto;
+import com.remelearning.bff.dto.SectionAnswerResultDto;
+import com.remelearning.bff.dto.SectionCardDto;
+import com.remelearning.bff.dto.SectionHistoryEntryDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
+import com.remelearning.bff.dto.StartSectionRequestDto;
+import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
+import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
+import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingPracticeItemDto;
+import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
+import com.remelearning.bff.dto.TopicSummaryDto;
+import com.remelearning.bff.dto.VocabAttemptDetailDto;
+import com.remelearning.bff.dto.VocabAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.VocabAttemptResultDto;
+import com.remelearning.bff.dto.VocabPracticeItemDto;
 import com.remelearning.bff.dto.WeakPointDto;
 import com.remelearning.bff.service.LearnerOverviewService;
 import com.remelearning.bff.service.WeakPointAggregationService;
@@ -26,12 +55,15 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
@@ -194,5 +226,228 @@ public class LearnerController {
 	public Mono<ApiResponse<DictationPracticeItemDetailDto>> getAiPracticeDetail(
 			@PathVariable String userId, @PathVariable Long practiceItemId) {
 		return englishServiceClient.getAiPracticeDetail(practiceItemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate one AI vocabulary practice set, targeting the given focus words or (if omitted) the learner's own top weak points; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/vocabulary/generate")
+	public Mono<ApiResponse<VocabPracticeItemDto>> generateVocabPractice(
+			@PathVariable String userId, @RequestBody(required = false) GenerateVocabPracticeRequestDto request) {
+		return englishServiceClient.generateVocabPractice(userId, request == null ? new GenerateVocabPracticeRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's generated vocabulary practice sets, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/items")
+	public Mono<ApiResponse<List<VocabPracticeItemDto>>> listVocabPracticeItems(@PathVariable String userId) {
+		return englishServiceClient.listVocabPracticeItems(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail (questions, no answers) for one vocabulary practice set; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/items/{itemId}")
+	public Mono<ApiResponse<VocabPracticeItemDto>> getVocabPracticeItem(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.getVocabPracticeItem(itemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade a submitted vocabulary-practice attempt; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/vocabulary/attempts")
+	public Mono<ApiResponse<VocabAttemptResultDto>> submitVocabAttempt(
+			@PathVariable String userId, @RequestBody SubmitVocabAttemptRequestDto request) {
+		request.setUserId(userId);
+		return englishServiceClient.submitVocabAttempt(request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's past vocabulary-practice attempts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/history")
+	public Mono<ApiResponse<List<VocabAttemptHistoryEntryDto>>> getVocabPracticeHistory(@PathVariable String userId) {
+		return englishServiceClient.getVocabPracticeHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one of a learner's own past vocabulary-practice attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/history/{attemptId}")
+	public Mono<ApiResponse<VocabAttemptDetailDto>> getVocabAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getVocabAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "List every vocabulary-library topic with word count and mastered-word count; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/library/topics")
+	public Mono<ApiResponse<List<TopicSummaryDto>>> listVocabLibraryTopics(@PathVariable String userId) {
+		return englishServiceClient.listVocabLibraryTopics(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Start a new vocabulary-library Section for a topic; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/vocabulary/library/topics/{topicId}/sections")
+	public Mono<ApiResponse<SectionCardDto>> startVocabSection(
+			@PathVariable String userId, @PathVariable Long topicId, @RequestBody(required = false) StartSectionRequestDto request) {
+		return englishServiceClient.startVocabSection(userId, topicId, request == null ? new StartSectionRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade the current Section card's answer and get the next card; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/vocabulary/library/sections/{sectionId}/answers")
+	public Mono<ApiResponse<SectionAnswerResultDto>> submitVocabSectionAnswer(
+			@PathVariable String userId, @PathVariable Long sectionId, @RequestBody(required = false) SubmitSectionAnswerRequestDto request) {
+		return englishServiceClient.submitVocabSectionAnswer(sectionId, request == null ? new SubmitSectionAnswerRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "End a vocabulary-library Section early; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/vocabulary/library/sections/{sectionId}/finish")
+	public Mono<ApiResponse<SectionAnswerResultDto>> finishVocabSection(@PathVariable String userId, @PathVariable Long sectionId) {
+		return englishServiceClient.finishVocabSection(sectionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's finished vocabulary-library Sections, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/vocabulary/library/sections/history")
+	public Mono<ApiResponse<List<SectionHistoryEntryDto>>> getVocabSectionHistory(@PathVariable String userId) {
+		return englishServiceClient.getVocabSectionHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Stream one vocabulary-library word's synthesized audio; relays english-service's audio response")
+	@GetMapping("/{userId}/learn/vocabulary/library/words/{wordId}/audio")
+	public Mono<ResponseEntity<Flux<DataBuffer>>> getVocabLibraryWordAudio(@PathVariable String userId, @PathVariable Long wordId) {
+		return englishServiceClient.streamVocabLibraryWordAudio(wordId);
+	}
+
+	@Operation(summary = "Generate one AI grammar practice set, targeting the given focus rules or (if omitted) the learner's own top weak points; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/generate")
+	public Mono<ApiResponse<GrammarPracticeItemDto>> generateGrammarPractice(
+			@PathVariable String userId, @RequestBody(required = false) GenerateGrammarPracticeRequestDto request) {
+		return englishServiceClient.generateGrammarPractice(userId, request == null ? new GenerateGrammarPracticeRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's generated grammar practice sets, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/items")
+	public Mono<ApiResponse<List<GrammarPracticeItemDto>>> listGrammarPracticeItems(@PathVariable String userId) {
+		return englishServiceClient.listGrammarPracticeItems(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail (questions, no answers) for one grammar practice set; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/items/{itemId}")
+	public Mono<ApiResponse<GrammarPracticeItemDto>> getGrammarPracticeItem(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.getGrammarPracticeItem(itemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade a submitted grammar-practice attempt; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/attempts")
+	public Mono<ApiResponse<GrammarAttemptResultDto>> submitGrammarAttempt(
+			@PathVariable String userId, @RequestBody SubmitGrammarAttemptRequestDto request) {
+		request.setUserId(userId);
+		return englishServiceClient.submitGrammarAttempt(request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's past grammar-practice attempts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/history")
+	public Mono<ApiResponse<List<GrammarAttemptHistoryEntryDto>>> getGrammarPracticeHistory(@PathVariable String userId) {
+		return englishServiceClient.getGrammarPracticeHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one of a learner's own past grammar-practice attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/history/{attemptId}")
+	public Mono<ApiResponse<GrammarAttemptDetailDto>> getGrammarAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getGrammarAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate one AI listening passage, targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/generate")
+	public Mono<ApiResponse<ListeningPracticeItemDto>> generateListeningPractice(
+			@PathVariable String userId, @RequestBody(required = false) GenerateListeningPracticeRequestDto request) {
+		return englishServiceClient.generateListeningPractice(userId, request == null ? new GenerateListeningPracticeRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's generated listening practice items, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/items")
+	public Mono<ApiResponse<List<ListeningPracticeItemDto>>> listListeningPracticeItems(@PathVariable String userId) {
+		return englishServiceClient.listListeningPracticeItems(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail (questions, no transcript/answers) for one listening practice item; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/items/{itemId}")
+	public Mono<ApiResponse<ListeningPracticeItemDto>> getListeningPracticeItem(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.getListeningPracticeItem(itemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Stream one listening practice item's synthesized audio; relays english-service's audio response")
+	@GetMapping("/{userId}/learn/listening/items/{itemId}/audio")
+	public Mono<ResponseEntity<Flux<DataBuffer>>> getListeningAudio(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.streamListeningAudio(itemId);
+	}
+
+	@Operation(summary = "Grade a submitted listening-practice attempt; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/attempts")
+	public Mono<ApiResponse<ListeningAttemptResultDto>> submitListeningAttempt(
+			@PathVariable String userId, @RequestBody SubmitListeningAttemptRequestDto request) {
+		request.setUserId(userId);
+		return englishServiceClient.submitListeningAttempt(request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's past listening-practice attempts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/history")
+	public Mono<ApiResponse<List<ListeningAttemptHistoryEntryDto>>> getListeningPracticeHistory(@PathVariable String userId) {
+		return englishServiceClient.getListeningPracticeHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one of a learner's own past listening-practice attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/history/{attemptId}")
+	public Mono<ApiResponse<ListeningAttemptDetailDto>> getListeningAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getListeningAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate one AI speaking-practice sentence with a Supertonic sample recording, targeting the given focus words or (if omitted) the learner's own top pronunciation weak points; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/speaking/generate")
+	public Mono<ApiResponse<SpeakingPracticeItemDto>> generateSpeakingPractice(
+			@PathVariable String userId, @RequestBody(required = false) GenerateSpeakingPracticeRequestDto request) {
+		return englishServiceClient.generateSpeakingPractice(userId, request == null ? new GenerateSpeakingPracticeRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's generated speaking practice items, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/items")
+	public Mono<ApiResponse<List<SpeakingPracticeItemDto>>> listSpeakingPracticeItems(@PathVariable String userId) {
+		return englishServiceClient.listSpeakingPracticeItems(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail (target text + sample audio URL) for one speaking practice item; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/items/{itemId}")
+	public Mono<ApiResponse<SpeakingPracticeItemDto>> getSpeakingPracticeItem(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.getSpeakingPracticeItem(itemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Stream one speaking practice item's Supertonic sample audio; relays english-service's audio response")
+	@GetMapping("/{userId}/learn/speaking/items/{itemId}/sample-audio")
+	public Mono<ResponseEntity<Flux<DataBuffer>>> getSpeakingSampleAudio(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.streamSpeakingSampleAudio(itemId);
+	}
+
+	@Operation(summary = "Submit a learner's recorded speaking attempt; streamed straight through to english-service without buffering the file in bff-service, scored via ai-service's wav2vec2 GOP model")
+	@PostMapping(value = "/{userId}/learn/speaking/attempts", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public Mono<ApiResponse<SpeakingAttemptResultDto>> submitSpeakingAttempt(
+			@PathVariable String userId,
+			@RequestPart("audio") FilePart audio,
+			@RequestPart("practiceItemId") String practiceItemId) {
+		return englishServiceClient.submitSpeakingAttempt(userId, Long.valueOf(practiceItemId), audio).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's past speaking-practice attempts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/history")
+	public Mono<ApiResponse<List<SpeakingAttemptHistoryEntryDto>>> getSpeakingPracticeHistory(@PathVariable String userId) {
+		return englishServiceClient.getSpeakingPracticeHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one of a learner's own past speaking-practice attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/history/{attemptId}")
+	public Mono<ApiResponse<SpeakingAttemptDetailDto>> getSpeakingAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getSpeakingAttemptDetail(userId, attemptId).map(ApiResponse::ok);
 	}
 }

@@ -13,7 +13,36 @@ import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
+import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
+import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
+import com.remelearning.bff.dto.GrammarAttemptDetailDto;
+import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.GrammarAttemptResultDto;
+import com.remelearning.bff.dto.GrammarPracticeItemDto;
+import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
+import com.remelearning.bff.dto.ListeningAttemptDetailDto;
+import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningPracticeItemDto;
+import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
+import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
+import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingPracticeItemDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
+import com.remelearning.bff.dto.SectionAnswerResultDto;
+import com.remelearning.bff.dto.SectionCardDto;
+import com.remelearning.bff.dto.SectionHistoryEntryDto;
+import com.remelearning.bff.dto.StartSectionRequestDto;
+import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
+import com.remelearning.bff.dto.TopicSummaryDto;
+import com.remelearning.bff.dto.VocabAttemptDetailDto;
+import com.remelearning.bff.dto.VocabAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.VocabAttemptResultDto;
+import com.remelearning.bff.dto.VocabPracticeItemDto;
 import com.remelearning.bff.dto.WeakPointDto;
 import com.remelearning.common.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +51,10 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -235,6 +267,348 @@ public class EnglishServiceClient {
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<DictationPracticeItemDetailDto>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to fetch AI-practice item detail for practiceItemId={}", practiceItemId, ex));
+	}
+
+	/** Generates one AI vocabulary practice set, targeting the given focus words or (if omitted) the learner's own top weak points. */
+	public Mono<VocabPracticeItemDto> generateVocabPractice(String userId, GenerateVocabPracticeRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/vocabulary/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<VocabPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate vocabulary practice for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail (questions, no answers) for one vocabulary practice set. */
+	public Mono<VocabPracticeItemDto> getVocabPracticeItem(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/items/{itemId}", itemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<VocabPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch vocabulary practice item for itemId={}", itemId, ex));
+	}
+
+	/** Fetches a learner's generated vocabulary practice sets, newest first. */
+	public Mono<List<VocabPracticeItemDto>> listVocabPracticeItems(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/{userId}/items", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<VocabPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list vocabulary practice items for userId={}", userId, ex));
+	}
+
+	/** Proxies a graded vocabulary-practice attempt straight through to english-service. */
+	public Mono<VocabAttemptResultDto> submitVocabAttempt(SubmitVocabAttemptRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/vocabulary/attempts")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<VocabAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit vocabulary practice attempt for userId={}", request.getUserId(), ex));
+	}
+
+	/** Fetches a learner's past vocabulary-practice attempts from english-service. */
+	public Mono<List<VocabAttemptHistoryEntryDto>> getVocabPracticeHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<VocabAttemptHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch vocabulary practice history for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail for one of a learner's own past vocabulary-practice attempts. */
+	public Mono<VocabAttemptDetailDto> getVocabAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<VocabAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch vocabulary attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Fetches every topic with its word count and this learner's mastered-word count. */
+	public Mono<List<TopicSummaryDto>> listVocabLibraryTopics(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/library/{userId}/topics", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<TopicSummaryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list vocabulary library topics for userId={}", userId, ex));
+	}
+
+	/** Starts a new Section for a topic; returns the first card. */
+	public Mono<SectionCardDto> startVocabSection(String userId, Long topicId, StartSectionRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/vocabulary/library/{userId}/topics/{topicId}/sections", userId, topicId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SectionCardDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start vocabulary section for userId={}, topicId={}", userId, topicId, ex));
+	}
+
+	/** Grades the current card's answer (or acknowledges an INTRO) and returns the next card, or a completed result. */
+	public Mono<SectionAnswerResultDto> submitVocabSectionAnswer(Long sectionId, SubmitSectionAnswerRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/vocabulary/library/sections/{sectionId}/answers", sectionId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SectionAnswerResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit vocabulary section answer for sectionId={}", sectionId, ex));
+	}
+
+	/** Ends an in-progress Section early. */
+	public Mono<SectionAnswerResultDto> finishVocabSection(Long sectionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/vocabulary/library/sections/{sectionId}/finish", sectionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SectionAnswerResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to finish vocabulary section for sectionId={}", sectionId, ex));
+	}
+
+	/** Fetches a learner's finished Sections, newest first. */
+	public Mono<List<SectionHistoryEntryDto>> getVocabSectionHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/library/{userId}/sections/history", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SectionHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get vocabulary section history for userId={}", userId, ex));
+	}
+
+	/** Relays one library word's synthesized pronunciation audio stream from english-service to the caller. */
+	public Mono<ResponseEntity<Flux<DataBuffer>>> streamVocabLibraryWordAudio(Long wordId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/vocabulary/library/words/{wordId}/audio", wordId)
+				.retrieve()
+				.toEntityFlux(DataBuffer.class)
+				.doOnError(ex -> log.error("Failed to stream vocabulary library word audio for wordId={}", wordId, ex));
+	}
+
+	/** Generates one AI grammar practice set, targeting the given focus rules or (if omitted) the learner's own top weak points. */
+	public Mono<GrammarPracticeItemDto> generateGrammarPractice(String userId, GenerateGrammarPracticeRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate grammar practice for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail (questions, no answers) for one grammar practice set. */
+	public Mono<GrammarPracticeItemDto> getGrammarPracticeItem(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/items/{itemId}", itemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch grammar practice item for itemId={}", itemId, ex));
+	}
+
+	/** Fetches a learner's generated grammar practice sets, newest first. */
+	public Mono<List<GrammarPracticeItemDto>> listGrammarPracticeItems(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/{userId}/items", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list grammar practice items for userId={}", userId, ex));
+	}
+
+	/** Proxies a graded grammar-practice attempt straight through to english-service. */
+	public Mono<GrammarAttemptResultDto> submitGrammarAttempt(SubmitGrammarAttemptRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/attempts")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit grammar practice attempt for userId={}", request.getUserId(), ex));
+	}
+
+	/** Fetches a learner's past grammar-practice attempts from english-service. */
+	public Mono<List<GrammarAttemptHistoryEntryDto>> getGrammarPracticeHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarAttemptHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch grammar practice history for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail for one of a learner's own past grammar-practice attempts. */
+	public Mono<GrammarAttemptDetailDto> getGrammarAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch grammar attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Generates one AI listening passage (Gemini transcript+questions, Supertonic audio), targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords. */
+	public Mono<ListeningPracticeItemDto> generateListeningPractice(String userId, GenerateListeningPracticeRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate listening practice for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail (questions, no transcript/answers) for one listening practice item. */
+	public Mono<ListeningPracticeItemDto> getListeningPracticeItem(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/items/{itemId}", itemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch listening practice item for itemId={}", itemId, ex));
+	}
+
+	/** Fetches a learner's generated listening practice items, newest first. */
+	public Mono<List<ListeningPracticeItemDto>> listListeningPracticeItems(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/{userId}/items", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list listening practice items for userId={}", userId, ex));
+	}
+
+	/** Relays one listening practice item's synthesized audio stream from english-service to the caller. */
+	public Mono<ResponseEntity<Flux<DataBuffer>>> streamListeningAudio(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/items/{itemId}/audio", itemId)
+				.retrieve()
+				.toEntityFlux(DataBuffer.class)
+				.doOnError(ex -> log.error("Failed to stream listening practice audio for itemId={}", itemId, ex));
+	}
+
+	/** Proxies a graded listening-practice attempt straight through to english-service. */
+	public Mono<ListeningAttemptResultDto> submitListeningAttempt(SubmitListeningAttemptRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/attempts")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit listening practice attempt for userId={}", request.getUserId(), ex));
+	}
+
+	/** Fetches a learner's past listening-practice attempts from english-service. */
+	public Mono<List<ListeningAttemptHistoryEntryDto>> getListeningPracticeHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningAttemptHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch listening practice history for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail for one of a learner's own past listening-practice attempts. */
+	public Mono<ListeningAttemptDetailDto> getListeningAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch listening attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Generates one AI speaking-practice sentence with a Supertonic sample recording, targeting the given focus words or (if omitted) the learner's own top pronunciation weak points. */
+	public Mono<SpeakingPracticeItemDto> generateSpeakingPractice(String userId, GenerateSpeakingPracticeRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate speaking practice for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail (target text + sample audio URL) for one speaking practice item. */
+	public Mono<SpeakingPracticeItemDto> getSpeakingPracticeItem(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/items/{itemId}", itemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch speaking practice item for itemId={}", itemId, ex));
+	}
+
+	/** Fetches a learner's generated speaking practice items, newest first. */
+	public Mono<List<SpeakingPracticeItemDto>> listSpeakingPracticeItems(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/{userId}/items", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list speaking practice items for userId={}", userId, ex));
+	}
+
+	/** Relays one speaking practice item's Supertonic sample audio stream from english-service to the caller. */
+	public Mono<ResponseEntity<Flux<DataBuffer>>> streamSpeakingSampleAudio(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/items/{itemId}/sample-audio", itemId)
+				.retrieve()
+				.toEntityFlux(DataBuffer.class)
+				.doOnError(ex -> log.error("Failed to stream speaking sample audio for itemId={}", itemId, ex));
+	}
+
+	/** Streams a learner's recorded attempt straight through to english-service's multipart submit endpoint, without buffering it in bff-service. */
+	public Mono<SpeakingAttemptResultDto> submitSpeakingAttempt(String userId, Long practiceItemId, FilePart audio) {
+		MultipartBodyBuilder builder = new MultipartBodyBuilder();
+		builder.asyncPart("audio", audio.content(), DataBuffer.class)
+				.headers(headers -> headers.setContentDispositionFormData("audio", audio.filename()));
+		builder.part("practiceItemId", practiceItemId.toString());
+
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/{userId}/attempts", userId)
+				.contentType(MediaType.MULTIPART_FORM_DATA)
+				.body(BodyInserters.fromMultipartData(builder.build()))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit speaking attempt for userId={}, practiceItemId={}", userId, practiceItemId, ex));
+	}
+
+	/** Fetches a learner's past speaking-practice attempts from english-service. */
+	public Mono<List<SpeakingAttemptHistoryEntryDto>> getSpeakingPracticeHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingAttemptHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch speaking practice history for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail for one of a learner's own past speaking-practice attempts. */
+	public Mono<SpeakingAttemptDetailDto> getSpeakingAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch speaking attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.

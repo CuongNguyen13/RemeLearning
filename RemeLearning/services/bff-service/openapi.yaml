@@ -461,6 +461,722 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseDictationPracticeItemDetail"
 
+  /api/v1/learners/{userId}/learn/vocabulary/generate:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate one AI vocabulary practice set, targeting the given focus words or (if omitted)
+        the learner's own top weak points; thin proxy to english-service
+      operationId: generateVocabPractice
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        description: All fields optional; an empty/omitted body falls back to the learner's own top weak points.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateVocabPracticeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabPracticeItem"
+
+  /api/v1/learners/{userId}/learn/vocabulary/items:
+    get:
+      tags: [Learners]
+      summary: A learner's generated vocabulary practice sets, newest first; thin proxy to english-service
+      operationId: listVocabPracticeItems
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/vocabulary/items/{itemId}:
+    get:
+      tags: [Learners]
+      summary: Full detail (questions, no answers) for one vocabulary practice set; thin proxy to english-service
+      operationId: getVocabPracticeItem
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabPracticeItem"
+
+  /api/v1/learners/{userId}/learn/vocabulary/attempts:
+    post:
+      tags: [Learners]
+      summary: Grade a submitted vocabulary-practice attempt; thin proxy to english-service
+      operationId: submitVocabAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        description: userId is stamped from the path onto the request before it's proxied to english-service.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitVocabAttemptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabAttemptResult"
+
+  /api/v1/learners/{userId}/learn/vocabulary/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past vocabulary-practice attempts, newest first; thin proxy to english-service
+      operationId: getVocabPracticeHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabAttemptHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/vocabulary/history/{attemptId}:
+    get:
+      tags: [Learners]
+      summary: Full detail for one of a learner's own past vocabulary-practice attempts; thin proxy to english-service
+      operationId: getVocabAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseVocabAttemptDetail"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/topics:
+    get:
+      tags: [Learners]
+      summary: List every vocabulary-library topic with word count and mastered-word count; thin proxy to english-service
+      operationId: listVocabLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseTopicSummaryList"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/topics/{topicId}/sections:
+    post:
+      tags: [Learners]
+      summary: Start a new vocabulary-library Section for a topic; thin proxy to english-service
+      operationId: startVocabSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartSectionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSectionCard"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/answers:
+    post:
+      tags: [Learners]
+      summary: Grade the current Section card's answer and get the next card; thin proxy to english-service
+      operationId: submitVocabSectionAnswer
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitSectionAnswerRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSectionAnswerResult"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/finish:
+    post:
+      tags: [Learners]
+      summary: End a vocabulary-library Section early; thin proxy to english-service
+      operationId: finishVocabSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSectionAnswerResult"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/sections/history:
+    get:
+      tags: [Learners]
+      summary: A learner's finished vocabulary-library Sections, newest first; thin proxy to english-service
+      operationId: getVocabSectionHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSectionHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/vocabulary/library/words/{wordId}/audio:
+    get:
+      tags: [Learners]
+      summary: Stream one vocabulary-library word's synthesized audio; relays english-service's audio response
+      operationId: getVocabLibraryWordAudio
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: wordId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Audio stream
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/wav: { schema: { type: string, format: binary } }
+
+  /api/v1/learners/{userId}/learn/grammar/generate:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate one AI grammar practice set, targeting the given focus rules or (if omitted) the
+        learner's own top weak points; thin proxy to english-service
+      operationId: generateGrammarPractice
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        description: All fields optional; an empty/omitted body falls back to the learner's own top weak points.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateGrammarPracticeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItem"
+
+  /api/v1/learners/{userId}/learn/grammar/items:
+    get:
+      tags: [Learners]
+      summary: A learner's generated grammar practice sets, newest first; thin proxy to english-service
+      operationId: listGrammarPracticeItems
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/grammar/items/{itemId}:
+    get:
+      tags: [Learners]
+      summary: Full detail (questions, no answers) for one grammar practice set; thin proxy to english-service
+      operationId: getGrammarPracticeItem
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItem"
+
+  /api/v1/learners/{userId}/learn/grammar/attempts:
+    post:
+      tags: [Learners]
+      summary: Grade a submitted grammar-practice attempt; thin proxy to english-service
+      operationId: submitGrammarAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        description: userId is stamped from the path onto the request before it's proxied to english-service.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitGrammarAttemptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarAttemptResult"
+
+  /api/v1/learners/{userId}/learn/grammar/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past grammar-practice attempts, newest first; thin proxy to english-service
+      operationId: getGrammarPracticeHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarAttemptHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/grammar/history/{attemptId}:
+    get:
+      tags: [Learners]
+      summary: Full detail for one of a learner's own past grammar-practice attempts; thin proxy to english-service
+      operationId: getGrammarAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarAttemptDetail"
+
+  /api/v1/learners/{userId}/learn/listening/generate:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate one AI listening passage (Gemini transcript+questions, Supertonic audio),
+        targeting the given focus keywords or (if omitted) the learner's own recently-missed
+        keywords; thin proxy to english-service
+      operationId: generateListeningPractice
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        description: >
+          All fields optional; an empty/omitted body falls back to the learner's own recently
+          missed keywords. translationLang enables a per-line translation, only revealed after
+          the attempt is submitted.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateListeningPracticeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItem"
+
+  /api/v1/learners/{userId}/learn/listening/items:
+    get:
+      tags: [Learners]
+      summary: A learner's generated listening practice items, newest first; thin proxy to english-service
+      operationId: listListeningPracticeItems
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/listening/items/{itemId}:
+    get:
+      tags: [Learners]
+      summary: Full detail (questions, no transcript/answers) for one listening practice item; thin proxy to english-service
+      operationId: getListeningPracticeItem
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItem"
+
+  /api/v1/learners/{userId}/learn/listening/items/{itemId}/audio:
+    get:
+      tags: [Learners]
+      summary: Stream one listening practice item's synthesized audio; relays english-service's audio response
+      operationId: getListeningPracticeAudio
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Audio stream
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/wav: { schema: { type: string, format: binary } }
+
+  /api/v1/learners/{userId}/learn/listening/attempts:
+    post:
+      tags: [Learners]
+      summary: Grade a submitted listening-practice attempt; thin proxy to english-service
+      operationId: submitListeningAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        description: userId is stamped from the path onto the request before it's proxied to english-service.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitListeningAttemptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningAttemptResult"
+
+  /api/v1/learners/{userId}/learn/listening/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past listening-practice attempts, newest first; thin proxy to english-service
+      operationId: getListeningPracticeHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningAttemptHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/listening/history/{attemptId}:
+    get:
+      tags: [Learners]
+      summary: Full detail for one of a learner's own past listening-practice attempts; thin proxy to english-service
+      operationId: getListeningAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningAttemptDetail"
+
+  /api/v1/learners/{userId}/learn/speaking/generate:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate one AI speaking-practice sentence with a Supertonic sample recording, targeting
+        the given focus words or (if omitted) the learner's own top pronunciation weak points;
+        thin proxy to english-service
+      operationId: generateSpeakingPractice
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        description: All fields optional; an empty/omitted body falls back to the learner's own top pronunciation weak points.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateSpeakingPracticeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItem"
+
+  /api/v1/learners/{userId}/learn/speaking/items:
+    get:
+      tags: [Learners]
+      summary: A learner's generated speaking practice items, newest first; thin proxy to english-service
+      operationId: listSpeakingPracticeItems
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/speaking/items/{itemId}:
+    get:
+      tags: [Learners]
+      summary: Full detail (target text + sample audio URL) for one speaking practice item; thin proxy to english-service
+      operationId: getSpeakingPracticeItem
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItem"
+
+  /api/v1/learners/{userId}/learn/speaking/items/{itemId}/sample-audio:
+    get:
+      tags: [Learners]
+      summary: Stream one speaking practice item's Supertonic sample audio; relays english-service's audio response
+      operationId: getSpeakingSampleAudio
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Audio stream
+          content:
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/wav: { schema: { type: string, format: binary } }
+
+  /api/v1/learners/{userId}/learn/speaking/attempts:
+    post:
+      tags: [Learners]
+      summary: >
+        Submit a learner's recorded speaking attempt; streamed straight through to
+        english-service's multipart submit endpoint without buffering the file in bff-service,
+        scored via ai-service's wav2vec2 GOP model
+      operationId: submitSpeakingAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [practiceItemId, audio]
+              properties:
+                practiceItemId: { type: string, description: "sent as a multipart text part, not JSON" }
+                audio: { type: string, format: binary }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingAttemptResult"
+
+  /api/v1/learners/{userId}/learn/speaking/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past speaking-practice attempts, newest first; thin proxy to english-service
+      operationId: getSpeakingPracticeHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingAttemptHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/speaking/history/{attemptId}:
+    get:
+      tags: [Learners]
+      summary: Full detail for one of a learner's own past speaking-practice attempts; thin proxy to english-service
+      operationId: getSpeakingAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingAttemptDetail"
+
 components:
   schemas:
     User:
@@ -746,6 +1462,23 @@ components:
         actualWord: { type: string, nullable: true }
         expectedWord: { type: string, nullable: true }
 
+    DictationErrorEntry:
+      type: object
+      description: One row of the mistake-comparison table, root-classified.
+      properties:
+        original: { type: string, nullable: true }
+        transcribed: { type: string, nullable: true }
+        category: { type: string, enum: [LEXICON, GRAMMAR, PHONOLOGY] }
+        note: { type: string, nullable: true, description: "short note on why this was likely misheard/mistyped" }
+
+    DictationRootCauseGroup:
+      type: object
+      description: A root-cause explanation for one category, only present when it has misses.
+      properties:
+        category: { type: string, enum: [LEXICON, GRAMMAR, PHONOLOGY] }
+        summary: { type: string }
+        examples: { type: array, items: { type: string } }
+
     DictationAttemptResult:
       type: object
       properties:
@@ -755,7 +1488,13 @@ components:
         diff:
           type: array
           items: { $ref: "#/components/schemas/WordDiff" }
-        aiSuggestions: { type: array, items: { type: string } }
+        errorTable:
+          type: array
+          items: { $ref: "#/components/schemas/DictationErrorEntry" }
+        rootCauses:
+          type: array
+          items: { $ref: "#/components/schemas/DictationRootCauseGroup" }
+        actionAdvice: { type: array, items: { type: string }, description: "immediate AI study tips (Vietnamese)" }
         practiceSentences: { type: array, items: { type: string } }
 
     DictationHistoryEntry:
@@ -801,7 +1540,13 @@ components:
         mistakes:
           type: array
           items: { $ref: "#/components/schemas/DictationMistake" }
-        aiSuggestions: { type: array, items: { type: string } }
+        errorTable:
+          type: array
+          items: { $ref: "#/components/schemas/DictationErrorEntry" }
+        rootCauses:
+          type: array
+          items: { $ref: "#/components/schemas/DictationRootCauseGroup" }
+        actionAdvice: { type: array, items: { type: string } }
         attemptedAt: { type: string, format: date-time }
 
     DictationPracticeItem:
@@ -920,3 +1665,593 @@ components:
         - type: object
           properties:
             data: { $ref: "#/components/schemas/DictationPracticeItemDetail" }
+
+    GenerateVocabPracticeRequest:
+      type: object
+      description: Facets for generating one AI vocabulary practice set; proxied verbatim to english-service.
+      properties:
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        focusItems: { type: array, nullable: true, items: { type: string } }
+
+    VocabQuestion:
+      type: object
+      description: Public-facing question shape (no answer), proxied from english-service.
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        type: { type: string, description: "CLOZE | MCQ | MATCHING" }
+        options: { type: array, nullable: true, items: { type: string } }
+
+    VocabPracticeItem:
+      type: object
+      description: One AI-generated vocabulary practice set, proxied from english-service.
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        targetWords: { type: array, items: { type: string } }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/VocabQuestion" }
+        createdAt: { type: string, format: date-time }
+
+    SubmitVocabAttemptRequest:
+      type: object
+      required: [practiceItemId, answers]
+      description: userId is stamped from the path (not required in the request body).
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        answers:
+          type: array
+          minItems: 1
+          items: { type: string }
+
+    VocabAttemptQuestionResult:
+      type: object
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        yourAnswer: { type: string, nullable: true }
+        correctAnswer: { type: string }
+        correct: { type: boolean }
+        translation: { type: string, nullable: true }
+
+    VocabAttemptResult:
+      type: object
+      properties:
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/VocabAttemptQuestionResult" }
+        actionAdvice: { type: array, items: { type: string } }
+
+    VocabAttemptHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        score: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    VocabAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/VocabAttemptQuestionResult" }
+        attemptedAt: { type: string, format: date-time }
+
+    ApiResponseVocabPracticeItem:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/VocabPracticeItem" }
+
+    ApiResponseVocabPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/VocabPracticeItem" }
+
+    ApiResponseVocabAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/VocabAttemptResult" }
+
+    ApiResponseVocabAttemptHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/VocabAttemptHistoryEntry" }
+
+    ApiResponseVocabAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/VocabAttemptDetail" }
+
+    TopicSummary:
+      type: object
+      properties:
+        topicId: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        wordCount: { type: integer }
+        masteredCount: { type: integer }
+
+    ApiResponseTopicSummaryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/TopicSummary" } }
+
+    StartSectionRequest:
+      type: object
+      properties:
+        sectionSize: { type: integer, nullable: true, description: "Clamped server-side to [5,20], default 10" }
+
+    SubmitSectionAnswerRequest:
+      type: object
+      properties:
+        submittedAnswer: { type: string, nullable: true, description: "Omit/blank for an INTRO card" }
+
+    SectionProgress:
+      type: object
+      properties:
+        totalWords: { type: integer }
+        wordsMastered: { type: integer }
+        wordsRemaining: { type: integer }
+
+    SectionCard:
+      type: object
+      properties:
+        sectionId: { type: integer, format: int64 }
+        cardKind: { type: string, enum: [INTRO, QUIZ] }
+        libraryWordId: { type: integer, format: int64 }
+        word: { type: string, nullable: true, description: "Set only on INTRO cards" }
+        meaningVi: { type: string, nullable: true }
+        exampleEn: { type: string, nullable: true }
+        audioUrl: { type: string, nullable: true }
+        exerciseType:
+          type: string
+          nullable: true
+          enum: [MCQ, CLOZE, MATCHING, LISTENING_DICTATION, TRANSLATE_EN_TO_VI, TRANSLATE_VI_TO_EN]
+        prompt: { type: string, nullable: true }
+        options: { type: array, nullable: true, items: { type: string } }
+        progress: { $ref: "#/components/schemas/SectionProgress" }
+
+    ApiResponseSectionCard:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SectionCard" }
+
+    SectionAnswerResult:
+      type: object
+      properties:
+        correct: { type: boolean }
+        correctAnswer: { type: string, nullable: true }
+        score: { type: number, format: double }
+        completed: { type: boolean }
+        nextCard:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SectionCard" }]
+        progress: { $ref: "#/components/schemas/SectionProgress" }
+
+    ApiResponseSectionAnswerResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SectionAnswerResult" }
+
+    SectionHistoryEntry:
+      type: object
+      properties:
+        sectionAttemptId: { type: integer, format: int64 }
+        topicName: { type: string, nullable: true }
+        accuracy: { type: number, format: double }
+        wordsCount: { type: integer }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponseSectionHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SectionHistoryEntry" } }
+
+    GenerateGrammarPracticeRequest:
+      type: object
+      description: Facets for generating one AI grammar practice set; proxied verbatim to english-service.
+      properties:
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        focusItems: { type: array, nullable: true, items: { type: string } }
+
+    GrammarQuestion:
+      type: object
+      description: Public-facing question shape (no answer), proxied from english-service.
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        type: { type: string, description: "ERROR_CORRECTION | FILL_TENSE | TRANSFORM | MCQ" }
+        options: { type: array, nullable: true, items: { type: string } }
+
+    GrammarPracticeItem:
+      type: object
+      description: One AI-generated grammar practice set, proxied from english-service.
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        targetRules: { type: array, items: { type: string } }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/GrammarQuestion" }
+        createdAt: { type: string, format: date-time }
+
+    SubmitGrammarAttemptRequest:
+      type: object
+      required: [practiceItemId, answers]
+      description: userId is stamped from the path (not required in the request body).
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        answers:
+          type: array
+          minItems: 1
+          items: { type: string }
+
+    GrammarAttemptQuestionResult:
+      type: object
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        yourAnswer: { type: string, nullable: true }
+        correctAnswer: { type: string }
+        correct: { type: boolean }
+        translation: { type: string, nullable: true }
+
+    GrammarAttemptResult:
+      type: object
+      properties:
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/GrammarAttemptQuestionResult" }
+        actionAdvice: { type: array, items: { type: string } }
+
+    GrammarAttemptHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        score: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    GrammarAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/GrammarAttemptQuestionResult" }
+        attemptedAt: { type: string, format: date-time }
+
+    ApiResponseGrammarPracticeItem:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/GrammarPracticeItem" }
+
+    ApiResponseGrammarPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/GrammarPracticeItem" }
+
+    ApiResponseGrammarAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/GrammarAttemptResult" }
+
+    ApiResponseGrammarAttemptHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/GrammarAttemptHistoryEntry" }
+
+    ApiResponseGrammarAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/GrammarAttemptDetail" }
+
+    GenerateListeningPracticeRequest:
+      type: object
+      description: Facets for generating one AI listening passage; proxied verbatim to english-service.
+      properties:
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        translationLang: { type: string, nullable: true }
+        focusItems: { type: array, nullable: true, items: { type: string } }
+
+    ListeningQuestion:
+      type: object
+      description: Public-facing question shape (no answer/transcript), proxied from english-service.
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        type: { type: string, description: "MCQ | KEYWORD | OPEN" }
+        options: { type: array, nullable: true, items: { type: string } }
+
+    ListeningPracticeItem:
+      type: object
+      description: One AI-generated listening passage, proxied from english-service (no transcript before grading).
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        audioUrl: { type: string, nullable: true, description: "null until Supertonic has finished synthesizing the audio" }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/ListeningQuestion" }
+        createdAt: { type: string, format: date-time }
+
+    SubmitListeningAttemptRequest:
+      type: object
+      required: [practiceItemId, answers]
+      description: userId is stamped from the path (not required in the request body).
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        answers:
+          type: array
+          minItems: 1
+          items: { type: string }
+
+    ListeningAttemptQuestionResult:
+      type: object
+      properties:
+        index: { type: integer }
+        prompt: { type: string }
+        yourAnswer: { type: string, nullable: true }
+        correctAnswer: { type: string }
+        correct: { type: boolean }
+        subScore: { type: number, format: double, description: "0..1 partial credit - meaningful for KEYWORD (WER-based) and OPEN (LLM-graded); 0/1 for MCQ" }
+        explanation: { type: string, nullable: true }
+
+    ListeningAttemptResult:
+      type: object
+      properties:
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ListeningAttemptQuestionResult" }
+        transcript: { type: string }
+        translation: { type: string, nullable: true }
+        actionAdvice: { type: array, items: { type: string } }
+
+    ListeningAttemptHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        score: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    ListeningAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        accuracy: { type: number, format: double }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ListeningAttemptQuestionResult" }
+        transcript: { type: string }
+        translation: { type: string, nullable: true }
+        attemptedAt: { type: string, format: date-time }
+
+    ApiResponseListeningPracticeItem:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/ListeningPracticeItem" }
+
+    ApiResponseListeningPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/ListeningPracticeItem" }
+
+    ApiResponseListeningAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/ListeningAttemptResult" }
+
+    ApiResponseListeningAttemptHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/ListeningAttemptHistoryEntry" }
+
+    ApiResponseListeningAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/ListeningAttemptDetail" }
+
+    GenerateSpeakingPracticeRequest:
+      type: object
+      description: Facets for generating one AI speaking-practice sentence; proxied verbatim to english-service.
+      properties:
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        focusItems: { type: array, nullable: true, items: { type: string } }
+
+    SpeakingPracticeItem:
+      type: object
+      description: >
+        One AI-generated speaking-practice sentence, proxied from english-service. Unlike
+        vocabulary/grammar/listening, the target text is shown upfront.
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        sampleAudioUrl: { type: string, nullable: true, description: "null until Supertonic has synthesized the sample (model) audio" }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        targetText: { type: string }
+        translation: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    PhonemeScore:
+      type: object
+      description: One scored phoneme (IPA symbol), proxied from ai-service's GOP result.
+      properties:
+        ipa: { type: string }
+        score: { type: number, format: double }
+
+    WordScore:
+      type: object
+      description: One scored word, proxied from ai-service's GOP result.
+      properties:
+        word: { type: string }
+        score: { type: number, format: double }
+        phonemes:
+          type: array
+          items: { $ref: "#/components/schemas/PhonemeScore" }
+
+    SpeakingAttemptResult:
+      type: object
+      properties:
+        overall: { type: number, format: double }
+        words:
+          type: array
+          items: { $ref: "#/components/schemas/WordScore" }
+        transcript: { type: string, description: "what the learner actually said, per ai-service's own ASR pass" }
+        weakPhonemes: { type: array, items: { type: string } }
+        actionAdvice: { type: array, items: { type: string } }
+
+    SpeakingAttemptHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        overallScore: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    SpeakingAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        targetText: { type: string }
+        overallScore: { type: number, format: double }
+        words:
+          type: array
+          items: { $ref: "#/components/schemas/WordScore" }
+        transcript: { type: string }
+        weakPhonemes: { type: array, items: { type: string } }
+        attemptedAt: { type: string, format: date-time }
+
+    ApiResponseSpeakingPracticeItem:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SpeakingPracticeItem" }
+
+    ApiResponseSpeakingPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/SpeakingPracticeItem" }
+
+    ApiResponseSpeakingAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SpeakingAttemptResult" }
+
+    ApiResponseSpeakingAttemptHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/SpeakingAttemptHistoryEntry" }
+
+    ApiResponseSpeakingAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SpeakingAttemptDetail" }

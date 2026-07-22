@@ -1106,6 +1106,29 @@ path được gán đè lên body (`request.setUserId(userId)`) trước khi pro
 - **GET `/api/v1/learners/{userId}/learn/speaking/history`** → `SpeakingAttemptHistoryEntryDto[]`.
 - **GET `/api/v1/learners/{userId}/learn/speaking/history/{attemptId}`** → `SpeakingAttemptDetailDto`.
 
+### Vocabulary Library (BFF proxy) — proxy sang `english-service` (mục 1)
+
+Thin proxy sang 6 endpoint `vocabulary.library` của `english-service`, base
+`/api/v1/learners/{userId}/learn/vocabulary/library/...`. `userId` luôn có trong path theo convention
+của controller này (kể cả với `sections/{sectionId}/answers`/`finish`/`words/{wordId}/audio` mà bản
+thân english-service không cần `userId`, giống cách `getVocabPracticeItem` đã làm) nhưng không được
+proxy tiếp xuống body/path của english-service. Các DTO là class riêng trong `com.remelearning.bff.dto`
+(không dùng lại DTO của english-service), field giống 1-1: `TopicSummaryDto`, `SectionCardDto`,
+`SectionProgressDto`, `StartSectionRequestDto`, `SubmitSectionAnswerRequestDto`,
+`SectionAnswerResultDto`, `SectionHistoryEntryDto`.
+
+- **GET `/api/v1/learners/{userId}/learn/vocabulary/library/topics`** → `TopicSummaryDto[]`.
+- **POST `/api/v1/learners/{userId}/learn/vocabulary/library/topics/{topicId}/sections`** (body
+  `StartSectionRequestDto?`) → `SectionCardDto`.
+- **POST `/api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/answers`** (body
+  `SubmitSectionAnswerRequestDto?`) → `SectionAnswerResultDto`.
+- **POST `/api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/finish`** →
+  `SectionAnswerResultDto`.
+- **GET `/api/v1/learners/{userId}/learn/vocabulary/library/sections/history`** →
+  `SectionHistoryEntryDto[]`.
+- **GET `/api/v1/learners/{userId}/learn/vocabulary/library/words/{wordId}/audio`** → relay stream audio
+  (`WebClient.toEntityFlux(DataBuffer)`, giống các endpoint audio khác).
+
 ### Dictation — proxy sang `english-service` (mục 1)
 
 Tất cả là proxy thuần túy; endpoint audio **relay nguyên** luồng bytes (status/headers/body) từ
@@ -1572,6 +1595,12 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/vocabulary/attempts` | proxy chấm điểm (`userId` gán đè lên body) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/history` | proxy lịch sử làm bài |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/history/{attemptId}` | proxy chi tiết 1 lần làm bài |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/library/topics` | proxy `GET /api/v1/learn/vocabulary/library/{userId}/topics` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/vocabulary/library/topics/{topicId}/sections` | proxy bắt đầu Section mới |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/answers` | proxy chấm card hiện tại |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/vocabulary/library/sections/{sectionId}/finish` | proxy kết thúc sớm 1 Section |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/library/sections/history` | proxy lịch sử Section đã hoàn thành |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/library/words/{wordId}/audio` | relay stream audio phát âm 1 từ |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/grammar/generate` | proxy `POST /api/v1/learn/grammar/{userId}/generate` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/grammar/items` | proxy danh sách bộ đề đã sinh |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/grammar/items/{itemId}` | proxy chi tiết 1 bộ đề |
