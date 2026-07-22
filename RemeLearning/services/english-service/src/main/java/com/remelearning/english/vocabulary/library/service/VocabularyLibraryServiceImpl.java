@@ -8,6 +8,11 @@ import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
+import com.remelearning.common.constants.LearningCategories;
+import com.remelearning.english.listening.scoring.OpenAnswerGrade;
+import com.remelearning.english.listening.scoring.OpenAnswerGrader;
+import com.remelearning.english.practice.dto.PracticeAttemptRequest;
+import com.remelearning.english.practice.dto.PracticeRedoRequest;
 import com.remelearning.english.practice.service.PracticeService;
 import com.remelearning.english.vocabulary.domain.VocabularyType;
 import com.remelearning.english.vocabulary.library.domain.SectionQueueEntry;
@@ -65,11 +70,13 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 	private final TtsClient ttsClient;
 	private final StorageClient storageClient;
 	private final PracticeService practiceService;
+	private final OpenAnswerGrader openAnswerGrader;
 	private final ObjectMapper objectMapper;
 
 	public VocabularyLibraryServiceImpl(VocabularyTopicMapper topicMapper, VocabularyLibraryWordMapper libraryWordMapper,
 			VocabularySectionMapper sectionMapper, LibraryWordGenerator libraryWordGenerator, TtsClient ttsClient,
-			StorageClient storageClient, PracticeService practiceService, ObjectMapper objectMapper) {
+			StorageClient storageClient, PracticeService practiceService, OpenAnswerGrader openAnswerGrader,
+			ObjectMapper objectMapper) {
 		this.topicMapper = topicMapper;
 		this.libraryWordMapper = libraryWordMapper;
 		this.sectionMapper = sectionMapper;
@@ -77,6 +84,7 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 		this.ttsClient = ttsClient;
 		this.storageClient = storageClient;
 		this.practiceService = practiceService;
+		this.openAnswerGrader = openAnswerGrader;
 		this.objectMapper = objectMapper;
 	}
 
@@ -126,8 +134,42 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 	}
 
 	@Override
+	@Transactional
 	public SectionAnswerResultDto submitAnswer(Long sectionId, SubmitSectionAnswerRequest request) {
-		throw new UnsupportedOperationException("Implemented in Task 9");
+		VocabularySectionAttempt attempt = requireInProgressAttempt(sectionId);
+		List<SectionQueueEntry> queue = readQueue(attempt.getQueueStateJson());
+		SectionQueueEntry entry = SectionQueue.current(queue);
+		VocabularyLibraryWord word = requireWord(entry.getLibraryWordId());
+
+		if (!entry.isIntroShown()) {
+			List<SectionQueueEntry> updated = SectionQueue.acknowledgeIntro(queue);
+			persistQueue(attempt, updated);
+			return SectionAnswerResultDto.builder().correct(true).completed(false)
+					.nextCard(buildCard(attempt, updated)).progress(progressFor(updated, attempt.getSectionSize())).build();
+		}
+
+		var type = entry.getPendingExerciseType();
+		String correctAnswer = correctAnswerFor(word, type);
+		double score = scoreAnswer(type, word, request.getSubmittedAnswer());
+		boolean correct = score >= com.remelearning.english.vocabulary.library.scoring.SectionAnswerScoring.CORRECT_THRESHOLD;
+
+		sectionMapper.insertAnswer(com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer.builder()
+				.sectionAttemptId(sectionId).libraryWordId(word.getId()).exerciseType(type)
+				.submittedAnswer(request.getSubmittedAnswer()).score(score).correct(correct).build());
+
+		List<SectionQueueEntry> updated = SectionQueue.applyResult(queue, correct);
+		int correctCount = attempt.getCorrectCount() + (correct ? 1 : 0);
+		int totalAnswers = attempt.getTotalAnswers() + 1;
+
+		if (SectionQueue.isComplete(updated)) {
+			persistQueue(attempt, updated, correctCount, totalAnswers);
+			return completeSection(attempt, correct, correctAnswer, score);
+		}
+
+		persistQueue(attempt, updated, correctCount, totalAnswers);
+		return SectionAnswerResultDto.builder()
+				.correct(correct).correctAnswer(correctAnswer).score(score).completed(false)
+				.nextCard(buildCard(attempt, updated)).progress(progressFor(updated, attempt.getSectionSize())).build();
 	}
 
 	@Override
@@ -234,6 +276,51 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 		attempt.setQueueStateJson(json);
 		attempt.setCorrectCount(correctCount);
 		attempt.setTotalAnswers(totalAnswers);
+	}
+
+	// CLOZE/MCQ/LISTENING_DICTATION/TRANSLATE_VI_TO_EN are guessing the word itself; MATCHING/
+	// TRANSLATE_EN_TO_VI are guessing the meaning.
+	private String correctAnswerFor(VocabularyLibraryWord word, com.remelearning.english.vocabulary.library.domain.SectionExerciseType type) {
+		return switch (type) {
+			case CLOZE, MCQ, LISTENING_DICTATION, TRANSLATE_VI_TO_EN -> word.getWord();
+			case MATCHING, TRANSLATE_EN_TO_VI -> word.getMeaningVi();
+		};
+	}
+
+	// Every type but TRANSLATE_EN_TO_VI is graded by the pure SectionAnswerScoring dispatcher;
+	// TRANSLATE_EN_TO_VI (free-text Vietnamese meaning) needs the LLM grader, reusing the same
+	// OpenAnswerGrader the listening skill's OPEN questions already use.
+	private double scoreAnswer(com.remelearning.english.vocabulary.library.domain.SectionExerciseType type,
+			VocabularyLibraryWord word, String submitted) {
+		if (type == com.remelearning.english.vocabulary.library.domain.SectionExerciseType.TRANSLATE_EN_TO_VI) {
+			OpenAnswerGrade grade = openAnswerGrader.grade(word.getExampleEn(),
+					"Nghĩa tiếng Việt của từ '" + word.getWord() + "' là gì?", word.getMeaningVi(), submitted);
+			return grade.score();
+		}
+		return com.remelearning.english.vocabulary.library.scoring.SectionAnswerScoring.scoreClosed(
+				type, correctAnswerFor(word, type), submitted);
+	}
+
+	private VocabularySectionAttempt requireInProgressAttempt(Long sectionId) {
+		VocabularySectionAttempt attempt = sectionMapper.findAttemptById(sectionId);
+		if (attempt == null) {
+			throw BusinessException.notFound("Vocabulary section attempt not found: id=" + sectionId);
+		}
+		if (attempt.getStatus() != SectionStatus.IN_PROGRESS) {
+			throw BusinessException.conflict("Vocabulary section attempt is not in progress: id=" + sectionId);
+		}
+		return attempt;
+	}
+
+	// Temporary body for this task - Task 10 replaces this with the real weak-point feed.
+	private SectionAnswerResultDto completeSection(VocabularySectionAttempt attempt, boolean lastCorrect,
+			String lastCorrectAnswer, double lastScore) {
+		sectionMapper.completeAttempt(attempt.getId(), SectionStatus.COMPLETED.name());
+		return SectionAnswerResultDto.builder()
+				.correct(lastCorrect).correctAnswer(lastCorrectAnswer).score(lastScore).completed(true).nextCard(null)
+				.progress(SectionProgressDto.builder().totalWords(attempt.getSectionSize())
+						.wordsMastered(attempt.getSectionSize()).wordsRemaining(0).build())
+				.build();
 	}
 
 	private VocabularyTopic requireTopic(Long topicId) {

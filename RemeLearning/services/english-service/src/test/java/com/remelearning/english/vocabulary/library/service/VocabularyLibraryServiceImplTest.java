@@ -7,10 +7,13 @@ import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.practice.service.PracticeService;
 import com.remelearning.english.vocabulary.domain.VocabularyType;
+import com.remelearning.english.vocabulary.library.domain.SectionStatus;
 import com.remelearning.english.vocabulary.library.domain.TopicMasterySummaryRow;
 import com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord;
 import com.remelearning.english.vocabulary.library.domain.VocabularyTopic;
+import com.remelearning.english.vocabulary.library.dto.SectionAnswerResultDto;
 import com.remelearning.english.vocabulary.library.dto.StartSectionRequest;
+import com.remelearning.english.vocabulary.library.dto.SubmitSectionAnswerRequest;
 import com.remelearning.english.vocabulary.library.dto.TopicSummaryDto;
 import com.remelearning.english.vocabulary.library.generator.GeneratedLibraryWord;
 import com.remelearning.english.vocabulary.library.generator.LibraryWordGenerator;
@@ -42,9 +45,12 @@ class VocabularyLibraryServiceImplTest {
 	private final TtsClient ttsClient = mock(TtsClient.class);
 	private final StorageClient storageClient = mock(StorageClient.class);
 	private final PracticeService practiceService = mock(PracticeService.class);
+	private final com.remelearning.english.listening.scoring.OpenAnswerGrader openAnswerGrader =
+			mock(com.remelearning.english.listening.scoring.OpenAnswerGrader.class);
 	private final ObjectMapper objectMapper = new ObjectMapper();
 	private final VocabularyLibraryServiceImpl service = new VocabularyLibraryServiceImpl(
-			topicMapper, libraryWordMapper, sectionMapper, libraryWordGenerator, ttsClient, storageClient, practiceService, objectMapper);
+			topicMapper, libraryWordMapper, sectionMapper, libraryWordGenerator, ttsClient, storageClient,
+			practiceService, openAnswerGrader, objectMapper);
 
 	@Test
 	void listTopicsMergesTopicRowsWithTheLearnersMasterySummary() {
@@ -135,5 +141,100 @@ class VocabularyLibraryServiceImplTest {
 
 		assertThatThrownBy(() -> service.startSection("user-1", 99L, new StartSectionRequest()))
 				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void submitAnswerAcknowledgesIntroWithoutScoringAndAdvancesToTheQuizForTheSameWord() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary")
+				.wordType(VocabularyType.NOUN).meaningVi("lịch trình").exampleEn("An itinerary for the trip.").build();
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.IN_PROGRESS).sectionSize(1)
+						.queueStateJson(toJson(List.of(com.remelearning.english.vocabulary.library.domain.SectionQueueEntry
+								.builder().libraryWordId(10L).streak(0).introShown(false).build())))
+						.correctCount(0).totalAnswers(0).build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+		when(libraryWordMapper.findRandomByTopicIdExcluding(eq(1L), eq(List.of(10L)), anyInt())).thenReturn(List.of());
+
+		SectionAnswerResultDto result = service.submitAnswer(100L, new SubmitSectionAnswerRequest());
+
+		assertThat(result.isCorrect()).isTrue();
+		assertThat(result.isCompleted()).isFalse();
+		assertThat(result.getNextCard().getCardKind().name()).isEqualTo("QUIZ");
+	}
+
+	@Test
+	void submitAnswerScoresAClosedFormTypeAndRequeuesOnAWrongAnswer() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary")
+				.wordType(VocabularyType.NOUN).meaningVi("lịch trình").exampleEn("An itinerary for the trip.").build();
+		VocabularyLibraryWord other = VocabularyLibraryWord.builder().id(11L).topicId(1L).word("visa")
+				.wordType(VocabularyType.NOUN).meaningVi("thị thực").exampleEn("A visa.").build();
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.IN_PROGRESS).sectionSize(2)
+						.queueStateJson(toJson(List.of(
+								com.remelearning.english.vocabulary.library.domain.SectionQueueEntry.builder()
+										.libraryWordId(10L).streak(0).introShown(true)
+										.pendingExerciseType(com.remelearning.english.vocabulary.library.domain.SectionExerciseType.CLOZE).build(),
+								com.remelearning.english.vocabulary.library.domain.SectionQueueEntry.builder()
+										.libraryWordId(11L).streak(0).introShown(false).build())))
+						.correctCount(0).totalAnswers(0).build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+		when(libraryWordMapper.findById(11L)).thenReturn(other);
+
+		SubmitSectionAnswerRequest request = new SubmitSectionAnswerRequest();
+		request.setSubmittedAnswer("wrong");
+		SectionAnswerResultDto result = service.submitAnswer(100L, request);
+
+		assertThat(result.isCorrect()).isFalse();
+		assertThat(result.getCorrectAnswer()).isEqualTo("itinerary");
+		assertThat(result.isCompleted()).isFalse();
+		verify(sectionMapper).insertAnswer(any());
+	}
+
+	@Test
+	void submitAnswerUsesTheLlmGraderForTranslateEnToViAndTreatsAboveThresholdAsCorrect() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary")
+				.wordType(VocabularyType.NOUN).meaningVi("lịch trình").exampleEn("An itinerary for the trip.").build();
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.IN_PROGRESS).sectionSize(1)
+						.queueStateJson(toJson(List.of(com.remelearning.english.vocabulary.library.domain.SectionQueueEntry.builder()
+								.libraryWordId(10L).streak(1).introShown(true)
+								.pendingExerciseType(com.remelearning.english.vocabulary.library.domain.SectionExerciseType.TRANSLATE_EN_TO_VI).build())))
+						.correctCount(0).totalAnswers(0).build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+		when(openAnswerGrader.grade(any(), any(), eq("lịch trình"), eq("kế hoạch chuyến đi")))
+				.thenReturn(new com.remelearning.english.listening.scoring.OpenAnswerGrade(0.9, "Đúng ý."));
+
+		SubmitSectionAnswerRequest request = new SubmitSectionAnswerRequest();
+		request.setSubmittedAnswer("kế hoạch chuyến đi");
+		SectionAnswerResultDto result = service.submitAnswer(100L, request);
+
+		// streak was already 1 and this answer is correct -> reaches MASTERY_STREAK=2 -> section completes.
+		assertThat(result.isCorrect()).isTrue();
+		assertThat(result.isCompleted()).isTrue();
+	}
+
+	@Test
+	void submitAnswerThrowsConflictWhenTheAttemptIsNotInProgress() {
+		com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt attempt =
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).status(SectionStatus.COMPLETED).build();
+		when(sectionMapper.findAttemptById(100L)).thenReturn(attempt);
+
+		assertThatThrownBy(() -> service.submitAnswer(100L, new SubmitSectionAnswerRequest()))
+				.isInstanceOf(BusinessException.class);
+	}
+
+	private String toJson(Object value) {
+		try {
+			return objectMapper.writeValueAsString(value);
+		} catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+			throw new RuntimeException(ex);
+		}
 	}
 }
