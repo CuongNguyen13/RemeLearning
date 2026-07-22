@@ -12,9 +12,11 @@ import com.remelearning.english.vocabulary.library.domain.TopicMasterySummaryRow
 import com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord;
 import com.remelearning.english.vocabulary.library.domain.VocabularyTopic;
 import com.remelearning.english.vocabulary.library.dto.SectionAnswerResultDto;
+import com.remelearning.english.vocabulary.library.dto.SectionHistoryEntryDto;
 import com.remelearning.english.vocabulary.library.dto.StartSectionRequest;
 import com.remelearning.english.vocabulary.library.dto.SubmitSectionAnswerRequest;
 import com.remelearning.english.vocabulary.library.dto.TopicSummaryDto;
+import com.remelearning.english.vocabulary.library.dto.VocabularyAudioResource;
 import com.remelearning.english.vocabulary.library.generator.GeneratedLibraryWord;
 import com.remelearning.english.vocabulary.library.generator.LibraryWordGenerator;
 import com.remelearning.english.vocabulary.library.mapper.VocabularyLibraryWordMapper;
@@ -288,6 +290,59 @@ class VocabularyLibraryServiceImplTest {
 		when(sectionMapper.findAttemptById(999L)).thenReturn(null);
 
 		assertThatThrownBy(() -> service.finishSection(999L)).isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void getSectionHistoryComputesAccuracyAndResolvesTopicName() {
+		when(sectionMapper.findHistoryByUserId("user-1")).thenReturn(List.of(
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(100L).userId("user-1").topicId(1L).status(SectionStatus.COMPLETED)
+						.sectionSize(10).correctCount(8).totalAnswers(10)
+						.completedAt(java.time.Instant.parse("2026-07-22T10:00:00Z")).build()));
+		when(topicMapper.findById(1L)).thenReturn(VocabularyTopic.builder().id(1L).code("travel").name("Travel").build());
+
+		List<SectionHistoryEntryDto> result = service.getSectionHistory("user-1");
+
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0).getTopicName()).isEqualTo("Travel");
+		assertThat(result.get(0).getAccuracy()).isEqualTo(0.8);
+		assertThat(result.get(0).getWordsCount()).isEqualTo(10);
+	}
+
+	@Test
+	void getSectionHistoryScoresZeroAccuracyRatherThanDividingByZeroForAnAbandonedSectionWithNoAnswers() {
+		when(sectionMapper.findHistoryByUserId("user-1")).thenReturn(List.of(
+				com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt.builder()
+						.id(101L).userId("user-1").topicId(1L).status(SectionStatus.ABANDONED)
+						.sectionSize(10).correctCount(0).totalAnswers(0).build()));
+		when(topicMapper.findById(1L)).thenReturn(VocabularyTopic.builder().id(1L).name("Travel").build());
+
+		List<SectionHistoryEntryDto> result = service.getSectionHistory("user-1");
+
+		assertThat(result.get(0).getAccuracy()).isEqualTo(0.0);
+	}
+
+	@Test
+	void loadWordAudioReturnsTheStoredAudioStreamAndSize() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).word("itinerary").audioStorageKey("vocab-library/1/10.wav").build();
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+		java.io.InputStream stream = new java.io.ByteArrayInputStream(new byte[]{1, 2, 3});
+		when(storageClient.read("vocab-library/1/10.wav")).thenReturn(stream);
+		when(storageClient.size("vocab-library/1/10.wav")).thenReturn(3L);
+
+		com.remelearning.english.vocabulary.library.dto.VocabularyAudioResource resource = service.loadWordAudio(10L);
+
+		assertThat(resource.stream()).isSameAs(stream);
+		assertThat(resource.size()).isEqualTo(3L);
+		assertThat(resource.mimeType()).isEqualTo("audio/wav");
+	}
+
+	@Test
+	void loadWordAudioThrowsNotFoundWhenTheWordHasNoAudioYet() {
+		VocabularyLibraryWord word = VocabularyLibraryWord.builder().id(10L).word("itinerary").audioStorageKey(null).build();
+		when(libraryWordMapper.findById(10L)).thenReturn(word);
+
+		assertThatThrownBy(() -> service.loadWordAudio(10L)).isInstanceOf(BusinessException.class);
 	}
 
 	private String toJson(Object value) {

@@ -187,12 +187,28 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 
 	@Override
 	public List<SectionHistoryEntryDto> getSectionHistory(String userId) {
-		throw new UnsupportedOperationException("Implemented in Task 11");
+		return sectionMapper.findHistoryByUserId(userId).stream().map(attempt -> {
+			VocabularyTopic topic = topicMapper.findById(attempt.getTopicId());
+			double accuracy = attempt.getTotalAnswers() == 0 ? 0.0 : (double) attempt.getCorrectCount() / attempt.getTotalAnswers();
+			return SectionHistoryEntryDto.builder()
+					.sectionAttemptId(attempt.getId())
+					.topicName(topic == null ? null : topic.getName())
+					.accuracy(accuracy)
+					.wordsCount(attempt.getSectionSize())
+					.completedAt(attempt.getCompletedAt())
+					.build();
+		}).toList();
 	}
 
 	@Override
 	public VocabularyAudioResource loadWordAudio(Long wordId) {
-		throw new UnsupportedOperationException("Implemented in Task 11");
+		VocabularyLibraryWord word = requireWord(wordId);
+		if (word.getAudioStorageKey() == null) {
+			throw BusinessException.notFound("Vocabulary library word audio not ready: id=" + wordId);
+		}
+		return new VocabularyAudioResource(
+				storageClient.read(word.getAudioStorageKey()), storageClient.size(word.getAudioStorageKey()),
+				"audio/wav", "vocab-" + wordId + ".wav");
 	}
 
 	// --- helpers (shared by later tasks too) ---
