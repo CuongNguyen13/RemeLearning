@@ -80,9 +80,10 @@ class VocabularyLibraryServiceImplTest {
 		when(libraryWordGenerator.generate(eq("Travel"), eq(List.of("passport", "luggage")), anyInt()))
 				.thenReturn(List.of(new GeneratedLibraryWord("itinerary", "NOUN", "lịch trình", "She planned a detailed itinerary for the trip.")));
 		when(ttsClient.synthesize(any())).thenReturn(TtsAudio.builder().audioBytes(new byte[]{1, 2, 3}).mimeType("audio/wav").build());
-		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(
-				VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
-						.meaningVi("lịch trình").exampleEn("She planned a detailed itinerary for the trip.").build()));
+		VocabularyLibraryWord itinerary = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
+				.meaningVi("lịch trình").exampleEn("She planned a detailed itinerary for the trip.").build();
+		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(itinerary));
+		when(libraryWordMapper.findById(10L)).thenReturn(itinerary);
 
 		service.startSection("user-1", 1L, new StartSectionRequest());
 
@@ -95,9 +96,10 @@ class VocabularyLibraryServiceImplTest {
 	void startSectionSkipsTopUpWhenTheTopicAlreadyHasEnoughWords() {
 		when(topicMapper.findById(1L)).thenReturn(VocabularyTopic.builder().id(1L).code("travel").name("Travel").build());
 		when(libraryWordMapper.countByTopicId(1L)).thenReturn(50);
-		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(
-				VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
-						.meaningVi("lịch trình").exampleEn("An itinerary.").build()));
+		VocabularyLibraryWord itinerary = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
+				.meaningVi("lịch trình").exampleEn("An itinerary.").build();
+		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(itinerary));
+		when(libraryWordMapper.findById(10L)).thenReturn(itinerary);
 
 		service.startSection("user-1", 1L, new StartSectionRequest());
 
@@ -108,12 +110,14 @@ class VocabularyLibraryServiceImplTest {
 	void startSectionFillsRemainderWithRandomWordsWhenNotEnoughUnmasteredWordsExist() {
 		when(topicMapper.findById(1L)).thenReturn(VocabularyTopic.builder().id(1L).code("travel").name("Travel").build());
 		when(libraryWordMapper.countByTopicId(1L)).thenReturn(50);
-		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(
-				VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
-						.meaningVi("lịch trình").exampleEn("An itinerary.").build()));
-		when(libraryWordMapper.findRandomByTopicIdExcluding(eq(1L), eq(List.of(10L)), anyInt())).thenReturn(List.of(
-				VocabularyLibraryWord.builder().id(11L).topicId(1L).word("visa").wordType(VocabularyType.NOUN)
-						.meaningVi("thị thực").exampleEn("A visa.").build()));
+		VocabularyLibraryWord itinerary = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
+				.meaningVi("lịch trình").exampleEn("An itinerary.").build();
+		VocabularyLibraryWord visa = VocabularyLibraryWord.builder().id(11L).topicId(1L).word("visa").wordType(VocabularyType.NOUN)
+				.meaningVi("thị thực").exampleEn("A visa.").build();
+		when(libraryWordMapper.findNotYetMasteredByTopicId(eq(1L), eq("user-1"), anyInt())).thenReturn(List.of(itinerary));
+		when(libraryWordMapper.findRandomByTopicIdExcluding(eq(1L), eq(List.of(10L)), anyInt())).thenReturn(List.of(visa));
+		when(libraryWordMapper.findById(10L)).thenReturn(itinerary);
+		when(libraryWordMapper.findById(11L)).thenReturn(visa);
 
 		StartSectionRequest request = new StartSectionRequest();
 		request.setSectionSize(2);

@@ -109,17 +109,9 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 
 		List<VocabularyLibraryWord> notYetMastered = libraryWordMapper.findNotYetMasteredByTopicId(topicId, userId, sectionSize);
 		List<Long> wordIds = new ArrayList<>(notYetMastered.stream().map(VocabularyLibraryWord::getId).toList());
-		// Cache the already-fetched word rows so the very first card can be built without a redundant
-		// findById round-trip - requireWord(id, cache) still falls back to the mapper for any word not
-		// picked here (e.g. once a later occurrence of a word is re-queued across a Section's lifetime).
-		Map<Long, VocabularyLibraryWord> wordCache = new HashMap<>();
-		notYetMastered.forEach(word -> wordCache.put(word.getId(), word));
 		if (wordIds.size() < sectionSize) {
 			libraryWordMapper.findRandomByTopicIdExcluding(topicId, wordIds, sectionSize - wordIds.size())
-					.forEach(word -> {
-						wordIds.add(word.getId());
-						wordCache.put(word.getId(), word);
-					});
+					.forEach(word -> wordIds.add(word.getId()));
 		}
 
 		List<SectionQueueEntry> queue = SectionQueue.initial(wordIds);
@@ -130,7 +122,7 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 				.build();
 		sectionMapper.insertAttempt(attempt);
 
-		return buildCard(attempt, queue, wordCache);
+		return buildCard(attempt, queue);
 	}
 
 	@Override
@@ -204,10 +196,9 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 
 	// Builds the DTO for whatever is currently at the front of the queue - an INTRO flashcard the
 	// first time a word appears, otherwise a QUIZ of its (frozen-per-occurrence) exercise type.
-	private SectionCardDto buildCard(VocabularySectionAttempt attempt, List<SectionQueueEntry> queue,
-			Map<Long, VocabularyLibraryWord> wordCache) {
+	private SectionCardDto buildCard(VocabularySectionAttempt attempt, List<SectionQueueEntry> queue) {
 		SectionQueueEntry entry = SectionQueue.current(queue);
-		VocabularyLibraryWord word = requireWord(entry.getLibraryWordId(), wordCache);
+		VocabularyLibraryWord word = requireWord(entry.getLibraryWordId());
 		SectionProgressDto progress = progressFor(queue, attempt.getSectionSize());
 		String audioUrl = word.getAudioStorageKey() == null ? null : AUDIO_URL.formatted(word.getId());
 
@@ -259,13 +250,6 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 			throw new IllegalStateException("Vocabulary library word referenced by a section queue not found: id=" + wordId);
 		}
 		return word;
-	}
-
-	// Prefers an already-in-hand word row (e.g. the ones just selected in startSection) over a fresh
-	// mapper lookup, avoiding a redundant findById for words we already fetched in this same call.
-	private VocabularyLibraryWord requireWord(Long wordId, Map<Long, VocabularyLibraryWord> wordCache) {
-		VocabularyLibraryWord cached = wordCache.get(wordId);
-		return cached != null ? cached : requireWord(wordId);
 	}
 
 	private List<SectionQueueEntry> readQueue(String json) {
