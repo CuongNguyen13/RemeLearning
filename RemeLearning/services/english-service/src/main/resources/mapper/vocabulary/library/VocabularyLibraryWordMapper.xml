@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.vocabulary.library.mapper.VocabularyLibraryWordMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vocabulary_library_words (topic_id, word, word_type, meaning_vi, example_en, ipa, audio_storage_key)
+        VALUES (#{topicId}, #{word}, #{wordType}, #{meaningVi}, #{exampleEn}, #{ipa}, #{audioStorageKey})
+    </insert>
+
+    <select id="findById" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord">
+        SELECT id, topic_id, word, word_type, meaning_vi, example_en, ipa, audio_storage_key, created_at
+        FROM vocabulary_library_words WHERE id = #{id}
+    </select>
+
+    <select id="findByTopicId" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord">
+        SELECT id, topic_id, word, word_type, meaning_vi, example_en, ipa, audio_storage_key, created_at
+        FROM vocabulary_library_words WHERE topic_id = #{topicId} ORDER BY word
+    </select>
+
+    <select id="countByTopicId" resultType="int">
+        SELECT COUNT(*) FROM vocabulary_library_words WHERE topic_id = #{topicId}
+    </select>
+
+    <select id="findWordsByTopicId" resultType="string">
+        SELECT word FROM vocabulary_library_words WHERE topic_id = #{topicId}
+    </select>
+
+    <select id="findNotYetMasteredByTopicId" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord">
+        SELECT w.id, w.topic_id, w.word, w.word_type, w.meaning_vi, w.example_en, w.ipa, w.audio_storage_key, w.created_at
+        FROM vocabulary_library_words w
+        LEFT JOIN vocabulary_weak_points wp ON wp.user_id = #{userId} AND wp.item_id = 'vocab:' || lower(w.word)
+        WHERE w.topic_id = #{topicId} AND (wp.mastery_level IS NULL OR wp.mastery_level < 0.7)
+        ORDER BY random()
+        LIMIT #{limit}
+    </select>
+
+    <select id="findRandomByTopicIdExcluding" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyLibraryWord">
+        SELECT id, topic_id, word, word_type, meaning_vi, example_en, ipa, audio_storage_key, created_at
+        FROM vocabulary_library_words
+        WHERE topic_id = #{topicId}
+        <if test="excludeIds != null and !excludeIds.isEmpty()">
+            AND id NOT IN
+            <foreach item="excludeId" collection="excludeIds" open="(" separator="," close=")">#{excludeId}</foreach>
+        </if>
+        ORDER BY random()
+        LIMIT #{limit}
+    </select>
+
+    <update id="updateAudioStorageKey">
+        UPDATE vocabulary_library_words SET audio_storage_key = #{audioStorageKey} WHERE id = #{id}
+    </update>
+
+</mapper>

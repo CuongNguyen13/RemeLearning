@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.vocabulary.library.mapper.VocabularyTopicMapper">
+
+    <select id="findAll" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyTopic">
+        SELECT id, code, name, description, level, created_at FROM vocabulary_topics ORDER BY name
+    </select>
+
+    <select id="findById" resultType="com.remelearning.english.vocabulary.library.domain.VocabularyTopic">
+        SELECT id, code, name, description, level, created_at FROM vocabulary_topics WHERE id = #{id}
+    </select>
+
+    <!-- Computed at read time (no running counter), same convention dashboard-service uses for
+         per-category progress: a topic's mastered_count is how many of its words currently have a
+         vocabulary_weak_points row (shared across the ad-hoc "Học & Luyện tập" flow and this
+         library, via the same item_id = "vocab:" + word convention) with mastery_level >= 0.7. -->
+    <select id="findMasterySummaryByUserId" resultType="com.remelearning.english.vocabulary.library.domain.TopicMasterySummaryRow">
+        SELECT t.id AS topic_id,
+               COUNT(w.id) AS word_count,
+               COUNT(*) FILTER (WHERE wp.mastery_level IS NOT NULL AND wp.mastery_level >= 0.7) AS mastered_count
+        FROM vocabulary_topics t
+        LEFT JOIN vocabulary_library_words w ON w.topic_id = t.id
+        LEFT JOIN vocabulary_weak_points wp ON wp.user_id = #{userId} AND wp.item_id = 'vocab:' || lower(w.word)
+        GROUP BY t.id
+    </select>
+
+</mapper>

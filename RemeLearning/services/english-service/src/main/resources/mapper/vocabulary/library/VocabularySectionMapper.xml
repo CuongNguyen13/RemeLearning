@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.vocabulary.library.mapper.VocabularySectionMapper">
+
+    <insert id="insertAttempt" parameterType="com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vocabulary_section_attempts
+            (user_id, topic_id, status, section_size, library_word_ids, queue_state, correct_count, total_answers)
+        VALUES
+            (#{userId}, #{topicId}, #{status}, #{sectionSize}, #{libraryWordIdsJson}, #{queueStateJson}, #{correctCount}, #{totalAnswers})
+    </insert>
+
+    <select id="findAttemptById" resultType="com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt">
+        SELECT id, user_id, topic_id, status, section_size,
+               library_word_ids AS library_word_ids_json, queue_state AS queue_state_json,
+               correct_count, total_answers, started_at, completed_at
+        FROM vocabulary_section_attempts WHERE id = #{id}
+    </select>
+
+    <update id="updateAttemptQueueState">
+        UPDATE vocabulary_section_attempts
+        SET queue_state = #{queueStateJson}, correct_count = #{correctCount}, total_answers = #{totalAnswers}
+        WHERE id = #{id}
+    </update>
+
+    <update id="completeAttempt">
+        UPDATE vocabulary_section_attempts SET status = #{status}, completed_at = now() WHERE id = #{id}
+    </update>
+
+    <insert id="insertAnswer" parameterType="com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vocabulary_section_answers
+            (section_attempt_id, library_word_id, exercise_type, submitted_answer, score, correct)
+        VALUES
+            (#{sectionAttemptId}, #{libraryWordId}, #{exerciseType}, #{submittedAnswer}, #{score}, #{correct})
+    </insert>
+
+    <select id="findAnswersByAttemptId" resultType="com.remelearning.english.vocabulary.library.domain.VocabularySectionAnswer">
+        SELECT id, section_attempt_id, library_word_id, exercise_type, submitted_answer, score, correct, answered_at
+        FROM vocabulary_section_answers WHERE section_attempt_id = #{attemptId} ORDER BY answered_at
+    </select>
+
+    <select id="findHistoryByUserId" resultType="com.remelearning.english.vocabulary.library.domain.VocabularySectionAttempt">
+        SELECT id, user_id, topic_id, status, section_size,
+               library_word_ids AS library_word_ids_json, queue_state AS queue_state_json,
+               correct_count, total_answers, started_at, completed_at
+        FROM vocabulary_section_attempts
+        WHERE user_id = #{userId} AND status != 'IN_PROGRESS'
+        ORDER BY completed_at DESC
+    </select>
+
+</mapper>
