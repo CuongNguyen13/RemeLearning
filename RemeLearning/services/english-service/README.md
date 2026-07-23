@@ -215,8 +215,8 @@ Migration: `V19__listening_library.sql` (`listening_library_topics`, `listening_
 other library/learn skill, scoring here does **not** call `PracticeService.redo(...)` — it only writes
 `listening_library_attempts`/`listening_topic_progress`, consistent with the pre-existing gap that
 category `listening` has no dedicated weak-point table anywhere in the service (see
-[Learn skills](#learn-skills-học--luyện-tập-với-ai) above). `bff-service` does not yet proxy these four
-endpoints (a follow-up gap, unlike Vocabulary/Grammar Library). See
+[Learn skills](#learn-skills-học--luyện-tập-với-ai) above). `bff-service` now proxies these four
+endpoints too (via `EnglishServiceClient`/`LearnerController`), same as Vocabulary/Grammar Library. See
 [`docs/sequence/English_service/listening-library.md`](../../../docs/sequence/English_service/listening-library.md)
 and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-service-data-flow.md).
 
@@ -250,8 +250,8 @@ Migration: `V20__speaking_library.sql` (`speaking_library_topics`, `speaking_lib
 `speaking_library_sentences`, `speaking_topic_progress`, `speaking_library_attempts`). Like Listening
 Library, scoring here does **not** call `PracticeService.redo(...)` — it only writes
 `speaking_library_attempts`/`speaking_topic_progress`, not `pronunciation_weak_points` (unlike
-`speaking.learn`, which does feed that table via the same scoring client). `bff-service` does not yet
-proxy these five endpoints (a follow-up gap, same as Listening Library). See
+`speaking.learn`, which does feed that table via the same scoring client). `bff-service` now proxies
+these five endpoints too (via `EnglishServiceClient`/`LearnerController`), same as Listening Library. See
 [`docs/sequence/English_service/speaking-library.md`](../../../docs/sequence/English_service/speaking-library.md)
 and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-service-data-flow.md).
 

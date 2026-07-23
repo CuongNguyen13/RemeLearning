@@ -50,13 +50,14 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 - [Listening library: fixed topic catalog + AI Section (passage + audio) + pass/unlock-next-topic](listening-library.md) -
   a fixed listening topic catalog crossing Grammar Library's gating state machine with an
   AI-generated passage + Supertonic audio + question pool per Section (generated once, reused
-  forever); `bff-service` does not yet proxy it (gap noted in the linked file).
+  forever); `bff-service` proxies it (via `EnglishServiceClient`/`LearnerController`), same as
+  Vocabulary/Grammar Library.
 - [Speaking library: fixed topic catalog + AI Section (sample sentences + per-sentence audio) + pass/unlock-next-topic](speaking-library.md) -
   a fixed speaking topic catalog crossing the same gating state machine with an AI-generated pool of
   5 sample sentences (IPA + one Supertonic sample clip per sentence) per Section; scoring is per
   sentence via the reused GOP `PronunciationScoringClient`, and gating only advances in a separate
-  `finishSection` call (not on every submitted attempt, unlike Listening Library); `bff-service` does
-  not yet proxy it either (same gap).
+  `finishSection` call (not on every submitted attempt, unlike Listening Library); `bff-service`
+  proxies it too, same as Listening Library.
 
 ## 1. Kafka consumers (ingestion)
 

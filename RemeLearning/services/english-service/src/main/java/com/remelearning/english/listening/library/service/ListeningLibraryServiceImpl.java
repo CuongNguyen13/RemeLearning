@@ -147,6 +147,11 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		if (section == null) {
 			throw BusinessException.notFound("Listening library section not found: id=" + sectionId);
 		}
+		// A missing `answers` field would otherwise NPE below; reject it as a clean 400 instead,
+		// mirroring this class's other guard methods (requireTopic/requireUnlockedOrInProgress).
+		if (req.getAnswers() == null) {
+			throw BusinessException.badRequest("Submitted answers must not be null: sectionId=" + sectionId);
+		}
 		java.util.List<ListeningLibraryQuestion> questions = questionMapper.findBySectionId(sectionId);
 		Map<Long, String> correctByQuestionId = questions.stream()
 				.collect(Collectors.toMap(ListeningLibraryQuestion::getId, ListeningLibraryQuestion::getCorrectOption));

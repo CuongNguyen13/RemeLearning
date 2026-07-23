@@ -194,9 +194,12 @@ tab Thư viện cho nghe/nói.
 
 ## 8. Testing
 
-- Pure unit test (không Spring context): `TopicProgressCalculatorTest` (mọi
-  trường hợp gating), so sánh lại kết quả grammar/vocabulary sau refactor
-  không đổi hành vi cũ.
+- **Cập nhật sau khi triển khai:** phương án `TopicProgressCalculatorTest` bị
+  bỏ cùng với việc bỏ refactor gating chung ở mục "Bối cảnh" trên — không có
+  hàm tính-gating dùng chung nào được trích xuất nên không có test riêng cho
+  nó. Test cho gating/chấm điểm nằm thẳng trong
+  `ListeningLibraryServiceImplTest`/`SpeakingLibraryServiceImplTest` (mỗi
+  domain tự test state machine của mình, clone từ `GrammarLibraryServiceImpl`).
 - Service-level test (`Mockito.mock`) cho listening/speaking library service:
   top-up khi ngân hàng cạn, chấm điểm, cập nhật topic_progress khi PASSED.
 - Không thêm test tích hợp DB thật (không có `@SpringBootTest`/integration

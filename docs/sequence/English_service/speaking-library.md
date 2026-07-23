@@ -15,8 +15,8 @@ which checks whether every sentence in the section has at least one attempt scor
 (Goodness-of-Pronunciation) scoring service `speaking.learn` already calls
 (`common.ai.pronunciation.PronunciationScoringClient`), not a new scorer. FE calls go through
 `bff-service`'s `LearnerController`, a pure pass-through, omitted below as a separate hop per
-`vocabulary-library.md`'s convention - as of this change `bff-service` does not yet proxy these five
-endpoints (same gap already noted for `listening.library`).
+`vocabulary-library.md`'s convention - `bff-service` proxies all five of these endpoints (via
+`EnglishServiceClient`/`LearnerController`), same as `listening.library`.
 
 ## 1. List topics (`GET /api/v1/learn/speaking/library/{userId}/topics`)
 
@@ -247,5 +247,5 @@ sequenceDiagram
   and does not call `PracticeService#redo` - scoring here only writes to `speaking_library_attempts`
   and `speaking_topic_progress`, not to `pronunciation_weak_points` (unlike `speaking.learn`, which
   does feed that table) - a deliberate scope cut mirroring `listening.library`'s equivalent gap.
-- **Gap surfaced while documenting this flow:** `bff-service` does not yet proxy any of these five
-  endpoints - same follow-up gap already documented for `listening.library`.
+- `bff-service` proxies all five of these endpoints through its own `LearnerController` (backed by
+  `EnglishServiceClient`), the same pass-through pattern already used for `listening.library`.

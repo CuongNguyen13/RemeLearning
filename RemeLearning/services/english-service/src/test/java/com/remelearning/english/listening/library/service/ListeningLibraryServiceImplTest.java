@@ -123,6 +123,33 @@ class ListeningLibraryServiceImplTest {
 	}
 
 	@Test
+	void submitAnswersThrowsCleanBadRequestWhenAnswersIsNull() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+
+		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
+		// answers left null on purpose - simulates a request body that omits the field
+
+		org.junit.jupiter.api.Assertions.assertThrows(
+				com.remelearning.common.exception.BusinessException.class,
+				() -> service.submitAnswers("user-1", 100L, req));
+
+		verify(questionMapper, org.mockito.Mockito.never()).findBySectionId(any());
+		verify(attemptMapper, org.mockito.Mockito.never()).insert(any());
+	}
+
+	@Test
 	void submitAnswersComputesScoreMarksPassedAndUnlocksNextTopicAboveThreshold() {
 		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
 		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
