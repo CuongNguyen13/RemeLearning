@@ -105,15 +105,15 @@ sequenceDiagram
             end
         end
         Svc->>DMapper: insertMisses(combined miss list - one batch insert either way)
-        Svc->>An: analyzeAttempt(referenceText, missedWords)
+        Svc->>An: analyzeAttempt(referenceText, userTranscript, diff)
         opt dictation.analyzer.mode = llm
-            An->>Gemini: complete(prompt) -> suggestions + practice sentences
+            An->>Gemini: complete(prompt) -> root-cause-classified errorTable + rootCauses + actionAdvice + practice sentences
         end
-        An-->>Svc: {suggestions[], practiceSentences[]} (templates on any failure)
+        An-->>Svc: {errorTable[], rootCauses[], actionAdvice[], practiceSentences[]} (rule-based heuristic on any failure)
         Svc->>DMapper: insertPracticeItem(each practice sentence, source="attempt")
-        Svc->>Pub: publish(recordingId, userId, weakPoints[word->vocabulary])
+        Svc->>Pub: publish(recordingId, userId, weakPoints[word->vocabulary], recommendation=actionAdvice[0])
         Pub->>Kafka: learning.gap.analyzed (snake_case via EventCodec)
-        Svc-->>Ctrl: DictationAttemptResultDto{referenceText, accuracy, wer, diff[], aiSuggestions[], practiceSentences[]}
+        Svc-->>Ctrl: DictationAttemptResultDto{referenceText, accuracy, wer, diff[], errorTable[], rootCauses[], actionAdvice[], practiceSentences[]}
     end
 ```
 
@@ -261,11 +261,11 @@ sequenceDiagram
     DMapper->>DB: SELECT folder, COUNT(*) GROUP BY folder
     Svc-->>Ctrl: List[DictationFolderDto]{folderId, name, lessonCount}
 
-    Caller->>Ctrl: GET /dictation/folders/{folderId}/lessons
-    Ctrl->>Svc: listFolderLessons(folderId)
-    Svc->>DMapper: findClipsByFolder(folderId)
-    DMapper->>DB: SELECT ... WHERE folder = ? ORDER BY code
-    Svc-->>Ctrl: List[DictationLessonSummaryDto]{clipId, code, title, audioUrl} (no script)
+    Caller->>Ctrl: GET /dictation/folders/{folderId}/lessons/{userId}
+    Ctrl->>Svc: listFolderLessons(folderId, userId)
+    Svc->>DMapper: findLessonSummariesByFolder(folderId, userId)
+    DMapper->>DB: SELECT clips LEFT JOIN (per-user attempt agg: count, latest accuracy) WHERE folder = ? ORDER BY code
+    Svc-->>Ctrl: List[DictationLessonSummaryDto]{clipId, code, title, audioUrl, level, sentenceCount, attemptCount?, latestAccuracy?} (no script)
 
     Caller->>Ctrl: GET /dictation/clips/{clipId}?translationLang=
     Ctrl->>Svc: getClipDetail(clipId, translationLang)
@@ -346,8 +346,8 @@ sequenceDiagram
     else found
         Svc->>DMapper: findMissesByAttemptId(attemptId)
         DMapper->>DB: SELECT * FROM dictation_misses WHERE attempt_id = ? ORDER BY id
-        Svc->>Svc: deserializeSuggestions(row.aiSuggestions) - JSON -> List[String], [] if null
-        Svc-->>Ctrl: DictationAttemptDetailDto{referenceText, userTranscript, mistakes[], aiSuggestions[], accuracy, wer, attemptedAt}
+        Svc->>Svc: deserializeAnalysis(row.aiSuggestions) - JSON -> DictationAnalysis, legacy plain string array read as actionAdvice, [] if null/unparseable
+        Svc-->>Ctrl: DictationAttemptDetailDto{referenceText, userTranscript, mistakes[], errorTable[], rootCauses[], actionAdvice[], accuracy, wer, attemptedAt}
     end
 ```
 
@@ -368,7 +368,7 @@ for the full reasoning.
 | 4 | Kafka produce | english-service -> `learning.gap.analyzed` | dictation misses as vocabulary weak points, feeding the recommendation pipeline |
 | 5 | Postgres | english-service -> `reme_english` | `dictation_clips`, `dictation_clip_sentences`, `dictation_attempts`, `dictation_misses`, `dictation_practice_items` |
 | 6 | HTTP (multipart) | english-service -> ai-service `/api/v1/dictation/align-sentences` | `SentenceAlignmentClient` (`reme.alignment.ai-service.*`); lazy, triggered from `getClipDetail` only when a sentence is still missing `startMs`/`endMs`; read-timeout defaults to 120s since it transcribes the whole clip synchronously |
-| 7 | Postgres | english-service -> `reme_english` | `dictation_attempts.ai_suggestions` (new column, JSON-encoded) written by section 1, read back by section 4 |
+| 7 | Postgres | english-service -> `reme_english` | `dictation_attempts.ai_suggestions` (JSON-encoded `DictationAnalysis` - errorTable/rootCauses/actionAdvice/practiceSentences; column name predates this shape) written by section 1, read back by section 4 |
 
 ## Notes
 

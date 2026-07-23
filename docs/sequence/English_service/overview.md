@@ -44,6 +44,9 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 
 - [Vocabulary library: topic word bank + Section practice](vocabulary-library.md) - extends the
   vocabulary skill with a persistent topic word bank and Leitner-lite in-session repetition.
+- [Grammar library: 60-topic catalog + theory page + session practice](grammar-library.md) - a fixed
+  grammar topic catalog with an AI-generated theory page + question pool per topic (generated once,
+  reused forever) and a pass/retry/unlock-next-topic progression per learner.
 
 ## 1. Kafka consumers (ingestion)
 
@@ -260,6 +263,13 @@ requested` mechanism section 3 documents, not a bespoke publisher per skill.
 All four generators are Gemini-only (no rule-based mode) with a static-template fallback on any LLM
 call/parse failure, so `generate` never hard-fails. None of the four packages has its own Kafka
 consumer/producer — they only reach Kafka indirectly through `PracticeService#redo`.
+
+**Client-side grading (contract change, vocabulary/grammar/listening only):** the practice-item
+question payloads (`generate`/`getItem`/`listItems`) now carry the correct answer — `answer` +
+`translation` for vocabulary/grammar, `answer` + `explanation` for listening (`answer` null for `OPEN`,
+which stays LLM-graded server-side) — so the client checks each question locally for instant feedback
+before submitting. The call order between services is unchanged; the authoritative score is still
+produced only by the `submit`-attempt step.
 
 ## Notes
 

@@ -173,6 +173,34 @@ flowchart TD
         LibFeed["feedWeakPoints: one PracticeAttemptRequest per<br/>vocabulary_section_answers row (NOT deduped by word)"]
     end
 
+    subgraph GrammarLibraryFlow["Grammar library (package grammar.library) - 60-topic catalog + AI theory page/pool, generated once"]
+        GLibContentReq["GET /.../library/topics/{topicId}"]
+        GLibContentCheck{"grammar_library_contents row exists for topic?"}
+        GLibGenerate["LlmGrammarLibraryContentGenerator.generateTopicContent(topic.name, topic.level)<br/>LLM (Gemini) -> {explanationEn, explanationVi, illustrationText, examples[], questions[8-10]}<br/>(static-template fallback, not empty, on call/parse failure)"]
+        GLibInsertContent["insert grammar_library_contents row"]
+        GLibInsertQuestions["insert grammar_library_questions row per generated question"]
+
+        GLibSessionReq["POST /.../library/{userId}/topics/{topicId}/sessions"]
+        GLibLockCheck{"grammar_topic_progress.status == LOCKED (or no row)?"}
+        GLibSnapshot["build List&lt;GrammarLibrarySessionQuestion&gt;<br/>full content snapshot per pool question, questionRef = q-&lt;id&gt;"]
+        GLibInsertSession["insert grammar_library_sessions row<br/>{sessionType=INITIAL, questionsJson, status=IN_PROGRESS}"]
+        GLibMarkInProgress["grammar_topic_progress -> IN_PROGRESS"]
+
+        GLibAnswerReq["POST /.../sessions/{sessionId}/answers<br/>{questionRef, submittedAnswer?}"]
+        GLibScore["ExactMatchScorer.score([answer], [submitted], stripTrailingPunctuation=true)<br/>(shared with grammar.learn)"]
+        GLibInsertAnswer["insert grammar_library_session_answers row"]
+
+        GLibFinishReq["POST /.../sessions/{sessionId}/finish"]
+        GLibRecompute["recompute correctness per question<br/>(latest answer per questionRef; unanswered = wrong)"]
+        GLibCompleteSession["update grammar_library_sessions<br/>{status=COMPLETED, correct_count, total_count}"]
+        GLibFeed["one PracticeAttemptRequest per question in the session<br/>itemId=grammar:&lt;topicCode&gt;, category=grammar (NOT deduped)"]
+        GLibAllCorrect{"every question correct?"}
+        GLibMarkPassed["grammar_topic_progress -> PASSED, passed_at=now()"]
+        GLibUnlockNext["grammar_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
+        GLibRetryGen["per wrong question:<br/>LlmGrammarLibraryContentGenerator.generateRetryQuestion(topic.name, topic.level, type, oldPrompt)<br/>LLM (Gemini) -> one fresh question, same type, not repeating oldPrompt"]
+        GLibRetrySession["insert grammar_library_sessions row<br/>{sessionType=RETRY, questionsJson=retryQuestions (inline, never in the pool table), status=IN_PROGRESS}"]
+    end
+
     subgraph Storage["reme_english DB"]
         T1[("transcripts")]
         T2[("transcript_segments")]
@@ -199,6 +227,12 @@ flowchart TD
         T23[("vocabulary_library_words")]
         T24[("vocabulary_section_attempts")]
         T25[("vocabulary_section_answers")]
+        T26[("grammar_library_topics")]
+        T27[("grammar_library_contents")]
+        T28[("grammar_library_questions")]
+        T29[("grammar_topic_progress")]
+        T30[("grammar_library_sessions")]
+        T31[("grammar_library_session_answers")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -347,6 +381,34 @@ flowchart TD
     LibFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
     LibFeed -.same.-> LockPrior
     LibFeed -.shares vocab:&lt;word&gt; itemId, same table.-> T3
+
+    T26 --> GLibContentReq
+    GLibContentReq --> GLibContentCheck
+    GLibContentCheck -->|no, first read| GLibGenerate --> GLibInsertContent --> T27
+    GLibInsertContent --> GLibInsertQuestions --> T28
+    GLibContentCheck -->|yes| GLibSessionReq
+    T28 --> GLibSessionReq
+
+    GLibSessionReq --> GLibLockCheck
+    T29 --> GLibLockCheck
+    GLibLockCheck -->|no, UNLOCKED/IN_PROGRESS| GLibSnapshot --> GLibInsertSession --> T30
+    GLibInsertSession --> GLibMarkInProgress --> T29
+
+    GLibAnswerReq --> GLibScore
+    T30 --> GLibScore
+    GLibScore --> GLibInsertAnswer --> T31
+
+    GLibFinishReq --> GLibRecompute
+    T30 --> GLibRecompute
+    T31 --> GLibRecompute
+    GLibRecompute --> GLibCompleteSession --> T30
+    GLibRecompute --> GLibFeed
+    GLibFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
+    GLibFeed -.same.-> LockPrior
+    GLibRecompute --> GLibAllCorrect
+    GLibAllCorrect -->|yes| GLibMarkPassed --> T29
+    GLibMarkPassed --> GLibUnlockNext --> T29
+    GLibAllCorrect -->|no| GLibRetryGen --> GLibRetrySession --> T30
 ```
 
 ## Data shape at each stage
@@ -389,22 +451,23 @@ flowchart TD
 | published `learning.gap.analyzed` | `{recording_id: "dictation-clip-<id>", user_id, weak_points: [{item_id: "dictation:<word>", category: vocabulary\|grammar\|pronunciation, label, forgetting_score, recommendation: actionAdvice[0]}]}` | **category is per-word, not always `"vocabulary"`**: `toLearningCategory` maps each missed word's `errorTable` root-cause (`LEXICON`/`GRAMMAR`/`PHONOLOGY`) to `vocabulary`/`grammar`/`pronunciation`; a word with no `errorTable` entry (e.g. a sentence-mode-retry miss, which never goes through `DictationAnalyzer`) defaults to `vocabulary`; dictation misses fed into the existing recommendation pipeline this way |
 | `DictationHistoryEntryDto.practiceType` | `LIBRARY \| AI_PRACTICE` | derived in Java from `clipId` being present/null - not a DB column - so the FE can badge each history row |
 | `GenerateVocabPracticeRequest` / `GenerateGrammarPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body; `focusItems` (explicit words/rules from a "Luyện ngay" deep-link) wins over the learner's own weak points |
-| `vocab_practice_items` / `grammar_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_words\|target_rules (JSON string[]), items (JSON `VocabQuestionItem[]`\|`GrammarQuestionItem[]`), created_at}` | one row per generated set; `items` holds the full graded content (prompt/type/options/answer/translation), never sent back on `getItem`/`listItems` (see `VocabQuestionDto`/`GrammarQuestionDto` below) |
+| `vocab_practice_items` / `grammar_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_words\|target_rules (JSON string[]), items (JSON `VocabQuestionItem[]`\|`GrammarQuestionItem[]`), created_at}` | one row per generated set; `items` holds the full graded content (prompt/type/options/answer/translation), now surfaced on `getItem`/`listItems` too (see `VocabQuestionDto`/`GrammarQuestionDto` below) |
 | `VocabQuestionItem` | `{targetWord, type: CLOZE\|MCQ\|MATCHING, prompt, options?, answer, translation}` | `options` null for `CLOZE`; JSON element of `vocab_practice_items.items` |
-| `GrammarQuestionItem` | `{targetRule, type: ERROR_CORRECTION\|FILL_TENSE\|TRANSFORM\|MCQ, prompt, options?, answer, translation}` | `options` only for `MCQ`; JSON element of `grammar_practice_items.items` |
-| `VocabQuestionDto` / `GrammarQuestionDto` (REST) | `{index, prompt, type, options?}` | `getItem`/`listItems` response - omits `answer`/`translation` so the learner can't see the key before submitting |
+| `GrammarQuestionItem` | `{targetRule, type: ERROR_CORRECTION\|FILL_TENSE\|TRANSFORM\|MCQ, prompt, options?, answer, translation, translationVi}` | `options` only for `MCQ`; JSON element of `grammar_practice_items.items`. `translationVi` is a plain Vietnamese meaning-translation of `answer`, distinct from `translation` (a grammar-rule explanation) - grammar-only, `VocabQuestionItem` has no equivalent |
+| `VocabQuestionDto` / `GrammarQuestionDto` (REST) | `{index, prompt, type, options?, answer, translation}` (+ `translationVi` on `GrammarQuestionDto` only) | generate/`getItem`/`listItems` response - now **includes** `answer` + `translation` so the client can grade each question locally for instant feedback (mirrors `ExactMatchScorer`); the authoritative score still comes only from the submit-attempt endpoint |
 | `SubmitVocabAttemptRequest` / `SubmitGrammarAttemptRequest` | `{userId, practiceItemId, answers: string[]}` | REST request body, one answer per question index |
 | `VocabScoreResult` / `GrammarScoreResult` (in-memory) | `{accuracy, perQuestionCorrect: boolean[]}` | pure exact-match scorer, no partial credit |
 | `vocab_practice_attempts` / `grammar_practice_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), score, created_at}` | one row per submission, full history kept |
-| `VocabAttemptResultDto` / `GrammarAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, translation}], actionAdvice[]}` | REST grading response |
+| `VocabAttemptResultDto` / `GrammarAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, translation}], actionAdvice[]}` (+ `translationVi` per result on `GrammarAttemptResultDto` only) | REST grading response |
 | `PracticeAttemptRequest` fed from vocabulary/grammar learn | `{itemId: "vocab:<word>"\|"grammar:<rule>", category: "vocabulary"\|"grammar", label, correct}` | one per distinct target word/rule in the submitted attempt (dedup by lower-cased label), passed straight into `PracticeService.redo(...)` - **not** a new event, reuses `PracticeFlow`'s existing scoring/dispatch |
 | `GenerateListeningPracticeRequest` | `{level?, examType?, translationLang?, focusItems?}` | REST request body |
 | `listening_practice_items` row | `{id, user_id, level?, exam_type?, topic, transcript, translation?, questions (JSON `ListeningQuestionItem[]`), storage_key?, created_at}` | one row per generated passage; audio synthesized synchronously in the same call, `storage_key` set before the row is returned |
 | `ListeningQuestionItem` | `{type: MCQ\|KEYWORD\|OPEN, skill, prompt, options?, answer, explanation}` | `skill` (e.g. "main-idea"/"detail"/"attitude"/"keyword") doubles as the weak-point label for non-`KEYWORD` questions; `options` only for `MCQ`; `answer` is the correct option (`MCQ`), expected phrase (`KEYWORD`, scored by WER), or model answer (`OPEN`, used as the LLM grading reference) |
+| `ListeningQuestionDto` (REST) | `{index, prompt, type, options?, answer, explanation}` | generate/`getItem`/`listItems` response - now **includes** `answer` + `explanation` for client-side grading of `MCQ`/`KEYWORD`; `answer` is **null** for `OPEN` (those are LLM-graded server-side by `OpenAnswerGrader` and must not leak). transcript/translation still withheld until the attempt is submitted; authoritative score still from the submit endpoint |
 | `SubmitListeningAttemptRequest` | `{userId, practiceItemId, answers: string[]}` | REST request body |
 | `OpenAnswerGrade` (in-memory) | `{score: 0..1, feedback}` | `OpenAnswerGrader` (LLM) output for `OPEN` questions only; `MCQ`/`KEYWORD` are scored by the pure `ListeningQuestionScoring.scoreClosed` instead |
 | `listening_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), results (JSON `ListeningAttemptQuestionResultDto[]`), score, created_at}` | `score` = mean of all `subScore`s (each question's own 0..1) |
-| `ListeningAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, subScore, explanation}], transcript, translation?, actionAdvice[]}` | REST grading response; `transcript`/`translation` returned **only** on this response, not on `getItem`/`listItems` (those would leak the answer) |
+| `ListeningAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, subScore, explanation}], transcript, translation?, actionAdvice[]}` | REST grading response; `transcript`/`translation` returned **only** on this response, not on `getItem`/`listItems` (those would leak the passage; note the per-question `answer`/`explanation` themselves are now on `getItem`/`listItems` for client-side grading, `answer` null for `OPEN`) |
 | `PracticeAttemptRequest` fed from listening learn | `{itemId: "listening:<label>", category: "listening", label, correct}` | one per distinct label (KEYWORD's `answer`, or MCQ/OPEN's `skill`); **`category = "listening"` has no matching consumer in `WeakPointDispatcherImpl`** - `mistake_history`/`item_difficulty_stats`/the review queue and `learning.gap.analysis.requested`'s `history[]` still pick it up (all category-agnostic), but no `listening_weak_points` table exists and the Java-computed score for it is simply logged and dropped - see the note below |
 | `GenerateSpeakingPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body |
 | `speaking_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_text, translation?, storage_key?, created_at}` | one row per generated sentence/passage; `storage_key` is the Supertonic **sample** (model) recording, synthesized with one fixed voice (unlike listening's multi-speaker dialogue) |
@@ -427,6 +490,21 @@ flowchart TD
 | `SectionQueueEntry` (post-`applyResult`) | `{wordId, streak, introShown, pendingExerciseType?}` | `SectionQueue.applyResult` drops the word (mastered) at `streak==2`, else requeues it `+6` cards on a correct-not-yet-mastered answer or `+2` cards (streak reset to `0`) on a wrong one |
 | `SectionAnswerResultDto` | `{correct, correctAnswer?, completed, nextCard?, progress}` | REST grading response; `nextCard` is null once `completed=true` |
 | `PracticeAttemptRequest` fed from vocabulary library | `{itemId: "vocab:<word>", category: "vocabulary", label, correct}` | one per `vocabulary_section_answers` row for the completed/abandoned attempt, **NOT** deduped by word (unlike `VocabLearnFlow`'s `VLFeed`) - a word answered 3 times in one Section produces 3 requests, so a same-batch repeat sets `recurredInBatch=true` in `WeakPointScoringEngine`, the entire point of in-session repetition; shares `vocabulary_weak_points` with `VocabLearnFlow` (same `item_id` scheme), no second mastery table |
+| `grammar_library_topics` row | `{id, code, name, description?, level, sequence_order, created_at}` | fixed, hand-seeded catalog of 60 topics (`V17__grammar_library.sql`), never generated/topped up at runtime, unlike `vocabulary_topics`/`vocabulary_library_words` |
+| `GeneratedGrammarTopicContent` (LLM JSON) | `{explanationEn, explanationVi, illustrationText, examples: [{en, vi}], questions: [{type, prompt, options?, answer, explanationVi, translationVi}] (8-10 items)}` | `LlmGrammarLibraryContentGenerator.generateTopicContent` output; falls back to a minimal static template (not empty) on call/parse failure. `translationVi` is a plain Vietnamese meaning-translation of `answer`, distinct from `explanationVi` (a grammar-rule explanation) |
+| `grammar_library_contents` row | `{id, topic_id (unique), explanation_en, explanation_vi, illustration_text, examples_json, generated_at}` | one row per topic, generated once on first `GET .../topics/{topicId}` and reused forever |
+| `grammar_library_questions` row | `{id, topic_id, question_type, prompt, options_json?, answer, explanation_vi?, translation_vi?, created_at}` | the reusable 8-10 question pool, generated alongside the content row in the same transaction (`translation_vi` added in `V18__grammar_library_translation.sql`, nullable for rows generated before it existed) |
+| `GrammarLibraryTopicDto` (REST) | `{topicId, code, name, description?, level, sequenceOrder, status: LOCKED\|UNLOCKED\|IN_PROGRESS\|PASSED}` | `GET .../{userId}/topics` response; `status` comes from `grammar_topic_progress`, defaulting to `LOCKED` when no row exists |
+| `GrammarLibraryContentDto` (REST) | `{topicId, explanationEn, explanationVi, illustrationText, examples: [{en, vi}], questions: GrammarLibraryQuestionDto[]}` | `GET .../topics/{topicId}` response; `GrammarLibraryQuestionDto` **includes** `answer`/`explanationVi`/`translationVi` (theory view, not a quiz) |
+| `grammar_topic_progress` row | `{id, user_id, topic_id, status, unlocked_at?, passed_at?, updated_at}` | upserted on `(user_id, topic_id)`; the first topic (`sequence_order=1`) is bootstrapped to `UNLOCKED` the first time a learner calls `listTopics` |
+| `GrammarLibrarySessionQuestion` (JSON element, in `questions_json`) | `{questionRef, type, prompt, options?, answer, explanationVi, translationVi}` | a full content snapshot, not a foreign-key reference - lets a `RETRY` session's freshly-generated questions live inline without ever touching `grammar_library_questions` |
+| `grammar_library_sessions` row | `{id, user_id, topic_id, session_type: INITIAL\|RETRY, questions_json, status: IN_PROGRESS\|COMPLETED, correct_count, total_count, started_at, completed_at?}` | `INITIAL` snapshots the full pool (`questionRef = "q-" + questionId`); `RETRY` snapshots only AI-regenerated replacements for the previously-wrong questions (`questionRef = "r-" + index`) |
+| `StartGrammarSessionResponse` (REST) | `{sessionId, sessionType, questions: GrammarSessionQuestionDto[], totalCount}` | `GrammarSessionQuestionDto` omits `answer`/`explanationVi`/`translationVi` (in-progress quiz, unlike the theory-page DTO) |
+| `SubmitGrammarLibraryAnswerRequest` | `{questionRef, submittedAnswer?}` | REST request body |
+| `grammar_library_session_answers` row | `{id, session_id, question_ref, submitted_answer?, correct, answered_at}` | one row per submission; a re-submitted `questionRef` is resolved to its most-recent row at `finishSession` time |
+| `GrammarLibraryAnswerResultDto` (REST) | `{questionRef, correct, correctAnswer?, explanationVi?, translationVi?}` | `POST .../sessions/{sessionId}/answers` response |
+| `FinishGrammarLibrarySessionResponse` (REST) | `{sessionId, correctCount, totalCount, passed, retrySession?: StartGrammarSessionResponse, nextTopicUnlocked, nextTopicId?}` | `retrySession` non-null only when `passed=false` |
+| `PracticeAttemptRequest` fed from grammar library | `{itemId: "grammar:<topicCode>", category: "grammar", label: topicName, correct}` | one per question in the finished session, **NOT** deduped (same convention as `LibFeed` above) - lets a session's repeated exposure to the same topic register as in-batch recurrence |
 
 ## Where data comes from / where it can go next
 
@@ -564,6 +642,13 @@ flowchart TD
   `practiceService.redo(...)` as a **direct in-process method call**, not a second HTTP round-trip to
   `POST /api/v1/practice/redo` - so they get `mistake_history`, `WeakPointScoringEngine`, and the
   bundled `learning.gap.analysis.requested` re-publish for free, exactly like a manual redo exercise.
+  **Contract change - client-side grading:** the generate/`getItem`/`listItems` question payloads now
+  ship the correct answer so the FE grades each question locally for instant feedback -
+  `VocabQuestionDto`/`GrammarQuestionDto` add `answer` + `translation`, `ListeningQuestionDto` adds
+  `answer` + `explanation` (with `answer` null for `OPEN`, which is LLM-graded server-side and must not
+  leak). The authoritative score is still produced only by the submit-attempt endpoint - the in-memory
+  scorers, `PracticeService.redo`, and the Kafka flow above are unchanged; client-side grading is
+  display-only.
 - **`category = "listening"` is new and has no dedicated weak-point table.** Unlike `vocabulary`/
   `grammar`/`pronunciation` (each backed by its own `*_weak_points` table and Kafka consumer),
   `LearningCategories.LISTENING` (`RemeLearning/common/.../constants/LearningCategories.java`) has no
@@ -646,3 +731,19 @@ flowchart TD
   `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weak_phonemes[]}`) is decoded
   Java-side by `common.ai.pronunciation.aiservice.AiServicePronunciationScoringClient`, the concrete
   `PronunciationScoringClient` `SpeakingLearnServiceImpl` calls.
+- **New: `grammar.library` (60-topic catalog + AI theory page/pool, generated once, pass/retry/
+  unlock-next-topic progression), crossing `vocabulary.library`'s "generate content once, reuse
+  forever" pattern with `grammar.learn`'s question types/scoring.** Unlike `vocabulary_topics`, the
+  60-row `grammar_library_topics` catalog is fixed and hand-seeded
+  (`V17__grammar_library.sql`) - nothing about the topic list itself is ever AI-generated; only each
+  topic's *content* (theory page + 8-10 question pool) is, exactly once, the first time
+  `GET .../topics/{topicId}` is called for it. A session snapshots full question content inline
+  (`GrammarLibrarySessionQuestion`, not a foreign-key reference) so a `RETRY` session's freshly
+  AI-regenerated replacement questions never need to touch the shared, reusable
+  `grammar_library_questions` pool - they are one-off, session-scoped content. Finishing a session
+  always feeds every question (not deduped) into `PracticeService.redo(...)` exactly like
+  `LibFeed` does for vocabulary Sections, and either marks the topic `PASSED` + unlocks the next
+  topic by `sequence_order` (a guarded upsert that never regresses a topic already past `LOCKED`), or
+  returns a brand-new `RETRY` session covering only the questions still wrong. See
+  [../sequence/English_service/grammar-library.md](../sequence/English_service/grammar-library.md)
+  for the call-order view.
