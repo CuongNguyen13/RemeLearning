@@ -94,8 +94,8 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 	@Override
 	@Transactional
 	public ListeningLibrarySectionDto startOrResumeSection(String userId, Long topicId) {
+		ListeningLibraryTopic topic = requireTopic(topicId);
 		requireUnlockedOrInProgress(userId, topicId);
-		ListeningLibraryTopic topic = topicMapper.findById(topicId);
 		java.util.List<ListeningLibrarySection> existing = sectionMapper.findByTopicId(topicId);
 		ListeningLibrarySection section = existing.isEmpty()
 				? generator.generateSection(topic)
@@ -117,6 +117,16 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		return new ListeningLibrarySectionDto(section.getId(), section.getPassageText(), audioUrl, questionViews);
 	}
 
+	// Mirrors GrammarLibraryServiceImpl.requireTopic: throws a 404-mapped BusinessException instead
+	// of letting a null topic silently flow into the section generator.
+	private ListeningLibraryTopic requireTopic(Long topicId) {
+		ListeningLibraryTopic topic = topicMapper.findById(topicId);
+		if (topic == null) {
+			throw BusinessException.notFound("Listening library topic not found: id=" + topicId);
+		}
+		return topic;
+	}
+
 	// Mirrors GrammarLibraryServiceImpl.requireUnlockedOrInProgress: only LOCKED is rejected (a
 	// missing row counts as LOCKED); UNLOCKED/IN_PROGRESS/PASSED all pass through.
 	private void requireUnlockedOrInProgress(String userId, Long topicId) {
@@ -134,6 +144,9 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 	@Transactional
 	public SubmitListeningAnswersResponse submitAnswers(String userId, Long sectionId, SubmitListeningAnswersRequest req) {
 		ListeningLibrarySection section = sectionMapper.findById(sectionId);
+		if (section == null) {
+			throw BusinessException.notFound("Listening library section not found: id=" + sectionId);
+		}
 		java.util.List<ListeningLibraryQuestion> questions = questionMapper.findBySectionId(sectionId);
 		Map<Long, String> correctByQuestionId = questions.stream()
 				.collect(Collectors.toMap(ListeningLibraryQuestion::getId, ListeningLibraryQuestion::getCorrectOption));
