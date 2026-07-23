@@ -1,5 +1,6 @@
 package com.remelearning.english.listening.library.generator;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.learn.common.AiContentClient;
@@ -13,6 +14,7 @@ import com.remelearning.english.listening.library.domain.ListeningLibraryTopic;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryQuestionMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibrarySectionMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -62,8 +64,19 @@ class LlmListeningLibraryGeneratorTest {
 		assertThat(section.getTopicId()).isEqualTo(1L);
 		assertThat(section.getAudioStorageKey()).isNotBlank();
 		verify(sectionMapper).insert(any(ListeningLibrarySection.class));
-		verify(questionMapper).insert(any(ListeningLibraryQuestion.class));
 		verify(audioSynthesizer).synthesize(List.of(new DialogueLine("Narrator", "A short passage about travel.", null)), "en");
+
+		// Capture the actual persisted question row to verify every NOT NULL column was mapped
+		// correctly, not just that insert() was called with "some" ListeningLibraryQuestion.
+		ArgumentCaptor<ListeningLibraryQuestion> questionCaptor = ArgumentCaptor.forClass(ListeningLibraryQuestion.class);
+		verify(questionMapper).insert(questionCaptor.capture());
+		ListeningLibraryQuestion persistedQuestion = questionCaptor.getValue();
+		assertThat(persistedQuestion.getQuestionText()).isEqualTo("Where did they go?");
+		assertThat(persistedQuestion.getCorrectOption()).isEqualTo("A");
+		assertThat(persistedQuestion.getExplanation()).isEqualTo("Stated in the passage.");
+		List<String> persistedOptions = new ObjectMapper().readValue(
+				persistedQuestion.getOptionsJson(), new TypeReference<List<String>>() {});
+		assertThat(persistedOptions).containsExactly("Paris", "Rome", "Tokyo", "Cairo");
 	}
 
 	@Test
