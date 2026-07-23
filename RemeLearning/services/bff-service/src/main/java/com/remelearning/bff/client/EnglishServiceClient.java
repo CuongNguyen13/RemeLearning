@@ -11,6 +11,7 @@ import com.remelearning.bff.dto.DictationHistoryEntryDto;
 import com.remelearning.bff.dto.DictationLessonSummaryDto;
 import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
+import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
@@ -18,6 +19,10 @@ import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
 import com.remelearning.bff.dto.GrammarAttemptDetailDto;
 import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarAttemptResultDto;
+import com.remelearning.bff.dto.GrammarLibraryAnswerResultDto;
+import com.remelearning.bff.dto.GrammarLibraryContentDto;
+import com.remelearning.bff.dto.GrammarLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.GrammarLibraryTopicDto;
 import com.remelearning.bff.dto.GrammarPracticeItemDto;
 import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
 import com.remelearning.bff.dto.ListeningAttemptDetailDto;
@@ -33,8 +38,10 @@ import com.remelearning.bff.dto.StartDictationSessionRequestDto;
 import com.remelearning.bff.dto.SectionAnswerResultDto;
 import com.remelearning.bff.dto.SectionCardDto;
 import com.remelearning.bff.dto.SectionHistoryEntryDto;
+import com.remelearning.bff.dto.StartGrammarSessionResponseDto;
 import com.remelearning.bff.dto.StartSectionRequestDto;
 import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitGrammarLibraryAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
@@ -394,6 +401,68 @@ public class EnglishServiceClient {
 				.retrieve()
 				.toEntityFlux(DataBuffer.class)
 				.doOnError(ex -> log.error("Failed to stream vocabulary library word audio for wordId={}", wordId, ex));
+	}
+
+	/** Fetches every one of the 60 grammar-library catalog topics with this learner's own progression status. */
+	public Mono<List<GrammarLibraryTopicDto>> listGrammarLibraryTopics(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/library/{userId}/topics", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarLibraryTopicDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list grammar library topics for userId={}", userId, ex));
+	}
+
+	/** Fetches a grammar-library topic's theory page + question pool, generated via AI on first read only. */
+	public Mono<GrammarLibraryContentDto> getGrammarLibraryTopicContent(Long topicId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/library/topics/{topicId}", topicId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarLibraryContentDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get grammar library topic content for topicId={}", topicId, ex));
+	}
+
+	/** Starts a new INITIAL grammar-library session for a topic (topic must be UNLOCKED or IN_PROGRESS). */
+	public Mono<StartGrammarSessionResponseDto> startGrammarLibrarySession(String userId, Long topicId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/library/{userId}/topics/{topicId}/sessions", userId, topicId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<StartGrammarSessionResponseDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start grammar library session for userId={}, topicId={}", userId, topicId, ex));
+	}
+
+	/** Grades one submitted answer within an in-progress grammar-library session. */
+	public Mono<GrammarLibraryAnswerResultDto> submitGrammarLibraryAnswer(Long sessionId, SubmitGrammarLibraryAnswerRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/library/sessions/{sessionId}/answers", sessionId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<GrammarLibraryAnswerResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit grammar library answer for sessionId={}", sessionId, ex));
+	}
+
+	/** Finishes a grammar-library session: PASSED + next-topic unlock when all correct, otherwise a fresh RETRY session. */
+	public Mono<FinishGrammarLibrarySessionResponseDto> finishGrammarLibrarySession(Long sessionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/library/sessions/{sessionId}/finish", sessionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<FinishGrammarLibrarySessionResponseDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to finish grammar library session for sessionId={}", sessionId, ex));
+	}
+
+	/** Fetches a learner's completed grammar-library sessions for one topic, newest first. */
+	public Mono<List<GrammarLibraryHistoryEntryDto>> getGrammarLibraryHistory(String userId, Long topicId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/library/{userId}/topics/{topicId}/history", userId, topicId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarLibraryHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get grammar library history for userId={}, topicId={}", userId, topicId, ex));
 	}
 
 	/** Generates one AI grammar practice set, targeting the given focus rules or (if omitted) the learner's own top weak points. */

@@ -10,6 +10,7 @@ public class SectionCardDto {
 	private String cardKind;
 	private Long libraryWordId;
 	private String word;
+	private String ipa;
 	private String meaningVi;
 	private String exampleEn;
 	private String audioUrl;

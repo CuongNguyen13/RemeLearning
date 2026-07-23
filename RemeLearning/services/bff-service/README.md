@@ -28,6 +28,12 @@ Full spec: [`openapi.yaml`](openapi.yaml) / `/swagger-ui.html` when running. Det
 Every fan-out call is wrapped in `.onErrorResume(...)` — if one downstream service is down, its slice
 of the response defaults to empty/null instead of failing the whole request.
 
+The `/api/v1/learners/{userId}/learn/*` routes are thin proxies to english-service's four "learn"
+skills. Contract note: the practice-item responses now proxy through the new answer fields —
+`answer`/`translation` (vocabulary, grammar) and `answer`/`explanation` (listening; `answer` is null for
+`OPEN` questions) — so the FE can grade each question locally for instant feedback. The authoritative
+score still comes only from the submit-attempt endpoint.
+
 ## Run locally
 
 ```bash

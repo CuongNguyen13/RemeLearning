@@ -13,12 +13,17 @@ import com.remelearning.bff.dto.DictationHistoryEntryDto;
 import com.remelearning.bff.dto.DictationLessonSummaryDto;
 import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
+import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
 import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
 import com.remelearning.bff.dto.GrammarAttemptDetailDto;
 import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarAttemptResultDto;
+import com.remelearning.bff.dto.GrammarLibraryAnswerResultDto;
+import com.remelearning.bff.dto.GrammarLibraryContentDto;
+import com.remelearning.bff.dto.GrammarLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.GrammarLibraryTopicDto;
 import com.remelearning.bff.dto.GrammarPracticeItemDto;
 import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
 import com.remelearning.bff.dto.LearnerOverviewResponse;
@@ -32,6 +37,7 @@ import com.remelearning.bff.dto.SectionAnswerResultDto;
 import com.remelearning.bff.dto.SectionCardDto;
 import com.remelearning.bff.dto.SectionHistoryEntryDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
+import com.remelearning.bff.dto.StartGrammarSessionResponseDto;
 import com.remelearning.bff.dto.StartSectionRequestDto;
 import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
 import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
@@ -39,6 +45,7 @@ import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingAttemptResultDto;
 import com.remelearning.bff.dto.SpeakingPracticeItemDto;
 import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitGrammarLibraryAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
@@ -350,6 +357,48 @@ public class LearnerController {
 	public Mono<ApiResponse<GrammarAttemptDetailDto>> getGrammarAttemptDetail(
 			@PathVariable String userId, @PathVariable Long attemptId) {
 		return englishServiceClient.getGrammarAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "List every one of the 60 grammar-library catalog topics with this learner's own progression status; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/library/topics")
+	public Mono<ApiResponse<List<GrammarLibraryTopicDto>>> listGrammarLibraryTopics(@PathVariable String userId) {
+		return englishServiceClient.listGrammarLibraryTopics(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A grammar-library topic's theory page + question pool, generated via AI on first read only; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/library/topics/{topicId}")
+	public Mono<ApiResponse<GrammarLibraryContentDto>> getGrammarLibraryTopicContent(
+			@PathVariable String userId, @PathVariable Long topicId) {
+		return englishServiceClient.getGrammarLibraryTopicContent(topicId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Start a new INITIAL grammar-library session for a topic (must be UNLOCKED or IN_PROGRESS); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/library/topics/{topicId}/sessions")
+	public Mono<ApiResponse<StartGrammarSessionResponseDto>> startGrammarLibrarySession(
+			@PathVariable String userId, @PathVariable Long topicId) {
+		return englishServiceClient.startGrammarLibrarySession(userId, topicId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade one submitted answer within an in-progress grammar-library session; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/library/sessions/{sessionId}/answers")
+	public Mono<ApiResponse<GrammarLibraryAnswerResultDto>> submitGrammarLibraryAnswer(
+			@PathVariable String userId, @PathVariable Long sessionId, @RequestBody(required = false) SubmitGrammarLibraryAnswerRequestDto request) {
+		return englishServiceClient.submitGrammarLibraryAnswer(sessionId, request == null ? new SubmitGrammarLibraryAnswerRequestDto() : request)
+				.map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Finish a grammar-library session: PASSED + next-topic unlock when all correct, otherwise a new RETRY session; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/library/sessions/{sessionId}/finish")
+	public Mono<ApiResponse<FinishGrammarLibrarySessionResponseDto>> finishGrammarLibrarySession(
+			@PathVariable String userId, @PathVariable Long sessionId) {
+		return englishServiceClient.finishGrammarLibrarySession(sessionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's completed grammar-library sessions for one topic, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/library/topics/{topicId}/history")
+	public Mono<ApiResponse<List<GrammarLibraryHistoryEntryDto>>> getGrammarLibraryHistory(
+			@PathVariable String userId, @PathVariable Long topicId) {
+		return englishServiceClient.getGrammarLibraryHistory(userId, topicId).map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Generate one AI listening passage, targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; thin proxy to english-service")

@@ -11,6 +11,8 @@ public class DictationAttemptResultDto {
 	private double accuracy;
 	private double wer;
 	private List<WordDiffDto> diff;
-	private List<String> aiSuggestions;
+	private List<DictationErrorEntryDto> errorTable;
+	private List<DictationRootCauseGroupDto> rootCauses;
+	private List<String> actionAdvice;
 	private List<String> practiceSentences;
 }

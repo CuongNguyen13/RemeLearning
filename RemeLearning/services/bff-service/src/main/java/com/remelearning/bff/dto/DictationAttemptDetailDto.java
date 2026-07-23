@@ -18,6 +18,8 @@ public class DictationAttemptDetailDto {
 	private double accuracy;
 	private double wer;
 	private List<DictationMistakeDto> mistakes;
-	private List<String> aiSuggestions;
+	private List<DictationErrorEntryDto> errorTable;
+	private List<DictationRootCauseGroupDto> rootCauses;
+	private List<String> actionAdvice;
 	private Instant attemptedAt;
 }
