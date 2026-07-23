@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.speaking.library.mapper.SpeakingLibrarySentenceMapper">
+
+    <select id="findBySectionId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySentence">
+        SELECT id, section_id, sentence_text, ipa, sample_audio_storage_key, created_at
+        FROM speaking_library_sentences WHERE section_id = #{sectionId} ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySentence">
+        SELECT id, section_id, sentence_text, ipa, sample_audio_storage_key, created_at
+        FROM speaking_library_sentences WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySentence"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO speaking_library_sentences (section_id, sentence_text, ipa, sample_audio_storage_key)
+        VALUES (#{sectionId}, #{sentenceText}, #{ipa}, #{sampleAudioStorageKey})
+    </insert>
+
+</mapper>

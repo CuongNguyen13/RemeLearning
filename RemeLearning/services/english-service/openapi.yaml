@@ -1460,6 +1460,133 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingAttemptDetail"
 
+  /api/v1/learn/speaking/library/{userId}/topics:
+    get:
+      tags: [Speaking Library]
+      summary: List every catalog topic with this learner's own progression status
+      operationId: getSpeakingLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibraryTopicList"
+
+  /api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections:
+    post:
+      tags: [Speaking Library]
+      summary: Start a new Section for a topic (generating one via AI on first read), or resume its most recent one
+      operationId: startOrResumeSpeakingLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibrarySection"
+        "403":
+          description: Topic is locked for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts:
+    post:
+      tags: [Speaking Library]
+      summary: Submit a learner's recorded attempt at one sentence (multipart audio); scores it via ai-service's wav2vec2 GOP model - does not itself affect topic gating
+      operationId: submitSpeakingLibrarySentenceAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: sentenceId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio: { type: string, format: binary }
+              required: [audio]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSentenceAttemptResult"
+        "404":
+          description: Section or sentence not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learn/speaking/library/{userId}/sections/{sectionId}/finish:
+    post:
+      tags: [Speaking Library]
+      summary: Finish a section; if every sentence has a passing attempt, marks the topic PASSED and unlocks the next topic
+      operationId: finishSpeakingLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseFinishSpeakingSection"
+
+  /api/v1/learn/speaking/library/{userId}/sections/history:
+    get:
+      tags: [Speaking Library]
+      summary: This learner's scored sentence attempts, across all topics
+      operationId: getSpeakingLibraryHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibraryAttemptList"
+
 components:
   schemas:
     VocabularyType:
@@ -2863,3 +2990,93 @@ components:
         - type: object
           properties:
             data: { $ref: "#/components/schemas/SpeakingAttemptDetail" }
+
+    SpeakingLibraryTopic:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        level: { type: string }
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+
+    ApiResponseSpeakingLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SpeakingLibraryTopic" } }
+
+    SpeakingLibrarySectionSentence:
+      type: object
+      description: Learner-facing view of a sample sentence - text, IPA and a fetchable sample-audio URL (null until Supertonic has synthesized it).
+      properties:
+        sentenceId: { type: integer, format: int64 }
+        sentenceText: { type: string }
+        ipa: { type: string, nullable: true }
+        sampleAudioUrl: { type: string, nullable: true }
+
+    SpeakingLibrarySection:
+      type: object
+      description: A section ready to practice - its pool of sample sentences.
+      properties:
+        sectionId: { type: integer, format: int64 }
+        sentences: { type: array, items: { $ref: "#/components/schemas/SpeakingLibrarySectionSentence" } }
+
+    ApiResponseSpeakingLibrarySection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SpeakingLibrarySection" }
+
+    SentenceAttemptResult:
+      type: object
+      description: Scoring result for one recorded sentence attempt - does not itself affect topic gating (see the finish endpoint).
+      properties:
+        sentenceId: { type: integer, format: int64 }
+        phonemeScore: { type: number, format: double }
+        wordScore: { type: number, format: double }
+        passed: { type: boolean }
+        transcript: { type: string }
+
+    ApiResponseSentenceAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SentenceAttemptResult" }
+
+    FinishSpeakingSection:
+      type: object
+      properties:
+        totalSentences: { type: integer }
+        passedSentences: { type: integer }
+        passed: { type: boolean }
+        nextTopicId: { type: integer, format: int64, nullable: true }
+        nextTopicUnlocked: { type: boolean }
+
+    ApiResponseFinishSpeakingSection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/FinishSpeakingSection" }
+
+    SpeakingLibraryAttempt:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: string }
+        sectionId: { type: integer, format: int64 }
+        sentenceId: { type: integer, format: int64 }
+        phonemeScore: { type: number, format: double }
+        wordScore: { type: number, format: double }
+        recordedAudioStorageKey: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    ApiResponseSpeakingLibraryAttemptList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SpeakingLibraryAttempt" } }

@@ -902,6 +902,71 @@ Chi tiết một lần làm bài — `SpeakingAttemptDetailDto`: `{attemptId, le
 overallScore, words: WordScoreDto[], transcript, weakPhonemes: string[], attemptedAt}`. **Lỗi**: `404`
 nếu không tồn tại hoặc không thuộc về `userId`.
 
+### Speaking Library — catalog chủ điểm luyện nói/phát âm, Section AI (câu mẫu + audio từng câu) + mở khóa tuần tự (package `speaking.library`)
+
+Song song `listening.library` nhưng cho kỹ năng nói: một catalog **cố định** các chủ điểm luyện nói
+(cùng tên/thứ tự với `grammar_library_topics`/`listening_library_topics`, seed cứng trong
+`V20__speaking_library.sql`), mỗi chủ điểm có một hoặc nhiều **Section**, mỗi Section là một pool 5
+câu mẫu (sinh bằng AI **một lần duy nhất** rồi tái sử dụng mãi mãi) kèm phiên âm IPA và audio mẫu
+Supertonic **riêng cho từng câu** (khác `listening.library`, nơi cả section chỉ có một audio đoạn văn
+chung). Learner đi tuần tự giống Listening/Grammar Library: chủ điểm đầu tiên tự bootstrap `UNLOCKED`,
+các chủ điểm sau `LOCKED` cho tới khi chủ điểm liền trước được `PASSED`. Khác biệt cốt lõi so với
+`listening.library`: chấm điểm diễn ra **từng câu một** (`submitSentenceAttempt`, GOP qua
+`PronunciationScoringClient` — tái dùng đúng dịch vụ chấm mà `speaking.learn` đang dùng, không viết
+lại), mỗi lần nộp chỉ lưu một attempt (`speaking_library_attempts`) và **không** đụng vào tiến độ chủ
+điểm; việc mở khóa chủ điểm kế tiếp chỉ xảy ra khi gọi endpoint `finish` riêng, sau khi mọi câu trong
+section đều có ít nhất một attempt đạt ngưỡng (`PASS_THRESHOLD = 0.7`) trên **cả hai** điểm
+`phonemeScore` và `wordScore`.
+
+### GET `/api/v1/learn/speaking/library/{userId}/topics`
+
+Danh sách toàn bộ chủ điểm kèm trạng thái tiến độ của learner (tự bootstrap chủ điểm đầu tiên thành
+`UNLOCKED` nếu learner chưa có row nào).
+- **Path param**: `userId` (string)
+- **Response `data`** — `SpeakingLibraryTopicDto[]`: `{id, name, level, status
+  (LOCKED|UNLOCKED|IN_PROGRESS|PASSED)}`.
+
+### POST `/api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections`
+
+Bắt đầu một Section mới cho chủ điểm (sinh 5 câu mẫu + IPA + audio từng câu bằng AI ở lần đọc đầu
+tiên, các lần sau chỉ đọc lại Section gần nhất đã có), chuyển trạng thái chủ điểm sang `IN_PROGRESS`.
+- **Path param**: `userId` (string), `topicId` (int64)
+- **Response `data`** — `SpeakingLibrarySectionDto`: `{sectionId, sentences: {sentenceId,
+  sentenceText, ipa?, sampleAudioUrl?}[]}`.
+- **Lỗi**: `403` nếu chủ điểm đang `LOCKED` cho learner này; `404` nếu `topicId` không tồn tại.
+
+### POST `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts` (multipart)
+
+Nộp bản ghi âm của learner cho **một câu** trong section để chấm điểm; không ảnh hưởng tiến độ chủ
+điểm (xem endpoint `finish` bên dưới).
+- **Path param**: `userId` (string), `sectionId` (int64), `sentenceId` (int64)
+- **Request** (multipart form): `audio` (file, bắt buộc)
+- **Xử lý** (`SpeakingLibraryServiceImpl`): lưu audio learner vào `StorageClient` (key
+  `speaking-library/attempts/{userId}/{uuid}.wav`), gọi `PronunciationScoringClient.score(...)` (→
+  ai-service `POST /api/v1/pronunciation/score`, mục 7) với `expected_text = sentenceText` của câu,
+  rút gọn kết quả phoneme/word chi tiết (`PronunciationScore.words[].score`/`.phonemes[].score`)
+  thành `phonemeScore`/`wordScore` bằng trung bình cộng, lưu một row `speaking_library_attempts`.
+- **Response `data`** — `SentenceAttemptResultDto`: `{sentenceId, phonemeScore, wordScore, passed
+  (cả hai điểm ≥ 0.7), transcript}`.
+- **Lỗi**: `404` nếu `sectionId` hoặc `sentenceId` không tồn tại.
+
+### POST `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/finish`
+
+Kết thúc section: kiểm tra mọi câu trong section có ít nhất một attempt đạt ngưỡng
+(`phonemeScore ≥ 0.7` và `wordScore ≥ 0.7`) hay chưa. Nếu đạt hết → chủ điểm chuyển `PASSED`, tự mở
+khóa (`UNLOCKED`) chủ điểm kế tiếp theo `sequenceOrder` (nếu đang `LOCKED` hoặc chưa có row).
+- **Path param**: `userId` (string), `sectionId` (int64)
+- **Response `data`** — `FinishSectionResponse`: `{totalSentences, passedSentences, passed,
+  nextTopicId?, nextTopicUnlocked}`.
+- **Lỗi**: `404` nếu `sectionId` không tồn tại.
+
+### GET `/api/v1/learn/speaking/library/{userId}/sections/history`
+
+Toàn bộ attempt (từng câu) đã chấm của learner, trên mọi chủ điểm/Section.
+- **Path param**: `userId` (string)
+- **Response `data`** — `SpeakingLibraryAttempt[]`: `{id, userId, sectionId, sentenceId,
+  phonemeScore, wordScore, recordedAudioStorageKey?, createdAt}`.
+
 ### Cơ chế chấm điểm (Java scoring engine, package `common.scoring`)
 
 Từ bản cập nhật này, `forgettingScore`/`weakScore` không còn chỉ là một công thức Ebbinghaus đơn lẻ tính
@@ -1856,6 +1921,11 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (speaking) | REST | POST | `/api/v1/learn/speaking/{userId}/attempts` | multipart audio; chấm GOP qua ai-service `/api/v1/pronunciation/score`, feed category `pronunciation` (tái dùng, không tạo mới) |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}` | lịch sử làm bài |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
+| english-service (speaking.library) | REST | GET | `/api/v1/learn/speaking/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
+| english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: 5 câu mẫu + IPA + audio từng câu); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
+| english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts` | multipart audio; chấm GOP từng câu qua `PronunciationScoringClient` (tái dùng dịch vụ chấm của `speaking.learn`), không đụng tiến độ chủ điểm; `404` nếu section/sentence không tồn tại |
+| english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/finish` | hoàn thành section: nếu mọi câu đều có attempt đạt ngưỡng (≥0.7 cả phoneme/word) → `PASSED` + mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |
+| english-service (speaking.library) | REST | GET | `/api/v1/learn/speaking/library/{userId}/sections/history` | lịch sử toàn bộ attempt (từng câu) đã chấm của learner |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/facets` | facets thư viện (skill/level/topic/examType) + `minListensForHint` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/clips` | duyệt clip thư viện theo facets |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/folders` | (rev 2) danh sách folder (chủ đề) + `lessonCount` |

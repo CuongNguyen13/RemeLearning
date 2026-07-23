@@ -220,6 +220,26 @@ flowchart TD
         LLibUnlockNext["listening_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
     end
 
+    subgraph SpeakingLibraryFlow["Speaking library (package speaking.library) - fixed topic catalog + AI Section (sample sentences + per-sentence audio), generated once"]
+        SLibSectionReq["POST /.../library/{userId}/topics/{topicId}/sections"]
+        SLibLockCheck{"speaking_topic_progress.status == LOCKED (or no row)?"}
+        SLibSectionCheck{"speaking_library_sections row exists for topic?"}
+        SLibGenerate["LlmSpeakingLibraryGenerator.generateSection(topic)<br/>LLM (Gemini) -> {sentences: [{text, ipa}] (5 items)}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
+        SLibInsertSection["insert speaking_library_sections row {topicId} (no content columns)"]
+        SLibSynthesizeLoop["per generated sentence:<br/>DialogueAudioSynthesizer.synthesize([Narrator: sentenceText], ttsLang) -> audio bytes<br/>StorageClient.write(speaking-library/{topicId}/{uuid}.wav, audioBytes)<br/>insert speaking_library_sentences row {sectionId, sentenceText, ipa, sampleAudioStorageKey}"]
+        SLibMarkInProgress["speaking_topic_progress -> IN_PROGRESS"]
+
+        SLibAttemptReq["POST /.../{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts (multipart audio)"]
+        SLibStorageWrite["StorageClient.write(speaking-library/attempts/{userId}/{uuid}.wav, audioBytes)"]
+        SLibScore["PronunciationScoringClient.score(audio, sentenceText, ttsLang)<br/>(same GOP call speaking.learn already makes)<br/>-> wordScore = avg(words[].score), phonemeScore = avg(words[].phonemes[].score)"]
+        SLibInsertAttempt["insert speaking_library_attempts row {sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey}<br/>(does NOT touch speaking_topic_progress)"]
+
+        SLibFinishReq["POST /.../{userId}/sections/{sectionId}/finish"]
+        SLibPassCheck{"every sentence in the section has >=1 attempt<br/>with phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD)?"}
+        SLibMarkPassed["speaking_topic_progress -> PASSED, passed_at=now()"]
+        SLibUnlockNext["speaking_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
+    end
+
     subgraph Storage["reme_english DB"]
         T1[("transcripts")]
         T2[("transcript_segments")]
@@ -257,6 +277,11 @@ flowchart TD
         T34[("listening_library_questions")]
         T35[("listening_topic_progress")]
         T36[("listening_library_attempts")]
+        T37[("speaking_library_topics")]
+        T38[("speaking_library_sections")]
+        T39[("speaking_library_sentences")]
+        T40[("speaking_topic_progress")]
+        T41[("speaking_library_attempts")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -451,6 +476,27 @@ flowchart TD
     LLibScore --> LLibPassCheck
     LLibPassCheck -->|yes| LLibMarkPassed --> T35
     LLibMarkPassed --> LLibUnlockNext --> T35
+
+    T37 --> SLibSectionReq
+    SLibSectionReq --> SLibLockCheck
+    T40 --> SLibLockCheck
+    SLibLockCheck -->|no, UNLOCKED/IN_PROGRESS/PASSED| SLibSectionCheck
+    T38 --> SLibSectionCheck
+    SLibSectionCheck -->|no, first read| SLibGenerate --> SLibInsertSection --> T38
+    SLibInsertSection --> SLibSynthesizeLoop --> T39
+    SLibSectionCheck -->|yes, reuse most recent| SLibMarkInProgress
+    SLibSynthesizeLoop --> SLibMarkInProgress
+    SLibMarkInProgress --> T40
+
+    SLibAttemptReq --> SLibStorageWrite --> SLibScore
+    T39 --> SLibScore
+    SLibScore --> SLibInsertAttempt --> T41
+
+    SLibFinishReq --> SLibPassCheck
+    T39 --> SLibPassCheck
+    T41 --> SLibPassCheck
+    SLibPassCheck -->|yes, every sentence passed| SLibMarkPassed --> T40
+    SLibMarkPassed --> SLibUnlockNext --> T40
 ```
 
 ## Data shape at each stage
@@ -559,6 +605,19 @@ flowchart TD
 | `SubmitListeningAnswersResponse` (REST) | `{score, correctCount, totalQuestions, topicPassed, nextTopicId?, nextTopicUnlocked}` | `POST .../sections/{sectionId}/answers` response; `topicPassed = score >= 0.7`; `nextTopicId`/`nextTopicUnlocked` only populated when passed and a next topic exists |
 | `ListeningLibraryAttempt` (REST, history) | `{id, userId, sectionId, score, correctCount, totalQuestions, startedAt, completedAt}` | `GET .../{userId}/sections/history` response; the domain row is returned directly, unlike `GrammarLibraryHistoryEntryDto` which is a dedicated DTO - no separate history-view type exists for listening library today |
 | listening library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | unlike every other "library"/"learn" skill, scoring here writes only to `listening_library_attempts`/`listening_topic_progress` - it does not reach the weak-point/spaced-repetition pipeline at all (consistent with the pre-existing gap that category `listening` has no dedicated weak-point table anywhere in the service, see the `PracticeAttemptRequest fed from listening learn` row above) |
+| `speaking_library_topics` row | `{id, code, name, description?, level, sequence_order, created_at}` | fixed, hand-seeded catalog (`V20__speaking_library.sql`, same topic set/order as `grammar_library_topics`/`listening_library_topics`), never generated/topped up at runtime |
+| `GeneratedSpeakingLibrarySection` (LLM JSON) | `{sentences: [{text, ipa}] (5 items)}` | `LlmSpeakingLibraryGenerator.generateSection` output; same "no static-template fallback" behavior as `GeneratedListeningLibrarySection` - any call/parse failure or empty `sentences` throws `AiContentException`, so a failed generation simply produces no Section |
+| `speaking_library_sections` row | `{id, topic_id, created_at}` | one row per generated Section, inserted **before** its sentences (it carries no content columns of its own, unlike `listening_library_sections`) |
+| `speaking_library_sentences` row | `{id, section_id, sentence_text, ipa?, sample_audio_storage_key?, created_at}` | the reusable 5-sentence pool, each with its own Supertonic sample clip synthesized+stored before insert, addressed by `topic_id` + a random suffix per sentence (mirrors listening's "set before insert" ordering, just one clip per sentence instead of one per section) |
+| `SpeakingLibraryTopicDto` (REST) | `{id, name, level, status: LOCKED\|UNLOCKED\|IN_PROGRESS\|PASSED}` | `GET .../{userId}/topics` response; `status` comes from `speaking_topic_progress`, defaulting to `LOCKED` when no row exists |
+| `speaking_topic_progress` row | `{id, user_id, topic_id, status, unlocked_at?, passed_at?, updated_at}` | upserted on `(user_id, topic_id)`, structurally identical to `listening_topic_progress`/`grammar_topic_progress`; the first topic (`sequence_order=1`) is bootstrapped to `UNLOCKED` the first time a learner calls `getTopics` |
+| `SpeakingLibrarySectionDto` (REST) | `{sectionId, sentences: {sentenceId, sentenceText, ipa?, sampleAudioUrl?}[]}` | `POST .../topics/{topicId}/sections` response |
+| `PronunciationScore` (from `PronunciationScoringClient.score`) | `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weakPhonemes[]}` | same ai-service wav2vec2 GOP response `speaking.learn` already decodes; collapsed to `wordScore`/`phonemeScore` (plain averages over `words[].score` and `words[].phonemes[].score`) rather than persisting the full per-word/per-phoneme breakdown |
+| `speaking_library_attempts` row | `{id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key?, created_at}` | one row per scored **sentence** attempt (unlike listening's one row per whole section submission), full history kept; no upsert/idempotency key |
+| `SentenceAttemptResultDto` (REST) | `{sentenceId, phonemeScore, wordScore, passed, transcript}` | `POST .../sections/{sectionId}/sentences/{sentenceId}/attempts` response; `passed = phonemeScore >= 0.7 AND wordScore >= 0.7`, informational only - does not itself unlock anything |
+| `FinishSectionResponse` (REST) | `{totalSentences, passedSentences, passed, nextTopicId?, nextTopicUnlocked}` | `POST .../sections/{sectionId}/finish` response; `passed` requires every sentence to have at least one qualifying attempt (not necessarily its most recent one) |
+| `SpeakingLibraryAttempt` (REST, history) | `{id, userId, sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey?, createdAt}` | `GET .../{userId}/sections/history` response; the domain row is returned directly, same simplification as `ListeningLibraryAttempt` |
+| speaking library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | same deliberate scope cut as `listening.library`: scoring here writes only to `speaking_library_attempts`/`speaking_topic_progress`, not to `pronunciation_weak_points` (unlike `speaking.learn`, which does feed that table via the same `PronunciationScoringClient` call) |
 
 ## Where data comes from / where it can go next
 

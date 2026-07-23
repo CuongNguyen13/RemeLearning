@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.speaking.library.mapper.SpeakingTopicProgressMapper">
+
+    <select id="findByUserIdAndTopicId" resultType="com.remelearning.english.speaking.library.domain.SpeakingTopicProgress">
+        SELECT id, user_id, topic_id, status, unlocked_at, passed_at, updated_at
+        FROM speaking_topic_progress WHERE user_id = #{userId} AND topic_id = #{topicId}
+    </select>
+
+    <select id="findByUserId" resultType="com.remelearning.english.speaking.library.domain.SpeakingTopicProgress">
+        SELECT id, user_id, topic_id, status, unlocked_at, passed_at, updated_at
+        FROM speaking_topic_progress WHERE user_id = #{userId}
+    </select>
+
+    <insert id="bootstrapFirstTopic">
+        INSERT INTO speaking_topic_progress (user_id, topic_id, status, unlocked_at)
+        VALUES (#{userId}, #{topicId}, 'UNLOCKED', now())
+        ON CONFLICT (user_id, topic_id) DO NOTHING
+    </insert>
+
+    <!-- Insert-when-absent covers "chưa tồn tại"; the DO UPDATE guarded by the WHERE clause only
+         flips an existing LOCKED row forward, never regressing UNLOCKED/IN_PROGRESS/PASSED. -->
+    <insert id="unlockIfLocked">
+        INSERT INTO speaking_topic_progress (user_id, topic_id, status, unlocked_at)
+        VALUES (#{userId}, #{topicId}, 'UNLOCKED', now())
+        ON CONFLICT (user_id, topic_id) DO UPDATE
+            SET status = 'UNLOCKED', unlocked_at = now()
+            WHERE speaking_topic_progress.status = 'LOCKED'
+    </insert>
+
+    <update id="markInProgress">
+        UPDATE speaking_topic_progress SET status = 'IN_PROGRESS', updated_at = now()
+        WHERE user_id = #{userId} AND topic_id = #{topicId}
+    </update>
+
+    <update id="markPassed">
+        UPDATE speaking_topic_progress SET status = 'PASSED', passed_at = now(), updated_at = now()
+        WHERE user_id = #{userId} AND topic_id = #{topicId}
+    </update>
+
+</mapper>

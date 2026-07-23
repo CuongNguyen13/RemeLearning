@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.speaking.library.mapper.SpeakingLibrarySectionMapper">
+
+    <select id="findByTopicId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySection">
+        SELECT id, topic_id, created_at
+        FROM speaking_library_sections WHERE topic_id = #{topicId} ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySection">
+        SELECT id, topic_id, created_at
+        FROM speaking_library_sections WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.remelearning.english.speaking.library.domain.SpeakingLibrarySection"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO speaking_library_sections (topic_id)
+        VALUES (#{topicId})
+    </insert>
+
+</mapper>

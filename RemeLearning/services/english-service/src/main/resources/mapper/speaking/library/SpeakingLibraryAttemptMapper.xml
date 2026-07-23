@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.speaking.library.mapper.SpeakingLibraryAttemptMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO speaking_library_attempts
+            (user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key)
+        VALUES
+            (#{userId}, #{sectionId}, #{sentenceId}, #{phonemeScore}, #{wordScore}, #{recordedAudioStorageKey})
+    </insert>
+
+    <select id="findByUserId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt">
+        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, created_at
+        FROM speaking_library_attempts WHERE user_id = #{userId} ORDER BY created_at DESC
+    </select>
+
+    <select id="findBySectionId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt">
+        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, created_at
+        FROM speaking_library_attempts WHERE section_id = #{sectionId} ORDER BY created_at
+    </select>
+
+</mapper>
