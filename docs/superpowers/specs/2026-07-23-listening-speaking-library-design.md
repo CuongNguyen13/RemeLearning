@@ -23,32 +23,61 @@ grammar/vocabulary để trải nghiệm nhất quán xuyên 4 kỹ năng — nh
 quy ước hiện có của repo, mỗi domain vẫn tự sở hữu bảng/migration/package
 riêng (không share bảng topic vật lý giữa các domain).
 
-Vì logic gating (LOCKED/IN_PROGRESS/PASSED) hiện bị lặp y hệt ở
-`grammar.library` và `vocabulary.library`, tính năng này đồng thời trích xuất
-logic đó vào `common` và refactor lại 2 domain hiện có để dùng chung, tránh
-nhân bản lần thứ ba/tư.
+**Sửa đổi sau khi bắt tay triển khai (2026-07-23):** phương án ban đầu định
+trích xuất logic gating LOCKED/IN_PROGRESS/PASSED thành một hàm tính-lại
+thuần (pure, stateless) dùng chung trong `common`, rồi refactor lại
+`grammar.library`/`vocabulary.library` để gọi hàm đó. Khi bắt tay code mới
+phát hiện tiền đề này sai: `GrammarLibraryServiceImpl` **không** tính gating
+bằng cách quét lại từ đầu — nó dùng một **state machine 4 trạng thái**
+(`LOCKED`/`UNLOCKED`/`IN_PROGRESS`/`PASSED`) lưu persistent trong bảng
+`grammar_topic_progress`, với các lệnh ghi tường minh
+(`markInProgress`/`markPassed`/`unlockIfLocked`) tại đúng thời điểm chuyển
+trạng thái — không phải một phép tính lại toàn bộ danh sách mỗi lần đọc.
+Ngoài ra `VocabularyLibraryServiceImpl` **hoàn toàn không có** gating theo
+topic (mọi topic từ vựng hiện mở tự do). Ép 2 class này dùng chung một hàm
+3-trạng thái sẽ vừa làm mất trạng thái `UNLOCKED` (thay đổi hành vi quan sát
+được, vỡ test hiện có của grammar) vừa không có gì thật sự trùng lặp để loại
+bỏ ở phía vocabulary.
 
-## 1. `common` — trích xuất gating logic dùng chung
+Quyết định: **giữ nguyên** `grammar.library`/`vocabulary.library` như hiện
+tại (không refactor, không trích xuất `common`). `listening.library` và
+`speaking.library` mới sẽ **clone chính xác** state machine 4 trạng thái của
+`grammar.library` (bảng progress riêng theo domain, cùng shape cột, cùng 6
+mapper method, cùng guard method ở service layer) — xem mục 1 bên dưới.
 
-Thêm `com.remelearning.common.library.TopicProgressCalculator` (pure logic,
-không phụ thuộc DB/mapper):
+## 1. Mô hình gating (clone từ `grammar.library`)
+
+Mỗi domain mới (`listening`, `speaking`) tự có enum + bảng + mapper progress
+riêng, cấu trúc giống hệt `grammar.library`'s:
 
 ```java
-public enum TopicStatus { LOCKED, IN_PROGRESS, PASSED }
-
-public final class TopicProgressCalculator {
-    // input: danh sách topic đã sort theo sequenceOrder + set các topicId
-    // learner đã PASSED. output: Map<topicId, TopicStatus>.
-    public static Map<Long, TopicStatus> compute(
-        List<Long> topicIdsBySequenceOrder, Set<Long> passedTopicIds) { ... }
-}
+public enum ListeningTopicStatus { LOCKED, UNLOCKED, IN_PROGRESS, PASSED }
+// (SpeakingTopicStatus tương tự cho domain speaking)
 ```
 
-Quy tắc: topic đầu tiên (sequence_order nhỏ nhất) luôn ít nhất
-`IN_PROGRESS`; mỗi topic sau chỉ `IN_PROGRESS`/`PASSED` nếu topic liền trước
-đã `PASSED`, ngược lại `LOCKED`. Refactor `GrammarLibraryServiceImpl` và
-`VocabularyLibraryServiceImpl` để gọi hàm này thay cho đoạn code gating hiện
-tại của từng service — không đổi schema/API của 2 domain đó.
+Bảng `listening_topic_progress`/`speaking_topic_progress`: `id, user_id,
+topic_id (FK), status (varchar), unlocked_at, passed_at, updated_at`, ràng
+buộc `UNIQUE (user_id, topic_id)` — y hệt `grammar_topic_progress`.
+
+Mapper (6 method, tên và ngữ nghĩa giống hệt `GrammarTopicProgressMapper`):
+`findByUserIdAndTopicId`, `findByUserId`, `bootstrapFirstTopic` (insert
+UNLOCKED cho topic đầu tiên nếu chưa có, `ON CONFLICT DO NOTHING`),
+`unlockIfLocked` (insert UNLOCKED nếu chưa có hàng, hoặc upsert
+`status = 'UNLOCKED'` **chỉ khi** hàng hiện tại đang `LOCKED` — dùng
+`ON CONFLICT ... DO UPDATE ... WHERE status = 'LOCKED'`), `markInProgress`,
+`markPassed` (unconditional UPDATE theo `(user_id, topic_id)`).
+
+Service layer: `listTopics` bootstrap topic đầu tiên rồi map mọi topic sang
+status (mặc định `LOCKED` nếu chưa có hàng progress) — giống
+`GrammarLibraryServiceImpl.listTopics`. `startOrResumeSection` gọi guard
+`requireUnlockedOrInProgress` (chỉ chặn `LOCKED`, coi hàng thiếu là `LOCKED`)
+trước khi tạo/lấy section, rồi gọi `markInProgress`. Khi learner đạt ngưỡng
+đạt (0.7) ở bước chấm điểm cuối (listening: `submitAnswers`; speaking:
+`finishSection`), gọi `markPassed` cho topic hiện tại rồi
+`unlockIfLocked` cho topic kế tiếp theo `sequence_order + 1` (nếu tồn tại) —
+y hệt `GrammarLibraryServiceImpl.buildPassedResponse`. Không mượn phần sinh
+lại câu hỏi retry theo từng câu sai của grammar (đó là một tính năng khác,
+phức tạp hơn) — chỉ mượn cơ chế gating/progress.
 
 ## 2. Data model mới
 
@@ -62,9 +91,10 @@ tại của từng service — không đổi schema/API của 2 domain đó.
 - **`listening_library_questions`**: `id, section_id (FK), question_text,
   options_json, correct_option, explanation, created_at` — câu hỏi MCQ gắn
   với 1 section.
-- **`listening_library_topic_progress`**: `user_id, topic_id, status
-  (IN_PROGRESS/PASSED), best_score, updated_at` — trạng thái PASSED của
-  learner cho từng topic (input cho `TopicProgressCalculator`).
+- **`listening_topic_progress`**: `id, user_id, topic_id (FK), status
+  (LOCKED/UNLOCKED/IN_PROGRESS/PASSED), unlocked_at, passed_at, updated_at`,
+  `UNIQUE (user_id, topic_id)` — bảng state machine clone từ
+  `grammar_topic_progress` (mục 1), không phải bảng tính-lại.
 - **`listening_library_attempts`**: `id, user_id, section_id, score,
   correct_count, total_questions, started_at, completed_at` — lịch sử làm
   section.
@@ -76,7 +106,7 @@ tại của từng service — không đổi schema/API của 2 domain đó.
   section gồm N câu mẫu.
 - **`speaking_library_sentences`**: `id, section_id (FK), sentence_text,
   ipa, sample_audio_storage_key, created_at` — câu mẫu để đọc theo.
-- **`speaking_library_topic_progress`**: tương tự listening.
+- **`speaking_topic_progress`**: tương tự `listening_topic_progress` (mục 1).
 - **`speaking_library_attempts`**: `id, user_id, section_id, sentence_id,
   phoneme_score, word_score, recorded_audio_storage_key, created_at` — mỗi
   câu đọc là một attempt (khác listening: chấm theo câu, không theo cả
@@ -104,7 +134,7 @@ tại của từng service — không đổi schema/API của 2 domain đó.
 
 ```
 GET  /{userId}/topics
-       -> danh sách 60 topic + status (LOCKED/IN_PROGRESS/PASSED) + best_score
+       -> danh sách 60 topic + status (LOCKED/UNLOCKED/IN_PROGRESS/PASSED)
 POST /{userId}/topics/{topicId}/sections
        -> tạo/lấy section hiện có (top-up nếu cần), trả về passage + audio url + câu hỏi
 POST /sections/{sectionId}/answers
