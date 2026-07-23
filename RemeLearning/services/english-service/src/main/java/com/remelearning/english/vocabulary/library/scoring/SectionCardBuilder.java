@@ -28,7 +28,7 @@ public final class SectionCardBuilder {
 	public static SectionCardDto buildIntro(Long sectionId, VocabularyLibraryWord word, String audioUrl, SectionProgressDto progress) {
 		return SectionCardDto.builder()
 				.sectionId(sectionId).cardKind(SectionCardKind.INTRO).libraryWordId(word.getId())
-				.word(word.getWord()).meaningVi(word.getMeaningVi()).exampleEn(word.getExampleEn())
+				.word(word.getWord()).ipa(word.getIpa()).meaningVi(word.getMeaningVi()).exampleEn(word.getExampleEn())
 				.audioUrl(audioUrl).progress(progress).build();
 	}
 

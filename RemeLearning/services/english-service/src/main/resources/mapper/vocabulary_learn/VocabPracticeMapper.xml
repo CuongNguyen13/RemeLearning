@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.vocabulary.learn.mapper.VocabPracticeMapper">
+
+    <insert id="insertItem" parameterType="com.remelearning.english.vocabulary.learn.domain.VocabPracticeItem"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vocab_practice_items
+            (user_id, level, exam_type, topic, target_words, items, created_at)
+        VALUES
+            (#{userId}, #{level}, #{examType}, #{topic}, #{targetWordsJson}, #{itemsJson}, now())
+    </insert>
+
+    <select id="findItemById" resultType="com.remelearning.english.vocabulary.learn.domain.VocabPracticeItem">
+        SELECT id, user_id, level, exam_type, topic,
+               target_words AS target_words_json, items AS items_json, created_at
+        FROM vocab_practice_items
+        WHERE id = #{itemId}
+    </select>
+
+    <select id="findItemsByUserId" resultType="com.remelearning.english.vocabulary.learn.domain.VocabPracticeItem">
+        SELECT id, user_id, level, exam_type, topic,
+               target_words AS target_words_json, items AS items_json, created_at
+        FROM vocab_practice_items
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+    <insert id="insertAttempt" parameterType="com.remelearning.english.vocabulary.learn.domain.VocabPracticeAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vocab_practice_attempts
+            (practice_item_id, user_id, answers, score, created_at)
+        VALUES
+            (#{practiceItemId}, #{userId}, #{answersJson}, #{score}, now())
+    </insert>
+
+    <select id="findHistoryByUserId" resultType="com.remelearning.english.vocabulary.learn.domain.VocabAttemptHistoryRow">
+        SELECT a.id AS attempt_id, a.practice_item_id AS practice_item_id,
+               i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               a.score AS score, a.created_at AS created_at
+        FROM vocab_practice_attempts a
+        JOIN vocab_practice_items i ON i.id = a.practice_item_id
+        WHERE a.user_id = #{userId}
+        ORDER BY a.created_at DESC
+    </select>
+
+    <select id="findAttemptDetailByIdAndUserId" resultType="com.remelearning.english.vocabulary.learn.domain.VocabAttemptDetailRow">
+        SELECT a.id AS attempt_id, i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               i.items AS items_json, a.answers AS answers_json, a.score AS score, a.created_at AS created_at
+        FROM vocab_practice_attempts a
+        JOIN vocab_practice_items i ON i.id = a.practice_item_id
+        WHERE a.id = #{attemptId} AND a.user_id = #{userId}
+    </select>
+
+</mapper>

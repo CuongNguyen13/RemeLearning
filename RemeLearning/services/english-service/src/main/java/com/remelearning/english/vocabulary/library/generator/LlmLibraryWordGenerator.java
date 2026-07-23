@@ -32,8 +32,10 @@ public class LlmLibraryWordGenerator implements LibraryWordGenerator {
 			for an intermediate learner. Respond with STRICTLY a raw JSON object (no markdown fences, no
 			commentary) of the shape:
 			{"words": [{"word": "...", "wordType": "NOUN|VERB|ADJECTIVE|ADVERB|PHRASAL_VERB|COLLOCATION|IDIOM|OTHER",
-			"meaningVi": "...", "exampleEn": "..."}]}
+			"ipa": "...", "meaningVi": "...", "exampleEn": "..."}]}
 			- "word": the target English word or short phrase, lowercase unless a proper noun.
+			- "ipa": the word's IPA phonetic transcription (General American or RP), without surrounding
+			  slashes, e.g. "rɪˈvɛnjuː" for "revenue" - required, never omit it.
 			- "exampleEn": one natural English sentence (6-16 words) that uses "word" verbatim (same
 			  casing/word-form) so it can be blanked out later - this is required, never omit it.
 			- "meaningVi": the Vietnamese meaning, one short phrase.
@@ -64,7 +66,7 @@ public class LlmLibraryWordGenerator implements LibraryWordGenerator {
 		}
 		List<GeneratedLibraryWord> result = new ArrayList<>();
 		for (LlmItem item : payload.words) {
-			result.add(new GeneratedLibraryWord(item.word, item.wordType, item.meaningVi, item.exampleEn));
+			result.add(new GeneratedLibraryWord(item.word, item.wordType, item.ipa, item.meaningVi, item.exampleEn));
 		}
 		return result;
 	}
@@ -82,6 +84,7 @@ public class LlmLibraryWordGenerator implements LibraryWordGenerator {
 	static class LlmItem {
 		private String word;
 		private String wordType;
+		private String ipa;
 		private String meaningVi;
 		private String exampleEn;
 	}

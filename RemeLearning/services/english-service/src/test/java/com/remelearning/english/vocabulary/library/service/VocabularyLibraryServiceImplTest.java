@@ -86,7 +86,7 @@ class VocabularyLibraryServiceImplTest {
 		when(libraryWordMapper.countByTopicId(1L)).thenReturn(2);
 		when(libraryWordMapper.findWordsByTopicId(1L)).thenReturn(List.of("passport", "luggage"));
 		when(libraryWordGenerator.generate(eq("Travel"), eq(List.of("passport", "luggage")), anyInt()))
-				.thenReturn(List.of(new GeneratedLibraryWord("itinerary", "NOUN", "lịch trình", "She planned a detailed itinerary for the trip.")));
+				.thenReturn(List.of(new GeneratedLibraryWord("itinerary", "NOUN", "aɪˈtɪnərəri", "lịch trình", "She planned a detailed itinerary for the trip.")));
 		when(ttsClient.synthesize(any())).thenReturn(TtsAudio.builder().audioBytes(new byte[]{1, 2, 3}).mimeType("audio/wav").build());
 		VocabularyLibraryWord itinerary = VocabularyLibraryWord.builder().id(10L).topicId(1L).word("itinerary").wordType(VocabularyType.NOUN)
 				.meaningVi("lịch trình").exampleEn("She planned a detailed itinerary for the trip.").build();

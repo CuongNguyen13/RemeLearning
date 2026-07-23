@@ -11,10 +11,13 @@ import com.remelearning.common.ai.tts.TtsRequest;
 import com.remelearning.common.event.WeakPointPayload;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
+import com.remelearning.common.constants.LearningCategories;
 import java.util.Random;
 import com.remelearning.english.dictation.analyzer.DialogueGenerationResult;
 import com.remelearning.english.dictation.analyzer.DictationAnalysis;
 import com.remelearning.english.dictation.analyzer.DictationAnalyzer;
+import com.remelearning.english.dictation.analyzer.DictationErrorCategory;
+import com.remelearning.english.dictation.analyzer.DictationErrorEntry;
 import com.remelearning.english.dictation.analyzer.DictationDialogueGenerator;
 import com.remelearning.english.dictation.analyzer.DictationDialogueLine;
 import com.remelearning.english.dictation.analyzer.DictationSentenceTranslator;
@@ -84,7 +87,6 @@ public class DictationServiceImpl implements DictationService {
 	private static final String CLIP_AUDIO_URL = "/api/v1/dictation/clips/%d/audio";
 	private static final String PRACTICE_AUDIO_URL = "/api/v1/dictation/ai-practice/items/%d/audio";
 	private static final String GENERATED_KEY = "generated/%s/%d.wav";
-	private static final String WEAK_POINT_CATEGORY = "vocabulary";
 	private static final String WEAK_POINT_ITEM_PREFIX = "dictation:";
 	private static final String RANDOM_FACET = "RANDOM";
 	private static final int DEFAULT_LIST_LIMIT = 50;
@@ -254,7 +256,7 @@ public class DictationServiceImpl implements DictationService {
 		DictationAnalysis analysis = dictationAnalyzer.analyzeAttempt(target.referenceText(), request.getUserTranscript(), score.getDiff());
 		persistPracticeSentences(request.getUserId(), analysis.getPracticeSentences());
 		dictationMapper.updateAttemptAiSuggestions(attempt.getId(), serializeAnalysis(analysis));
-		publishWeakPoints(target.recordingId(), request.getUserId(), missedWords, analysis.getActionAdvice());
+		publishWeakPoints(target.recordingId(), request.getUserId(), missedWords, analysis.getActionAdvice(), analysis.getErrorTable());
 
 		return DictationAttemptResultDto.builder()
 				.referenceText(target.referenceText())
@@ -565,22 +567,46 @@ public class DictationServiceImpl implements DictationService {
 		}
 	}
 
-	// Publishes each missed word as a vocabulary weak point onto learning.gap.analyzed; the
+	// Publishes each missed word as a weak point onto learning.gap.analyzed, routed to whichever
+	// skill category actually owns it (vocabulary/grammar/pronunciation) instead of always
+	// "vocabulary" - the AI analyzer already root-causes each mismatch as LEXICON/GRAMMAR/PHONOLOGY
+	// (errorTable), so this maps that classification onto the shared LearningCategories, giving
+	// grammar-service/pronunciation-service (and their own weak-point tables) real dictation-derived
+	// data instead of everything landing under vocabulary. Words with no errorTable entry (e.g. from
+	// a sentence-mode retry, which isn't run through the analyzer) default to vocabulary. The
 	// forgetting score saturates with the learner's running miss count for that word.
-	private void publishWeakPoints(String recordingId, String userId, List<String> missedWords, List<String> actionAdvice) {
+	private void publishWeakPoints(String recordingId, String userId, List<String> missedWords,
+			List<String> actionAdvice, List<DictationErrorEntry> errorTable) {
 		String recommendation = actionAdvice.isEmpty() ? null : actionAdvice.get(0);
+		Map<String, DictationErrorCategory> categoryByWord = new LinkedHashMap<>();
+		for (DictationErrorEntry entry : errorTable) {
+			categoryByWord.putIfAbsent(entry.getOriginal().toLowerCase(), entry.getCategory());
+		}
+
 		List<WeakPointPayload> weakPoints = new ArrayList<>();
 		for (String word : missedWords) {
 			int missCount = dictationMapper.countMissesForWord(userId, word);
 			WeakPointPayload payload = new WeakPointPayload();
 			payload.setItemId(WEAK_POINT_ITEM_PREFIX + word);
-			payload.setCategory(WEAK_POINT_CATEGORY);
+			payload.setCategory(toLearningCategory(categoryByWord.get(word)));
 			payload.setLabel(word);
 			payload.setForgettingScore((double) missCount / (missCount + 2.0));
 			payload.setRecommendation(recommendation);
 			weakPoints.add(payload);
 		}
 		gapEventPublisher.publish(recordingId, userId, weakPoints);
+	}
+
+	// LEXICON -> vocabulary, GRAMMAR -> grammar, PHONOLOGY -> pronunciation; unclassified -> vocabulary.
+	private String toLearningCategory(DictationErrorCategory category) {
+		if (category == null) {
+			return LearningCategories.VOCABULARY;
+		}
+		return switch (category) {
+			case GRAMMAR -> LearningCategories.GRAMMAR;
+			case PHONOLOGY -> LearningCategories.PRONUNCIATION;
+			case LEXICON -> LearningCategories.VOCABULARY;
+		};
 	}
 
 	// Synthesizes each dialogue line with its assigned speaker voice, merges the resulting WAV

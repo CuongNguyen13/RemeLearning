@@ -30,7 +30,7 @@
         SELECT w.id, w.topic_id, w.word, w.word_type, w.meaning_vi, w.example_en, w.ipa, w.audio_storage_key, w.created_at
         FROM vocabulary_library_words w
         LEFT JOIN vocabulary_weak_points wp ON wp.user_id = #{userId} AND wp.item_id = 'vocab:' || lower(w.word)
-        WHERE w.topic_id = #{topicId} AND (wp.mastery_level IS NULL OR wp.mastery_level < 0.7)
+        WHERE w.topic_id = #{topicId} AND (wp.mastery_level IS NULL OR wp.mastery_level &lt; 0.7)
         ORDER BY random()
         LIMIT #{limit}
     </select>

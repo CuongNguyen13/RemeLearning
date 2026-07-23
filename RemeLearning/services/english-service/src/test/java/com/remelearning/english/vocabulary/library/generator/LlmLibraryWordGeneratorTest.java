@@ -24,7 +24,7 @@ class LlmLibraryWordGeneratorTest {
 	void generateParsesLlmWordsIntoGeneratedLibraryWords() {
 		String json = """
 				{"words": [
-				  {"word": "itinerary", "wordType": "NOUN", "meaningVi": "lịch trình", "exampleEn": "She planned a detailed itinerary for the trip."}
+				  {"word": "itinerary", "wordType": "NOUN", "ipa": "aɪˈtɪnərəri", "meaningVi": "lịch trình", "exampleEn": "She planned a detailed itinerary for the trip."}
 				]}""";
 		when(aiContentClient.completeJson(anyString(), anyString(), anyDouble(), anyInt(), eq(LlmLibraryWordGenerator.LlmPayload.class)))
 				.thenAnswer(invocation -> new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, LlmLibraryWordGenerator.LlmPayload.class));
@@ -34,6 +34,7 @@ class LlmLibraryWordGeneratorTest {
 		assertThat(result).hasSize(1);
 		assertThat(result.get(0).word()).isEqualTo("itinerary");
 		assertThat(result.get(0).wordType()).isEqualTo("NOUN");
+		assertThat(result.get(0).ipa()).isEqualTo("aɪˈtɪnərəri");
 		assertThat(result.get(0).meaningVi()).isEqualTo("lịch trình");
 		assertThat(result.get(0).exampleEn()).contains("itinerary");
 	}

@@ -13,6 +13,8 @@ import com.remelearning.english.dictation.analyzer.DictationAnalysis;
 import com.remelearning.english.dictation.analyzer.DictationAnalyzer;
 import com.remelearning.english.dictation.analyzer.DictationDialogueGenerator;
 import com.remelearning.english.dictation.analyzer.DictationDialogueLine;
+import com.remelearning.english.dictation.analyzer.DictationErrorCategory;
+import com.remelearning.english.dictation.analyzer.DictationErrorEntry;
 import com.remelearning.english.dictation.analyzer.DictationSentenceTranslator;
 import com.remelearning.english.dictation.domain.DictationAttempt;
 import com.remelearning.english.dictation.domain.DictationAttemptDetailRow;
@@ -136,6 +138,32 @@ class DictationServiceImplTest {
 		verify(gapEventPublisher).publish(eq("dictation-clip-42"), eq("user-1"), weakCaptor.capture());
 		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getLabel).contains("reluctant");
 		assertThat(weakCaptor.getValue().get(0).getCategory()).isEqualTo("vocabulary");
+	}
+
+	@Test
+	void submitAttemptRoutesEachMissedWordToItsAnalyzedErrorCategory() {
+		when(dictationMapper.findClipById(42L)).thenReturn(DictationClip.builder()
+				.id(42L).code("c-1").scriptText("She was reluctant to admit it.").build());
+		simulateGeneratedAttemptId(502L);
+		when(dictationAnalyzer.analyzeAttempt(anyString(), anyString(), anyList())).thenReturn(DictationAnalysis.builder()
+				.errorTable(List.of(
+						DictationErrorEntry.builder().original("reluctant").transcribed("").category(DictationErrorCategory.PHONOLOGY).build()))
+				.rootCauses(List.of())
+				.actionAdvice(List.of())
+				.practiceSentences(List.of())
+				.build());
+		when(dictationMapper.countMissesForWord(eq("user-1"), anyString())).thenReturn(1);
+
+		DictationAttemptRequest request = new DictationAttemptRequest();
+		request.setUserId("user-1");
+		request.setClipId(42L);
+		request.setUserTranscript("She was to admit it.");
+
+		service.submitAttempt(request);
+
+		ArgumentCaptor<List<WeakPointPayload>> weakCaptor = ArgumentCaptor.forClass(List.class);
+		verify(gapEventPublisher).publish(eq("dictation-clip-42"), eq("user-1"), weakCaptor.capture());
+		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getCategory).containsExactly("pronunciation");
 	}
 
 	@Test

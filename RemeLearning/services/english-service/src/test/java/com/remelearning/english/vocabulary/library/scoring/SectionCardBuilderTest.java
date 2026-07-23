@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SectionCardBuilderTest {
 
 	private final VocabularyLibraryWord word = VocabularyLibraryWord.builder()
-			.id(1L).topicId(10L).word("reluctant").wordType(VocabularyType.ADJECTIVE)
+			.id(1L).topicId(10L).word("reluctant").wordType(VocabularyType.ADJECTIVE).ipa("rɪˈlʌktənt")
 			.meaningVi("miễn cưỡng").exampleEn("She was reluctant to admit it.").build();
 	private final List<VocabularyLibraryWord> distractors = List.of(
 			VocabularyLibraryWord.builder().id(2L).word("brief").meaningVi("ngắn gọn").build(),
@@ -28,6 +28,7 @@ class SectionCardBuilderTest {
 
 		assertThat(card.getCardKind().name()).isEqualTo("INTRO");
 		assertThat(card.getWord()).isEqualTo("reluctant");
+		assertThat(card.getIpa()).isEqualTo("rɪˈlʌktənt");
 		assertThat(card.getMeaningVi()).isEqualTo("miễn cưỡng");
 		assertThat(card.getExampleEn()).isEqualTo("She was reluctant to admit it.");
 		assertThat(card.getAudioUrl()).isEqualTo("/audio/1");

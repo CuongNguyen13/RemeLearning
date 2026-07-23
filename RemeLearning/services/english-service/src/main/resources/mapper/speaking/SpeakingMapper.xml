@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.speaking.mapper.SpeakingMapper">
+
+    <insert id="insertItem" parameterType="com.remelearning.english.speaking.domain.SpeakingPracticeItem"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO speaking_practice_items
+            (user_id, level, exam_type, topic, target_text, storage_key, translation, created_at)
+        VALUES
+            (#{userId}, #{level}, #{examType}, #{topic}, #{targetText}, #{storageKey}, #{translation}, now())
+    </insert>
+
+    <select id="findItemById" resultType="com.remelearning.english.speaking.domain.SpeakingPracticeItem">
+        SELECT id, user_id, level, exam_type, topic, target_text, storage_key, translation, created_at
+        FROM speaking_practice_items
+        WHERE id = #{itemId}
+    </select>
+
+    <select id="findItemsByUserId" resultType="com.remelearning.english.speaking.domain.SpeakingPracticeItem">
+        SELECT id, user_id, level, exam_type, topic, target_text, storage_key, translation, created_at
+        FROM speaking_practice_items
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+    <update id="updateItemStorageKey">
+        UPDATE speaking_practice_items SET storage_key = #{storageKey} WHERE id = #{itemId}
+    </update>
+
+    <insert id="insertAttempt" parameterType="com.remelearning.english.speaking.domain.SpeakingAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO speaking_attempts
+            (practice_item_id, user_id, audio_storage_key, overall_score, word_scores, transcript, weak_phonemes, created_at)
+        VALUES
+            (#{practiceItemId}, #{userId}, #{audioStorageKey}, #{overallScore}, #{wordScoresJson}, #{transcript}, #{weakPhonemesJson}, now())
+    </insert>
+
+    <select id="findHistoryByUserId" resultType="com.remelearning.english.speaking.domain.SpeakingAttemptHistoryRow">
+        SELECT a.id AS attempt_id, a.practice_item_id AS practice_item_id,
+               i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               a.overall_score AS overall_score, a.created_at AS created_at
+        FROM speaking_attempts a
+        JOIN speaking_practice_items i ON i.id = a.practice_item_id
+        WHERE a.user_id = #{userId}
+        ORDER BY a.created_at DESC
+    </select>
+
+    <select id="findAttemptDetailByIdAndUserId" resultType="com.remelearning.english.speaking.domain.SpeakingAttemptDetailRow">
+        SELECT a.id AS attempt_id, i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               i.target_text AS target_text,
+               a.overall_score AS overall_score, a.word_scores AS word_scores_json,
+               a.transcript AS transcript, a.weak_phonemes AS weak_phonemes_json, a.created_at AS created_at
+        FROM speaking_attempts a
+        JOIN speaking_practice_items i ON i.id = a.practice_item_id
+        WHERE a.id = #{attemptId} AND a.user_id = #{userId}
+    </select>
+
+</mapper>

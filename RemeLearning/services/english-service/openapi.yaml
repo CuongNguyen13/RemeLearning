@@ -939,6 +939,136 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseGrammarAttemptDetail"
 
+  /api/v1/learn/grammar/library/{userId}/topics:
+    get:
+      tags: [Grammar Library]
+      summary: List every one of the 60 catalog topics with this learner's own progression status
+      operationId: listGrammarLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarLibraryTopicList"
+
+  /api/v1/learn/grammar/library/topics/{topicId}:
+    get:
+      tags: [Grammar Library]
+      summary: A topic's theory page + question pool, generating it via AI on first read only
+      operationId: getGrammarLibraryTopicContent
+      parameters:
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarLibraryContent"
+
+  /api/v1/learn/grammar/library/{userId}/topics/{topicId}/sessions:
+    post:
+      tags: [Grammar Library]
+      summary: Start a new INITIAL session for a topic (must be UNLOCKED or IN_PROGRESS)
+      operationId: startGrammarLibrarySession
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseStartGrammarSession"
+        "403":
+          description: Topic is locked for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learn/grammar/library/sessions/{sessionId}/answers:
+    post:
+      tags: [Grammar Library]
+      summary: Grade one submitted answer within an in-progress session
+      operationId: submitGrammarLibraryAnswer
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitGrammarLibraryAnswerRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarLibraryAnswerResult"
+
+  /api/v1/learn/grammar/library/sessions/{sessionId}/finish:
+    post:
+      tags: [Grammar Library]
+      summary: >
+        Finish a session: PASSED + next-topic unlock when all correct, otherwise a new RETRY
+        session for the missed questions
+      operationId: finishGrammarLibrarySession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseFinishGrammarLibrarySession"
+
+  /api/v1/learn/grammar/library/{userId}/topics/{topicId}/history:
+    get:
+      tags: [Grammar Library]
+      summary: A learner's completed sessions for one topic, newest first
+      operationId: getGrammarLibraryHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarLibraryHistoryEntryList"
+
   /api/v1/learn/listening/{userId}/generate:
     post:
       tags: [Listening Learn]
@@ -1800,12 +1930,17 @@ components:
 
     VocabQuestion:
       type: object
-      description: Public-facing question shape - deliberately omits the answer so the client can't cheat.
+      description: >
+        Practice-time question shape. Now carries the correct answer + translation so the client can
+        grade each answer locally for instant feedback; the authoritative score still comes from the
+        submit endpoint. Mirrors the server-side ExactMatchScorer rule.
       properties:
         index: { type: integer }
         prompt: { type: string }
         type: { $ref: "#/components/schemas/VocabQuestionType" }
         options: { type: array, nullable: true, items: { type: string } }
+        answer: { type: string, description: "Correct answer, for client-side grading (mirrors VocabAttemptScorer)." }
+        translation: { type: string, nullable: true }
 
     VocabPracticeItem:
       type: object
@@ -1957,6 +2092,7 @@ components:
         cardKind: { type: string, enum: [INTRO, QUIZ] }
         libraryWordId: { type: integer, format: int64 }
         word: { type: string, nullable: true, description: "Set only on INTRO cards" }
+        ipa: { type: string, nullable: true, description: "IPA phonetic transcription, set only on INTRO cards" }
         meaningVi: { type: string, nullable: true }
         exampleEn: { type: string, nullable: true }
         audioUrl: { type: string, nullable: true }
@@ -2023,12 +2159,18 @@ components:
 
     GrammarQuestion:
       type: object
-      description: Public-facing question shape - deliberately omits the answer so the client can't cheat.
+      description: >
+        Practice-time question shape. Now carries the correct answer + translation so the client can
+        grade each answer locally for instant feedback; the authoritative score still comes from the
+        submit endpoint. Mirrors the server-side GrammarAttemptScorer/ExactMatchScorer rule.
       properties:
         index: { type: integer }
         prompt: { type: string }
         type: { $ref: "#/components/schemas/GrammarQuestionType" }
         options: { type: array, nullable: true, items: { type: string } }
+        answer: { type: string, description: "Correct answer, for client-side grading (mirrors GrammarAttemptScorer)." }
+        translation: { type: string, nullable: true }
+        translationVi: { type: string, nullable: true, description: "Plain Vietnamese translation of answer's meaning (not a grammar explanation)." }
 
     GrammarPracticeItem:
       type: object
@@ -2065,6 +2207,7 @@ components:
         correctAnswer: { type: string }
         correct: { type: boolean }
         translation: { type: string, nullable: true }
+        translationVi: { type: string, nullable: true, description: "Plain Vietnamese translation of correctAnswer's meaning." }
 
     GrammarAttemptResult:
       type: object
@@ -2138,6 +2281,145 @@ components:
           properties:
             data: { $ref: "#/components/schemas/GrammarAttemptDetail" }
 
+    GrammarLibraryTopic:
+      type: object
+      properties:
+        topicId: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        level: { type: string }
+        sequenceOrder: { type: integer }
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+
+    ApiResponseGrammarLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryTopic" } }
+
+    GrammarLibraryExample:
+      type: object
+      properties:
+        en: { type: string }
+        vi: { type: string }
+
+    GrammarLibraryQuestion:
+      type: object
+      description: >
+        A pool question shown on the topic's theory page - answer/explanation ARE included since
+        this is the "read the theory" view, not an in-progress quiz.
+      properties:
+        questionId: { type: integer, format: int64 }
+        type: { $ref: "#/components/schemas/GrammarQuestionType" }
+        prompt: { type: string }
+        options: { type: array, nullable: true, items: { type: string } }
+        answer: { type: string }
+        explanationVi: { type: string, nullable: true }
+        translationVi: { type: string, nullable: true, description: "Plain Vietnamese translation of answer's meaning (not a grammar explanation)." }
+
+    GrammarLibraryContent:
+      type: object
+      properties:
+        topicId: { type: integer, format: int64 }
+        explanationEn: { type: string }
+        explanationVi: { type: string }
+        illustrationText: { type: string, description: "A markdown table or mermaid diagram illustrating the sentence structure." }
+        examples: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryExample" } }
+        questions: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryQuestion" } }
+
+    ApiResponseGrammarLibraryContent:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/GrammarLibraryContent" }
+
+    GrammarSessionQuestion:
+      type: object
+      description: One in-progress session question - answer/explanation deliberately omitted (unlike GrammarLibraryQuestion).
+      properties:
+        questionRef: { type: string }
+        type: { $ref: "#/components/schemas/GrammarQuestionType" }
+        prompt: { type: string }
+        options: { type: array, nullable: true, items: { type: string } }
+
+    StartGrammarSession:
+      type: object
+      properties:
+        sessionId: { type: integer, format: int64 }
+        sessionType: { type: string, enum: [INITIAL, RETRY] }
+        questions: { type: array, items: { $ref: "#/components/schemas/GrammarSessionQuestion" } }
+        totalCount: { type: integer }
+
+    ApiResponseStartGrammarSession:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/StartGrammarSession" }
+
+    SubmitGrammarLibraryAnswerRequest:
+      type: object
+      required: [questionRef]
+      properties:
+        questionRef: { type: string }
+        submittedAnswer: { type: string, nullable: true }
+
+    GrammarLibraryAnswerResult:
+      type: object
+      properties:
+        questionRef: { type: string }
+        correct: { type: boolean }
+        correctAnswer: { type: string, nullable: true }
+        explanationVi: { type: string, nullable: true }
+        translationVi: { type: string, nullable: true, description: "Plain Vietnamese translation of correctAnswer's meaning." }
+
+    ApiResponseGrammarLibraryAnswerResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/GrammarLibraryAnswerResult" }
+
+    FinishGrammarLibrarySession:
+      type: object
+      properties:
+        sessionId: { type: integer, format: int64 }
+        correctCount: { type: integer }
+        totalCount: { type: integer }
+        passed: { type: boolean }
+        retrySession:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/StartGrammarSession" }]
+        nextTopicUnlocked: { type: boolean }
+        nextTopicId: { type: integer, format: int64, nullable: true }
+
+    ApiResponseFinishGrammarLibrarySession:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/FinishGrammarLibrarySession" }
+
+    GrammarLibraryHistoryEntry:
+      type: object
+      properties:
+        sessionId: { type: integer, format: int64 }
+        sessionType: { type: string, enum: [INITIAL, RETRY] }
+        correctCount: { type: integer }
+        totalCount: { type: integer }
+        accuracy: { type: number, format: double }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponseGrammarLibraryHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryHistoryEntry" } }
+
     GenerateListeningPracticeRequest:
       type: object
       description: >
@@ -2153,12 +2435,18 @@ components:
 
     ListeningQuestion:
       type: object
-      description: Public-facing question shape - deliberately omits the answer so the client can't cheat.
+      description: >
+        Practice-time question shape. Carries answer + explanation so the client can grade MCQ/KEYWORD
+        questions locally for instant feedback; the authoritative score still comes from the submit
+        endpoint. answer is null for OPEN questions - those are graded by an LLM server-side
+        (OpenAnswerGrader) and cannot be checked on the client.
       properties:
         index: { type: integer }
         prompt: { type: string }
         type: { $ref: "#/components/schemas/ListeningQuestionType" }
         options: { type: array, nullable: true, items: { type: string } }
+        answer: { type: string, nullable: true, description: "Correct answer for client-side grading (MCQ/KEYWORD only; null for OPEN, which is graded server-side by LLM)." }
+        explanation: { type: string, nullable: true }
 
     ListeningPracticeItem:
       type: object

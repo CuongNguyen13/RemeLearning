@@ -231,7 +231,7 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 		List<GeneratedLibraryWord> generated = libraryWordGenerator.generate(topic.getName(), existingWords, TOP_UP_BATCH_SIZE);
 		for (GeneratedLibraryWord g : generated) {
 			VocabularyLibraryWord word = VocabularyLibraryWord.builder()
-					.topicId(topicId).word(g.word()).wordType(parseWordType(g.wordType()))
+					.topicId(topicId).word(g.word()).wordType(parseWordType(g.wordType())).ipa(g.ipa())
 					.meaningVi(g.meaningVi()).exampleEn(g.exampleEn())
 					.build();
 			libraryWordMapper.insert(word);

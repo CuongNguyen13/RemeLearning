@@ -16,10 +16,16 @@ import org.springframework.context.annotation.ComponentScan;
 @ComponentScan(basePackages = "com.remelearning")
 @MapperScan({
 		"com.remelearning.english.vocabulary.mapper",
+		"com.remelearning.english.vocabulary.learn.mapper",
+		"com.remelearning.english.vocabulary.library.mapper",
 		"com.remelearning.english.grammar.mapper",
+		"com.remelearning.english.grammar.learn.mapper",
+		"com.remelearning.english.grammar.library.mapper",
 		"com.remelearning.english.pronunciation.mapper",
 		"com.remelearning.english.practice.mapper",
-		"com.remelearning.english.dictation.mapper"
+		"com.remelearning.english.dictation.mapper",
+		"com.remelearning.english.listening.mapper",
+		"com.remelearning.english.speaking.mapper"
 })
 public class EnglishServiceApplication {
 

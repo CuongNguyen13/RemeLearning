@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.grammar.library.mapper.GrammarLibraryQuestionMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.grammar.library.domain.GrammarLibraryQuestion"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO grammar_library_questions (topic_id, question_type, prompt, options_json, answer, explanation_vi, translation_vi)
+        VALUES (#{topicId}, #{questionType}, #{prompt}, #{optionsJson}, #{answer}, #{explanationVi}, #{translationVi})
+    </insert>
+
+    <select id="findByTopicId" resultType="com.remelearning.english.grammar.library.domain.GrammarLibraryQuestion">
+        SELECT id, topic_id, question_type, prompt, options_json, answer, explanation_vi, translation_vi, created_at
+        FROM grammar_library_questions WHERE topic_id = #{topicId} ORDER BY id
+    </select>
+
+</mapper>

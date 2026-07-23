@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.grammar.library.mapper.GrammarLibraryContentMapper">
+
+    <select id="findByTopicId" resultType="com.remelearning.english.grammar.library.domain.GrammarLibraryContent">
+        SELECT id, topic_id, explanation_en, explanation_vi, illustration_text, examples_json, generated_at
+        FROM grammar_library_contents WHERE topic_id = #{topicId}
+    </select>
+
+    <insert id="insert" parameterType="com.remelearning.english.grammar.library.domain.GrammarLibraryContent"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO grammar_library_contents (topic_id, explanation_en, explanation_vi, illustration_text, examples_json)
+        VALUES (#{topicId}, #{explanationEn}, #{explanationVi}, #{illustrationText}, #{examplesJson})
+    </insert>
+
+</mapper>

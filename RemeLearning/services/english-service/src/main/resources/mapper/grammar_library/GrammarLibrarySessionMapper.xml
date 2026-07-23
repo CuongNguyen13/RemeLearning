@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.grammar.library.mapper.GrammarLibrarySessionMapper">
+
+    <insert id="insertSession" parameterType="com.remelearning.english.grammar.library.domain.GrammarLibrarySession"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO grammar_library_sessions
+            (user_id, topic_id, session_type, questions_json, status, correct_count, total_count)
+        VALUES
+            (#{userId}, #{topicId}, #{sessionType}, #{questionsJson}, #{status}, #{correctCount}, #{totalCount})
+    </insert>
+
+    <select id="findById" resultType="com.remelearning.english.grammar.library.domain.GrammarLibrarySession">
+        SELECT id, user_id, topic_id, session_type, questions_json, status, correct_count, total_count,
+               started_at, completed_at
+        FROM grammar_library_sessions WHERE id = #{id}
+    </select>
+
+    <update id="completeSession">
+        UPDATE grammar_library_sessions
+        SET status = 'COMPLETED', correct_count = #{correctCount}, total_count = #{totalCount}, completed_at = now()
+        WHERE id = #{id}
+    </update>
+
+    <select id="findCompletedByUserIdAndTopicId" resultType="com.remelearning.english.grammar.library.domain.GrammarLibrarySession">
+        SELECT id, user_id, topic_id, session_type, questions_json, status, correct_count, total_count,
+               started_at, completed_at
+        FROM grammar_library_sessions
+        WHERE user_id = #{userId} AND topic_id = #{topicId} AND status = 'COMPLETED'
+        ORDER BY completed_at DESC
+    </select>
+
+    <insert id="insertAnswer" parameterType="com.remelearning.english.grammar.library.domain.GrammarLibrarySessionAnswer"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO grammar_library_session_answers (session_id, question_ref, submitted_answer, correct)
+        VALUES (#{sessionId}, #{questionRef}, #{submittedAnswer}, #{correct})
+    </insert>
+
+    <select id="findAnswersBySessionId" resultType="com.remelearning.english.grammar.library.domain.GrammarLibrarySessionAnswer">
+        SELECT id, session_id, question_ref, submitted_answer, correct, answered_at
+        FROM grammar_library_session_answers WHERE session_id = #{sessionId} ORDER BY answered_at
+    </select>
+
+</mapper>
