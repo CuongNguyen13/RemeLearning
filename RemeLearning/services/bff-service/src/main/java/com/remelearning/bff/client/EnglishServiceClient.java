@@ -12,6 +12,7 @@ import com.remelearning.bff.dto.DictationLessonSummaryDto;
 import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
+import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
@@ -28,11 +29,18 @@ import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
 import com.remelearning.bff.dto.ListeningAttemptDetailDto;
 import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.ListeningLibrarySectionDto;
+import com.remelearning.bff.dto.ListeningLibraryTopicDto;
 import com.remelearning.bff.dto.ListeningPracticeItemDto;
 import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
+import com.remelearning.bff.dto.SentenceAttemptResultDto;
 import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
 import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.SpeakingLibrarySectionDto;
+import com.remelearning.bff.dto.SpeakingLibraryTopicDto;
 import com.remelearning.bff.dto.SpeakingPracticeItemDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
 import com.remelearning.bff.dto.SectionAnswerResultDto;
@@ -42,6 +50,8 @@ import com.remelearning.bff.dto.StartGrammarSessionResponseDto;
 import com.remelearning.bff.dto.StartSectionRequestDto;
 import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitGrammarLibraryAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitListeningAnswersRequest;
+import com.remelearning.bff.dto.SubmitListeningAnswersResponse;
 import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
@@ -678,6 +688,108 @@ public class EnglishServiceClient {
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingAttemptDetailDto>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to fetch speaking attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Fetches every listening-library catalog topic with this learner's own progression status (bootstraps the first topic to UNLOCKED). */
+	public Mono<List<ListeningLibraryTopicDto>> getListeningLibraryTopics(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/library/{userId}/topics", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningLibraryTopicDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list listening library topics for userId={}", userId, ex));
+	}
+
+	/** Starts a new listening-library Section for a topic, or resumes its most recent one (topic must be UNLOCKED or IN_PROGRESS). */
+	public Mono<ListeningLibrarySectionDto> startListeningLibrarySection(String userId, Long topicId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections", userId, topicId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningLibrarySectionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start listening library section for userId={}, topicId={}", userId, topicId, ex));
+	}
+
+	/** Scores a submitted answer set for one listening-library section; passes the topic and unlocks the next one on pass. */
+	public Mono<SubmitListeningAnswersResponse> submitListeningLibraryAnswers(
+			String userId, Long sectionId, SubmitListeningAnswersRequest request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers", userId, sectionId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SubmitListeningAnswersResponse>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit listening library answers for userId={}, sectionId={}", userId, sectionId, ex));
+	}
+
+	/** Fetches a learner's completed listening-library section attempts, across all topics. */
+	public Mono<List<ListeningLibraryHistoryEntryDto>> getListeningLibraryHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/library/{userId}/sections/history", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningLibraryHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get listening library history for userId={}", userId, ex));
+	}
+
+	/** Fetches every speaking-library catalog topic with this learner's own progression status (bootstraps the first topic to UNLOCKED). */
+	public Mono<List<SpeakingLibraryTopicDto>> getSpeakingLibraryTopics(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/library/{userId}/topics", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingLibraryTopicDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list speaking library topics for userId={}", userId, ex));
+	}
+
+	/** Starts a new speaking-library Section for a topic, or resumes its most recent one (topic must be UNLOCKED or IN_PROGRESS). */
+	public Mono<SpeakingLibrarySectionDto> startSpeakingLibrarySection(String userId, Long topicId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections", userId, topicId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SpeakingLibrarySectionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start speaking library section for userId={}, topicId={}", userId, topicId, ex));
+	}
+
+	/** Streams a learner's recorded sentence attempt straight through to english-service's multipart submit endpoint, without buffering it in bff-service. */
+	public Mono<SentenceAttemptResultDto> submitSpeakingSentenceAttempt(
+			String userId, Long sectionId, Long sentenceId, FilePart audio) {
+		MultipartBodyBuilder builder = new MultipartBodyBuilder();
+		builder.asyncPart("audio", audio.content(), DataBuffer.class)
+				.headers(headers -> headers.setContentDispositionFormData("audio", audio.filename()));
+
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts",
+						userId, sectionId, sentenceId)
+				.contentType(MediaType.MULTIPART_FORM_DATA)
+				.body(BodyInserters.fromMultipartData(builder.build()))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SentenceAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit speaking library sentence attempt for userId={}, sectionId={}, sentenceId={}",
+						userId, sectionId, sentenceId, ex));
+	}
+
+	/** Finishes a speaking-library section: if every sentence has a passing attempt, marks the topic PASSED and unlocks the next one. */
+	public Mono<FinishSpeakingSectionResponse> finishSpeakingLibrarySection(String userId, Long sectionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/finish", userId, sectionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<FinishSpeakingSectionResponse>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to finish speaking library section for userId={}, sectionId={}", userId, sectionId, ex));
+	}
+
+	/** Fetches a learner's scored speaking-library sentence attempts, across all topics. */
+	public Mono<List<SpeakingLibraryHistoryEntryDto>> getSpeakingLibraryHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/library/{userId}/sections/history", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingLibraryHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get speaking library history for userId={}", userId, ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.

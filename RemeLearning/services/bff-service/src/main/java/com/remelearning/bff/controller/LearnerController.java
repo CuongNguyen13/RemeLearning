@@ -14,6 +14,7 @@ import com.remelearning.bff.dto.DictationLessonSummaryDto;
 import com.remelearning.bff.dto.DictationPracticeItemDetailDto;
 import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
+import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
 import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
 import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
@@ -30,12 +31,16 @@ import com.remelearning.bff.dto.LearnerOverviewResponse;
 import com.remelearning.bff.dto.ListeningAttemptDetailDto;
 import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.ListeningLibrarySectionDto;
+import com.remelearning.bff.dto.ListeningLibraryTopicDto;
 import com.remelearning.bff.dto.ListeningPracticeItemDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.RecommendationDto;
 import com.remelearning.bff.dto.SectionAnswerResultDto;
 import com.remelearning.bff.dto.SectionCardDto;
 import com.remelearning.bff.dto.SectionHistoryEntryDto;
+import com.remelearning.bff.dto.SentenceAttemptResultDto;
 import com.remelearning.bff.dto.StartDictationSessionRequestDto;
 import com.remelearning.bff.dto.StartGrammarSessionResponseDto;
 import com.remelearning.bff.dto.StartSectionRequestDto;
@@ -43,9 +48,14 @@ import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
 import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
 import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingLibraryHistoryEntryDto;
+import com.remelearning.bff.dto.SpeakingLibrarySectionDto;
+import com.remelearning.bff.dto.SpeakingLibraryTopicDto;
 import com.remelearning.bff.dto.SpeakingPracticeItemDto;
 import com.remelearning.bff.dto.SubmitGrammarAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitGrammarLibraryAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitListeningAnswersRequest;
+import com.remelearning.bff.dto.SubmitListeningAnswersResponse;
 import com.remelearning.bff.dto.SubmitListeningAttemptRequestDto;
 import com.remelearning.bff.dto.SubmitSectionAnswerRequestDto;
 import com.remelearning.bff.dto.SubmitVocabAttemptRequestDto;
@@ -450,6 +460,32 @@ public class LearnerController {
 		return englishServiceClient.getListeningAttemptDetail(userId, attemptId).map(ApiResponse::ok);
 	}
 
+	@Operation(summary = "List every listening-library catalog topic with this learner's own progression status; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/library/topics")
+	public Mono<ApiResponse<List<ListeningLibraryTopicDto>>> getListeningLibraryTopics(@PathVariable String userId) {
+		return englishServiceClient.getListeningLibraryTopics(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Start (or resume) a listening-library Section for a topic (must be UNLOCKED or IN_PROGRESS); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/library/topics/{topicId}/sections")
+	public Mono<ApiResponse<ListeningLibrarySectionDto>> startListeningLibrarySection(
+			@PathVariable String userId, @PathVariable Long topicId) {
+		return englishServiceClient.startListeningLibrarySection(userId, topicId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Score a submitted answer set for one listening-library section; passes the topic and unlocks the next one on pass; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/library/sections/{sectionId}/answers")
+	public Mono<ApiResponse<SubmitListeningAnswersResponse>> submitListeningLibraryAnswers(
+			@PathVariable String userId, @PathVariable Long sectionId, @RequestBody SubmitListeningAnswersRequest request) {
+		return englishServiceClient.submitListeningLibraryAnswers(userId, sectionId, request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's completed listening-library section attempts, across all topics; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/library/sections/history")
+	public Mono<ApiResponse<List<ListeningLibraryHistoryEntryDto>>> getListeningLibraryHistory(@PathVariable String userId) {
+		return englishServiceClient.getListeningLibraryHistory(userId).map(ApiResponse::ok);
+	}
+
 	@Operation(summary = "Generate one AI speaking-practice sentence with a Supertonic sample recording, targeting the given focus words or (if omitted) the learner's own top pronunciation weak points; thin proxy to english-service")
 	@PostMapping("/{userId}/learn/speaking/generate")
 	public Mono<ApiResponse<SpeakingPracticeItemDto>> generateSpeakingPractice(
@@ -498,5 +534,40 @@ public class LearnerController {
 	public Mono<ApiResponse<SpeakingAttemptDetailDto>> getSpeakingAttemptDetail(
 			@PathVariable String userId, @PathVariable Long attemptId) {
 		return englishServiceClient.getSpeakingAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "List every speaking-library catalog topic with this learner's own progression status; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/library/topics")
+	public Mono<ApiResponse<List<SpeakingLibraryTopicDto>>> getSpeakingLibraryTopics(@PathVariable String userId) {
+		return englishServiceClient.getSpeakingLibraryTopics(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Start (or resume) a speaking-library Section for a topic (must be UNLOCKED or IN_PROGRESS); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/speaking/library/topics/{topicId}/sections")
+	public Mono<ApiResponse<SpeakingLibrarySectionDto>> startSpeakingLibrarySection(
+			@PathVariable String userId, @PathVariable Long topicId) {
+		return englishServiceClient.startSpeakingLibrarySection(userId, topicId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Submit a learner's recorded attempt at one speaking-library sentence (multipart audio); streamed straight through to english-service without buffering the file in bff-service; thin proxy to english-service")
+	@PostMapping(value = "/{userId}/learn/speaking/library/sections/{sectionId}/sentences/{sentenceId}/attempts",
+			consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public Mono<ApiResponse<SentenceAttemptResultDto>> submitSpeakingSentenceAttempt(
+			@PathVariable String userId, @PathVariable Long sectionId, @PathVariable Long sentenceId,
+			@RequestPart("audio") FilePart audio) {
+		return englishServiceClient.submitSpeakingSentenceAttempt(userId, sectionId, sentenceId, audio).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Finish a speaking-library section: if every sentence has a passing attempt, marks the topic PASSED and unlocks the next one; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/speaking/library/sections/{sectionId}/finish")
+	public Mono<ApiResponse<FinishSpeakingSectionResponse>> finishSpeakingLibrarySection(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return englishServiceClient.finishSpeakingLibrarySection(userId, sectionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's scored speaking-library sentence attempts, across all topics; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/library/sections/history")
+	public Mono<ApiResponse<List<SpeakingLibraryHistoryEntryDto>>> getSpeakingLibraryHistory(@PathVariable String userId) {
+		return englishServiceClient.getSpeakingLibraryHistory(userId).map(ApiResponse::ok);
 	}
 }

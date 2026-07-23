@@ -1352,6 +1352,47 @@ giống 1-1: `GrammarLibraryTopicDto`, `GrammarLibraryContentDto`, `GrammarLibra
 - **GET `/api/v1/learners/{userId}/learn/grammar/library/topics/{topicId}/history`** →
   `GrammarLibraryHistoryEntryDto[]`.
 
+### Listening Library (BFF proxy) — proxy sang `english-service` (mục 1)
+
+Thin proxy sang 4 endpoint `listening.library` của `english-service`, base
+`/api/v1/learners/{userId}/learn/listening/library/...` — cùng convention `userId` luôn có trong path
+như `vocabulary.library`/`grammar.library` ở trên. Các DTO là class riêng trong
+`com.remelearning.bff.dto` (không dùng lại DTO của english-service), field giống 1-1:
+`ListeningLibraryTopicDto`, `ListeningLibrarySectionDto`, `ListeningLibraryQuestionDto`,
+`ListeningAnswerItemDto`, `SubmitListeningAnswersRequest`, `SubmitListeningAnswersResponse`,
+`ListeningLibraryHistoryEntryDto`. `status` là `String` phẳng với 4 giá trị
+`LOCKED`/`UNLOCKED`/`IN_PROGRESS`/`PASSED`.
+
+- **GET `/api/v1/learners/{userId}/learn/listening/library/topics`** → `ListeningLibraryTopicDto[]`
+  (bootstrap chủ điểm đầu = `UNLOCKED`).
+- **POST `/api/v1/learners/{userId}/learn/listening/library/topics/{topicId}/sections`** → bắt
+  đầu/resume 1 Section → `ListeningLibrarySectionDto`; `403` nếu chủ điểm `LOCKED`.
+- **POST `/api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/answers`** (body
+  `SubmitListeningAnswersRequest`) → chấm toàn bộ câu trả lời → `SubmitListeningAnswersResponse`.
+- **GET `/api/v1/learners/{userId}/learn/listening/library/sections/history`** →
+  `ListeningLibraryHistoryEntryDto[]`.
+
+### Speaking Library (BFF proxy) — proxy sang `english-service` (mục 1)
+
+Thin proxy sang 5 endpoint `speaking.library` của `english-service`, base
+`/api/v1/learners/{userId}/learn/speaking/library/...` — cùng convention `userId` luôn có trong path
+như trên. Endpoint `sentences/{sentenceId}/attempts` là multipart, streamed thẳng qua `FilePart` giống
+`submitSpeakingAttempt` (mục "Learn skills" ở trên), không buffer file trong bff-service. Các DTO là
+class riêng trong `com.remelearning.bff.dto`, field giống 1-1: `SpeakingLibraryTopicDto`,
+`SpeakingLibrarySectionDto`, `SpeakingLibrarySentenceDto`, `SentenceAttemptResultDto`,
+`FinishSpeakingSectionResponse`, `SpeakingLibraryHistoryEntryDto`.
+
+- **GET `/api/v1/learners/{userId}/learn/speaking/library/topics`** → `SpeakingLibraryTopicDto[]`
+  (bootstrap chủ điểm đầu = `UNLOCKED`).
+- **POST `/api/v1/learners/{userId}/learn/speaking/library/topics/{topicId}/sections`** → bắt
+  đầu/resume 1 Section → `SpeakingLibrarySectionDto`; `403` nếu chủ điểm `LOCKED`.
+- **POST `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/sentences/{sentenceId}/attempts`**
+  (multipart `audio`) → chấm GOP 1 câu, không đụng tiến độ chủ điểm → `SentenceAttemptResultDto`.
+- **POST `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/finish`** → hoàn thành
+  section (PASSED + mở khóa chủ điểm kế tiếp nếu mọi câu đạt ngưỡng) → `FinishSpeakingSectionResponse`.
+- **GET `/api/v1/learners/{userId}/learn/speaking/library/sections/history`** →
+  `SpeakingLibraryHistoryEntryDto[]`.
+
 ### Dictation — proxy sang `english-service` (mục 1)
 
 Tất cả là proxy thuần túy; endpoint audio **relay nguyên** luồng bytes (status/headers/body) từ
@@ -1850,6 +1891,15 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/attempts` | proxy multipart streaming (không buffer file) sang english-service, chấm GOP qua ai-service |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/history` | proxy lịch sử làm bài |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/history/{attemptId}` | proxy chi tiết 1 lần làm bài |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/library/topics` | proxy `GET /api/v1/learn/listening/library/{userId}/topics` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/library/topics/{topicId}/sections` | proxy bắt đầu/resume 1 Section |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/answers` | proxy chấm toàn bộ câu trả lời 1 Section |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/library/sections/history` | proxy lịch sử attempt đã hoàn thành |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/library/topics` | proxy `GET /api/v1/learn/speaking/library/{userId}/topics` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/topics/{topicId}/sections` | proxy bắt đầu/resume 1 Section |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/sentences/{sentenceId}/attempts` | proxy multipart streaming (không buffer file) sang english-service, chấm GOP qua ai-service |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/finish` | proxy hoàn thành section (PASSED/mở khóa chủ điểm kế tiếp) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/library/sections/history` | proxy lịch sử attempt (từng câu) đã chấm |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/facets` | proxy facets thư viện dictation (nay có `minListensForHint`) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/clips` | proxy duyệt clip theo skill/level/topic/examType |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/folders` | proxy `/api/v1/dictation/folders` (rev 2, folder→file) |

@@ -1159,6 +1159,98 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseListeningAttemptDetail"
 
+  /api/v1/learners/{userId}/learn/listening/library/topics:
+    get:
+      tags: [Learners]
+      summary: List every listening-library catalog topic with this learner's own progression status (bootstraps the first topic to UNLOCKED); thin proxy to english-service
+      operationId: getListeningLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibraryTopicList"
+
+  /api/v1/learners/{userId}/learn/listening/library/topics/{topicId}/sections:
+    post:
+      tags: [Learners]
+      summary: Start a new listening-library Section for a topic, or resume its most recent one (must be UNLOCKED or IN_PROGRESS); thin proxy to english-service
+      operationId: startListeningLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibrarySection"
+        "403":
+          description: Topic is locked for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/answers:
+    post:
+      tags: [Learners]
+      summary: Score a submitted answer set for one listening-library section; passes the topic and unlocks the next one on pass; thin proxy to english-service
+      operationId: submitListeningLibraryAnswers
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitListeningAnswersRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSubmitListeningAnswersResult"
+
+  /api/v1/learners/{userId}/learn/listening/library/sections/history:
+    get:
+      tags: [Learners]
+      summary: A learner's completed listening-library section attempts, across all topics; thin proxy to english-service
+      operationId: getListeningLibraryHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibraryHistoryEntryList"
+
   /api/v1/learners/{userId}/learn/speaking/generate:
     post:
       tags: [Learners]
@@ -1318,6 +1410,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingAttemptDetail"
+
+  /api/v1/learners/{userId}/learn/speaking/library/topics:
+    get:
+      tags: [Learners]
+      summary: List every speaking-library catalog topic with this learner's own progression status (bootstraps the first topic to UNLOCKED); thin proxy to english-service
+      operationId: getSpeakingLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibraryTopicList"
+
+  /api/v1/learners/{userId}/learn/speaking/library/topics/{topicId}/sections:
+    post:
+      tags: [Learners]
+      summary: Start a new speaking-library Section for a topic, or resume its most recent one (must be UNLOCKED or IN_PROGRESS); thin proxy to english-service
+      operationId: startSpeakingLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibrarySection"
+        "403":
+          description: Topic is locked for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/sentences/{sentenceId}/attempts:
+    post:
+      tags: [Learners]
+      summary: >
+        Submit a learner's recorded attempt at one speaking-library sentence; streamed straight
+        through to english-service's multipart submit endpoint without buffering the file in
+        bff-service, scored via ai-service's wav2vec2 GOP model - does not itself affect topic
+        gating, see the finish endpoint
+      operationId: submitSpeakingSentenceAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: sentenceId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio: { type: string, format: binary }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSentenceAttemptResult"
+
+  /api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/finish:
+    post:
+      tags: [Learners]
+      summary: Finish a speaking-library section - if every sentence has a passing attempt, marks the topic PASSED and unlocks the next one; thin proxy to english-service
+      operationId: finishSpeakingLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseFinishSpeakingSection"
+
+  /api/v1/learners/{userId}/learn/speaking/library/sections/history:
+    get:
+      tags: [Learners]
+      summary: A learner's scored speaking-library sentence attempts, across all topics; thin proxy to english-service
+      operationId: getSpeakingLibraryHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingLibraryHistoryEntryList"
 
 components:
   schemas:
@@ -2562,3 +2779,186 @@ components:
         - type: object
           properties:
             data: { $ref: "#/components/schemas/SpeakingAttemptDetail" }
+
+    ListeningLibraryTopic:
+      type: object
+      description: One listening-library catalog topic with this learner's own progression status.
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        level: { type: string, nullable: true }
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+
+    ApiResponseListeningLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/ListeningLibraryTopic" } }
+
+    ListeningLibraryQuestion:
+      type: object
+      description: Learner-facing view of one section question - no correct option/explanation, so answers aren't leaked.
+      properties:
+        questionId: { type: integer, format: int64 }
+        questionText: { type: string }
+        options: { type: array, items: { type: string } }
+
+    ListeningLibrarySection:
+      type: object
+      description: A section ready to play/answer - passage text, a fetchable audio URL (if generated), and its question pool.
+      properties:
+        sectionId: { type: integer, format: int64 }
+        passageText: { type: string }
+        audioUrl: { type: string, nullable: true }
+        questions:
+          type: array
+          items: { $ref: "#/components/schemas/ListeningLibraryQuestion" }
+
+    ApiResponseListeningLibrarySection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/ListeningLibrarySection" }
+
+    ListeningAnswerItem:
+      type: object
+      properties:
+        questionId: { type: integer, format: int64 }
+        selectedOption: { type: string }
+
+    SubmitListeningAnswersRequest:
+      type: object
+      properties:
+        answers:
+          type: array
+          items: { $ref: "#/components/schemas/ListeningAnswerItem" }
+
+    SubmitListeningAnswersResult:
+      type: object
+      description: Scoring result for one submitted answer set, plus whether the topic was just passed/unlocked the next one.
+      properties:
+        score: { type: number, format: double }
+        correctCount: { type: integer }
+        totalQuestions: { type: integer }
+        topicPassed: { type: boolean }
+        nextTopicId: { type: integer, format: int64, nullable: true }
+        nextTopicUnlocked: { type: boolean }
+
+    ApiResponseSubmitListeningAnswersResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SubmitListeningAnswersResult" }
+
+    ListeningLibraryHistoryEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        sectionId: { type: integer, format: int64 }
+        score: { type: number, format: double }
+        correctCount: { type: integer }
+        totalQuestions: { type: integer }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponseListeningLibraryHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/ListeningLibraryHistoryEntry" } }
+
+    SpeakingLibraryTopic:
+      type: object
+      description: One speaking-library catalog topic with this learner's own progression status.
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        level: { type: string, nullable: true }
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+
+    ApiResponseSpeakingLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SpeakingLibraryTopic" } }
+
+    SpeakingLibrarySentence:
+      type: object
+      description: Learner-facing view of one sample sentence - text, IPA and the fetchable sample-audio URL (null if not yet generated).
+      properties:
+        sentenceId: { type: integer, format: int64 }
+        sentenceText: { type: string }
+        ipa: { type: string, nullable: true }
+        sampleAudioUrl: { type: string, nullable: true }
+
+    SpeakingLibrarySection:
+      type: object
+      description: A section ready to practice - its pool of sample sentences, each with IPA + a fetchable sample-audio URL.
+      properties:
+        sectionId: { type: integer, format: int64 }
+        sentences:
+          type: array
+          items: { $ref: "#/components/schemas/SpeakingLibrarySentence" }
+
+    ApiResponseSpeakingLibrarySection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SpeakingLibrarySection" }
+
+    SentenceAttemptResult:
+      type: object
+      description: Scoring result for one recorded sentence attempt - does not itself affect topic gating (see FinishSpeakingSection).
+      properties:
+        sentenceId: { type: integer, format: int64 }
+        phonemeScore: { type: number, format: double }
+        wordScore: { type: number, format: double }
+        passed: { type: boolean }
+        transcript: { type: string }
+
+    ApiResponseSentenceAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SentenceAttemptResult" }
+
+    FinishSpeakingSection:
+      type: object
+      description: Result of finishing a section - whether every sentence passed, plus whether the topic was just passed/unlocked the next one.
+      properties:
+        totalSentences: { type: integer }
+        passedSentences: { type: integer }
+        passed: { type: boolean }
+        nextTopicId: { type: integer, format: int64, nullable: true }
+        nextTopicUnlocked: { type: boolean }
+
+    ApiResponseFinishSpeakingSection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/FinishSpeakingSection" }
+
+    SpeakingLibraryHistoryEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        sectionId: { type: integer, format: int64 }
+        sentenceId: { type: integer, format: int64 }
+        phonemeScore: { type: number, format: double }
+        wordScore: { type: number, format: double }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponseSpeakingLibraryHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SpeakingLibraryHistoryEntry" } }

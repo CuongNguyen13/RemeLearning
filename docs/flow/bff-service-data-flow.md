@@ -58,6 +58,16 @@ flowchart TD
         RecoPassthrough["straight pass-through -> Map[String, List[RecommendationDto]]<br/>(no aggregation, no fallback - errors propagate as 500)"]
     end
 
+    subgraph ListeningSpeakingLibrary["learn/listening|speaking/library/... (9 routes)"]
+        LibTopicsCall["GET english-service .../library/{userId}/topics<br/>-> ListeningLibraryTopicDto[] / SpeakingLibraryTopicDto[]"]
+        LibSectionCall["POST english-service .../library/{userId}/topics/{topicId}/sections<br/>-> ListeningLibrarySectionDto / SpeakingLibrarySectionDto"]
+        LibAnswersCall["POST english-service listening .../sections/{sectionId}/answers<br/>-> SubmitListeningAnswersResponse"]
+        LibAttemptCall["POST english-service speaking .../sentences/{sentenceId}/attempts (multipart, streamed)<br/>-> SentenceAttemptResultDto"]
+        LibFinishCall["POST english-service speaking .../sections/{sectionId}/finish<br/>-> FinishSpeakingSectionResponse"]
+        LibHistoryCall["GET english-service .../library/{userId}/sections/history<br/>-> ListeningLibraryHistoryEntryDto[] / SpeakingLibraryHistoryEntryDto[]"]
+        LibPassthrough["straight pass-through, no aggregation, no fallback - errors propagate as-is<br/>(403 when a topic is LOCKED, 500 otherwise)"]
+    end
+
     InFile --> BindPart --> Rebuild --> ProxyPost --> RecordingDtoOut
 
     DashCall --> DashFallback
@@ -84,6 +94,13 @@ flowchart TD
 
     AuthCall --> AuthPassthrough
     UserProxyCall --> AuthPassthrough
+
+    LibTopicsCall --> LibPassthrough
+    LibSectionCall --> LibPassthrough
+    LibAnswersCall --> LibPassthrough
+    LibAttemptCall --> LibPassthrough
+    LibFinishCall --> LibPassthrough
+    LibHistoryCall --> LibPassthrough
 ```
 
 ## Data shape at each stage
@@ -100,6 +117,11 @@ flowchart TD
 | `WeakPointDto` | `{itemId, label, category, forgettingScore, recommendation}` | deserialized from each domain's own weak-point JSON (extra fields like `vocabularyType`/`id`/`recordingId` are ignored); `category` is not in the source JSON - `EnglishServiceClient` stamps it itself per endpoint called |
 | Weak points merged map | `Map<String, List<WeakPointDto>>` keyed `"vocabulary"/"grammar"/"pronunciation"` | any category whose upstream call failed is present as `[]`, not omitted |
 | `RecommendationDto` | `{itemId, category, label, forgettingScore, recommendationText, updatedAt}` | 1:1 with recommendation-service's `Recommendation`; passed straight through with no bff-side transformation |
+| `ListeningLibraryTopicDto` / `SpeakingLibraryTopicDto` | `{id, name, level, status}` | 1:1 with english-service's own topic DTO; `status` is a flat `String` (`LOCKED`/`UNLOCKED`/`IN_PROGRESS`/`PASSED`), passed straight through with no bff-side transformation |
+| `ListeningLibrarySectionDto` / `SpeakingLibrarySectionDto` | listening: `{sectionId, passageText, audioUrl, questions: [{questionId, questionText, options}]}`; speaking: `{sectionId, sentences: [{sentenceId, sentenceText, ipa, sampleAudioUrl}]}` | 1:1 with english-service's own section DTO; answers/correct options are never included (withheld server-side) |
+| `SubmitListeningAnswersResponse` / `FinishSpeakingSectionResponse` | `{..., topicPassed/passed, nextTopicId, nextTopicUnlocked}` | 1:1 pass-through of the scoring result; `nextTopicId`/`nextTopicUnlocked` are only populated when the topic was just passed |
+| `SentenceAttemptResultDto` | `{sentenceId, phonemeScore, wordScore, passed, transcript}` | 1:1 pass-through of one scored speaking-library sentence attempt; does not itself affect topic gating |
+| `ListeningLibraryHistoryEntryDto` / `SpeakingLibraryHistoryEntryDto` | listening: `{id, sectionId, score, correctCount, totalQuestions, startedAt, completedAt}`; speaking: `{id, sectionId, sentenceId, phonemeScore, wordScore, createdAt}` | 1:1 with english-service's own attempt row; `userId` is dropped (implicit in the request path) |
 
 ## Where data comes from / where it can go next
 
@@ -113,6 +135,10 @@ flowchart TD
   (register/login/PATCH do write in user-service, but bff-service itself holds no state).
 - `.onErrorResume` fallbacks are applied only in the two aggregation services
   (`LearnerOverviewService`, `WeakPointAggregationService`); the recommendations endpoint, the auth
-  proxy, the profile proxy, and the upload proxy are thin 1:1 forwards and let a downstream error
-  propagate to `common`'s `GlobalExceptionHandler` (500 `INTERNAL_ERROR`) rather than silently
-  defaulting.
+  proxy, the profile proxy, the upload proxy, and all `vocabulary`/`grammar`/`listening`/`speaking`
+  library proxies are thin 1:1 forwards and let a downstream error propagate to `common`'s
+  `GlobalExceptionHandler` (500 `INTERNAL_ERROR`, or the downstream's own status - e.g. `403` when a
+  library topic is `LOCKED`) rather than silently defaulting.
+- The speaking-library sentence-attempt upload follows the exact same multipart-streaming shape as
+  the upload proxy above: `FilePart.content()` is re-published via `MultipartBodyBuilder.asyncPart`
+  straight to english-service, never buffered fully in bff-service memory.
