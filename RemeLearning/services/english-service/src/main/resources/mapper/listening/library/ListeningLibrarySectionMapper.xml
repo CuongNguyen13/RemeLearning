@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.listening.library.mapper.ListeningLibrarySectionMapper">
+
+    <select id="findByTopicId" resultType="com.remelearning.english.listening.library.domain.ListeningLibrarySection">
+        SELECT id, topic_id, passage_text, audio_storage_key, created_at
+        FROM listening_library_sections WHERE topic_id = #{topicId} ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.remelearning.english.listening.library.domain.ListeningLibrarySection">
+        SELECT id, topic_id, passage_text, audio_storage_key, created_at
+        FROM listening_library_sections WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.remelearning.english.listening.library.domain.ListeningLibrarySection"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO listening_library_sections (topic_id, passage_text, audio_storage_key)
+        VALUES (#{topicId}, #{passageText}, #{audioStorageKey})
+    </insert>
+
+</mapper>
