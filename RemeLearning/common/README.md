@@ -16,6 +16,7 @@ for the full architecture writeup; this file is a short index of what lives here
 | `storage/` | `S3StorageClient` + `S3ClientConfig` (`reme.s3.*`, MinIO-compatible via the `endpoint` override). |
 | `security/` | `JwtTokenProvider`/`JwtProperties` — issues/validates HMAC JWTs. `user-service` is the only caller today; no service enforces/validates a token on incoming requests yet. |
 | `response/`, `exception/`, `web/` | `ApiResponse<T>` envelope, `BusinessException`/`ErrorCode`, `GlobalExceptionHandler` — the standard success/error shape every controller in every service returns. |
+| `scoring/` | `WeakPointScoringEngine` (+ `AdaptiveHalfLifeModel`/`BktModel`/`RaschDifficultyEstimator`/`LeitnerScheduler`) — the shared forgetting/weak-point scoring model (Rasch difficulty × Ebbinghaus half-life decay × BKT mastery-gap × recurrence boost), ported 1:1 in `ai-service/app/scoring/engine.py`. `ExactMatchScorer` — normalize-and-compare scoring shared by grammar- and vocabulary-practice attempt grading (`english-service`'s `GrammarAttemptScorer`/`VocabAttemptScorer` both delegate to it). |
 
 ## Using this module
 
