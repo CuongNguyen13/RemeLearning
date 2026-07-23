@@ -201,6 +201,25 @@ flowchart TD
         GLibRetrySession["insert grammar_library_sessions row<br/>{sessionType=RETRY, questionsJson=retryQuestions (inline, never in the pool table), status=IN_PROGRESS}"]
     end
 
+    subgraph ListeningLibraryFlow["Listening library (package listening.library) - fixed topic catalog + AI Section (passage+audio), generated once"]
+        LLibSectionReq["POST /.../library/{userId}/topics/{topicId}/sections"]
+        LLibLockCheck{"listening_topic_progress.status == LOCKED (or no row)?"}
+        LLibSectionCheck{"listening_library_sections row exists for topic?"}
+        LLibGenerate["LlmListeningLibraryGenerator.generateSection(topic)<br/>LLM (Gemini) -> {passage, questions[4]}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
+        LLibSynthesize["DialogueAudioSynthesizer.synthesize([Narrator: passage], ttsLang)<br/>Supertonic -> audio bytes"]
+        LLibStorageWrite["StorageClient.write(listening-library/{topicId}/{uuid}.wav, audioBytes)"]
+        LLibInsertSection["insert listening_library_sections row {topicId, passageText, audioStorageKey}"]
+        LLibInsertQuestions["insert listening_library_questions row per generated question"]
+        LLibMarkInProgress["listening_topic_progress -> IN_PROGRESS"]
+
+        LLibAnswerReq["POST /.../{userId}/sections/{sectionId}/answers {answers[]}"]
+        LLibScore["score each submitted answer against correctOption per questionId<br/>-> {score = correctCount/total, correctCount, totalQuestions}"]
+        LLibInsertAttempt["insert listening_library_attempts row"]
+        LLibPassCheck{"score >= 0.7 (PASS_THRESHOLD)?"}
+        LLibMarkPassed["listening_topic_progress -> PASSED, passed_at=now()"]
+        LLibUnlockNext["listening_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
+    end
+
     subgraph Storage["reme_english DB"]
         T1[("transcripts")]
         T2[("transcript_segments")]
@@ -233,6 +252,11 @@ flowchart TD
         T29[("grammar_topic_progress")]
         T30[("grammar_library_sessions")]
         T31[("grammar_library_session_answers")]
+        T32[("listening_library_topics")]
+        T33[("listening_library_sections")]
+        T34[("listening_library_questions")]
+        T35[("listening_topic_progress")]
+        T36[("listening_library_attempts")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -409,6 +433,24 @@ flowchart TD
     GLibAllCorrect -->|yes| GLibMarkPassed --> T29
     GLibMarkPassed --> GLibUnlockNext --> T29
     GLibAllCorrect -->|no| GLibRetryGen --> GLibRetrySession --> T30
+
+    T32 --> LLibSectionReq
+    LLibSectionReq --> LLibLockCheck
+    T35 --> LLibLockCheck
+    LLibLockCheck -->|no, UNLOCKED/IN_PROGRESS/PASSED| LLibSectionCheck
+    T33 --> LLibSectionCheck
+    LLibSectionCheck -->|no, first read| LLibGenerate --> LLibSynthesize --> LLibStorageWrite --> LLibInsertSection --> T33
+    LLibInsertSection --> LLibInsertQuestions --> T34
+    LLibSectionCheck -->|yes, reuse most recent| LLibMarkInProgress
+    LLibInsertQuestions --> LLibMarkInProgress
+    LLibMarkInProgress --> T35
+
+    LLibAnswerReq --> LLibScore
+    T34 --> LLibScore
+    LLibScore --> LLibInsertAttempt --> T36
+    LLibScore --> LLibPassCheck
+    LLibPassCheck -->|yes| LLibMarkPassed --> T35
+    LLibMarkPassed --> LLibUnlockNext --> T35
 ```
 
 ## Data shape at each stage
@@ -505,6 +547,18 @@ flowchart TD
 | `GrammarLibraryAnswerResultDto` (REST) | `{questionRef, correct, correctAnswer?, explanationVi?, translationVi?}` | `POST .../sessions/{sessionId}/answers` response |
 | `FinishGrammarLibrarySessionResponse` (REST) | `{sessionId, correctCount, totalCount, passed, retrySession?: StartGrammarSessionResponse, nextTopicUnlocked, nextTopicId?}` | `retrySession` non-null only when `passed=false` |
 | `PracticeAttemptRequest` fed from grammar library | `{itemId: "grammar:<topicCode>", category: "grammar", label: topicName, correct}` | one per question in the finished session, **NOT** deduped (same convention as `LibFeed` above) - lets a session's repeated exposure to the same topic register as in-batch recurrence |
+| `listening_library_topics` row | `{id, code, name, description?, level, sequence_order, created_at}` | fixed, hand-seeded catalog (`V19__listening_library.sql`, same topic set/order as `grammar_library_topics`), never generated/topped up at runtime |
+| `GeneratedListeningLibrarySection` (LLM JSON) | `{passage, questions: [{question, options[4], correctOption: A\|B\|C\|D, explanation}] (4 items)}` | `LlmListeningLibraryGenerator.generateSection` output; unlike `GeneratedGrammarTopicContent`, **no** static-template fallback - any call/parse failure or blank passage throws `AiContentException`, so a failed generation simply produces no Section |
+| `listening_library_sections` row | `{id, topic_id, passage_text, audio_storage_key?, created_at}` | one row per generated Section; `audio_storage_key` is set before insert (unlike the "learn" skills' insert-then-update-key flow) since this mapper has no update-key method, addressed by `topic_id` + a random suffix instead of the not-yet-known section id |
+| `listening_library_questions` row | `{id, section_id, question_text, options_json, correct_option, explanation, created_at}` | the reusable 4-question pool, generated alongside the section row (not in the same DB transaction as `grammar.library`'s content+questions insert, but sequentially in the same generator call) |
+| `ListeningLibraryTopicDto` (REST) | `{id, name, level, status: LOCKED\|UNLOCKED\|IN_PROGRESS\|PASSED}` | `GET .../{userId}/topics` response; `status` comes from `listening_topic_progress`, defaulting to `LOCKED` when no row exists |
+| `listening_topic_progress` row | `{id, user_id, topic_id, status, unlocked_at?, passed_at?, updated_at}` | upserted on `(user_id, topic_id)`, structurally identical to `grammar_topic_progress`; the first topic (`sequence_order=1`) is bootstrapped to `UNLOCKED` the first time a learner calls `getTopics` |
+| `ListeningLibrarySectionDto` (REST) | `{sectionId, passageText, audioUrl?, questions: {questionId, questionText, options[]}[]}` | `POST .../topics/{topicId}/sections` response; questions omit `correctOption`/`explanation` (in-progress quiz, answers not leaked) |
+| `SubmitListeningAnswersRequest` | `{answers: [{questionId, selectedOption}]}` | REST request body |
+| `listening_library_attempts` row | `{id, user_id, section_id, score, correct_count, total_questions, started_at, completed_at}` | one row per graded submission, full history kept; no upsert/idempotency key - every submission is a new row |
+| `SubmitListeningAnswersResponse` (REST) | `{score, correctCount, totalQuestions, topicPassed, nextTopicId?, nextTopicUnlocked}` | `POST .../sections/{sectionId}/answers` response; `topicPassed = score >= 0.7`; `nextTopicId`/`nextTopicUnlocked` only populated when passed and a next topic exists |
+| `ListeningLibraryAttempt` (REST, history) | `{id, userId, sectionId, score, correctCount, totalQuestions, startedAt, completedAt}` | `GET .../{userId}/sections/history` response; the domain row is returned directly, unlike `GrammarLibraryHistoryEntryDto` which is a dedicated DTO - no separate history-view type exists for listening library today |
+| listening library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | unlike every other "library"/"learn" skill, scoring here writes only to `listening_library_attempts`/`listening_topic_progress` - it does not reach the weak-point/spaced-repetition pipeline at all (consistent with the pre-existing gap that category `listening` has no dedicated weak-point table anywhere in the service, see the `PracticeAttemptRequest fed from listening learn` row above) |
 
 ## Where data comes from / where it can go next
 

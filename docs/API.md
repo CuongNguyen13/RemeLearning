@@ -733,6 +733,53 @@ Lịch sử các session đã hoàn thành (`INITIAL`/`RETRY`) của learner cho
 - **Response `data`** — `GrammarLibraryHistoryEntryDto[]`: `{sessionId, sessionType, correctCount,
   totalCount, accuracy, completedAt?}`.
 
+### Listening Library — catalog chủ điểm nghe-hiểu, Section AI (đoạn văn + audio) + mở khóa tuần tự (package `listening.library`)
+
+Song song `grammar.library` nhưng cho kỹ năng nghe: một catalog **cố định** các chủ điểm nghe-hiểu
+(cùng tên/thứ tự với `grammar_library_topics`, seed cứng trong `V19__listening_library.sql`), mỗi chủ
+điểm có một hoặc nhiều **Section** (đoạn văn + audio Supertonic, sinh bằng AI **một lần duy nhất** rồi
+tái sử dụng mãi mãi) kèm bộ 4 câu hỏi trắc nghiệm. Learner đi tuần tự giống Grammar Library: chủ điểm
+đầu tiên tự bootstrap `UNLOCKED`, các chủ điểm sau `LOCKED` cho tới khi chủ điểm liền trước được
+`PASSED` (điểm ≥ 0.7). Chấm xong luôn ghi một attempt (`listening_library_attempts`); khi `PASSED`, tự
+mở khóa (`UNLOCKED`) chủ điểm kế tiếp theo `sequenceOrder`. Khác `Listening Learn` (sinh đề rời rạc mỗi
+lần theo weak-point, không lưu lâu dài), đây là một thư viện nội dung cố định giống Vocabulary/Grammar
+Library.
+
+### GET `/api/v1/learn/listening/library/{userId}/topics`
+
+Danh sách toàn bộ chủ điểm kèm trạng thái tiến độ của learner (tự bootstrap chủ điểm đầu tiên thành
+`UNLOCKED` nếu learner chưa có row nào).
+- **Path param**: `userId` (string)
+- **Response `data`** — `ListeningLibraryTopicDto[]`: `{id, name, level, status
+  (LOCKED|UNLOCKED|IN_PROGRESS|PASSED)}`.
+
+### POST `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections`
+
+Bắt đầu một Section mới cho chủ điểm (sinh đoạn văn + audio bằng AI ở lần đọc đầu tiên, các lần sau chỉ
+đọc lại Section gần nhất đã có), chuyển trạng thái chủ điểm sang `IN_PROGRESS`.
+- **Path param**: `userId` (string), `topicId` (int64)
+- **Response `data`** — `ListeningLibrarySectionDto`: `{sectionId, passageText, audioUrl?, questions:
+  {questionId, questionText, options[]}[]}`. Câu hỏi **không** kèm đáp án đúng/giải thích (đang làm
+  bài, không lộ đáp án).
+- **Lỗi**: `403` nếu chủ điểm đang `LOCKED` cho learner này; `404` nếu `topicId` không tồn tại.
+
+### POST `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers`
+
+Chấm toàn bộ câu trả lời đã nộp cho một Section, lưu lại thành một attempt. Nếu điểm ≥ 0.7 (`PASSED`),
+chủ điểm chuyển `PASSED` và tự mở khóa chủ điểm kế tiếp.
+- **Path param**: `userId` (string), `sectionId` (int64)
+- **Request body** — `SubmitListeningAnswersRequest`: `{answers: {questionId, selectedOption}[]}`.
+- **Response `data`** — `SubmitListeningAnswersResponse`: `{score, correctCount, totalQuestions,
+  topicPassed, nextTopicId?, nextTopicUnlocked}`.
+- **Lỗi**: `404` nếu `sectionId` không tồn tại.
+
+### GET `/api/v1/learn/listening/library/{userId}/sections/history`
+
+Toàn bộ attempt đã hoàn thành của learner, trên mọi chủ điểm/Section.
+- **Path param**: `userId` (string)
+- **Response `data`** — `ListeningLibraryAttempt[]`: `{id, userId, sectionId, score, correctCount,
+  totalQuestions, startedAt, completedAt}`.
+
 ### Listening Learn — luyện nghe-hiểu với AI (package `listening`, đỉnh mới)
 
 Sinh một đoạn hội thoại/độc thoại nghe-hiểu (Gemini sinh transcript + câu hỏi, Supertonic tổng hợp
@@ -1791,6 +1838,10 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/sessions/{sessionId}/answers` | chấm 1 câu trong session; `400`/`409` |
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/sessions/{sessionId}/finish` | hoàn thành session: PASSED + mở khóa chủ điểm kế tiếp, hoặc trả session RETRY cho câu sai; `409` |
 | english-service (grammar.library) | REST | GET | `/api/v1/learn/grammar/library/{userId}/topics/{topicId}/history` | lịch sử session đã hoàn thành của 1 chủ điểm |
+| english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
+| english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: đoạn văn + audio); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
+| english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers` | chấm toàn bộ câu trả lời 1 Section; `PASSED` (≥0.7) mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |
+| english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/sections/history` | lịch sử toàn bộ attempt đã hoàn thành của learner |
 | english-service (listening) | REST | POST | `/api/v1/learn/listening/{userId}/generate` | Gemini sinh transcript+câu hỏi, Supertonic tổng hợp audio đồng bộ |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/items/{itemId}` | chi tiết bài (không transcript; nay kèm `answer` MCQ/KEYWORD + `explanation` cho FE chấm local, `answer` null với OPEN); `404` |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/{userId}/items` | danh sách bài đã sinh của learner |

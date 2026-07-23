@@ -1069,6 +1069,98 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseGrammarLibraryHistoryEntryList"
 
+  /api/v1/learn/listening/library/{userId}/topics:
+    get:
+      tags: [Listening Library]
+      summary: List every catalog topic with this learner's own progression status
+      operationId: getListeningLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibraryTopicList"
+
+  /api/v1/learn/listening/library/{userId}/topics/{topicId}/sections:
+    post:
+      tags: [Listening Library]
+      summary: Start a new Section for a topic (generating one via AI on first read), or resume its most recent one
+      operationId: startOrResumeListeningLibrarySection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibrarySection"
+        "403":
+          description: Topic is locked for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers:
+    post:
+      tags: [Listening Library]
+      summary: Score a submitted answer set for one section; marks the topic PASSED and unlocks the next topic on pass
+      operationId: submitListeningLibraryAnswers
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitListeningAnswersRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSubmitListeningAnswers"
+
+  /api/v1/learn/listening/library/{userId}/sections/history:
+    get:
+      tags: [Listening Library]
+      summary: This learner's completed section attempts, across all topics
+      operationId: getListeningLibraryHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningLibraryAttemptList"
+
   /api/v1/learn/listening/{userId}/generate:
     post:
       tags: [Listening Learn]
@@ -2419,6 +2511,94 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryHistoryEntry" } }
+
+    ListeningLibraryTopic:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        level: { type: string }
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+
+    ApiResponseListeningLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/ListeningLibraryTopic" } }
+
+    ListeningLibrarySectionQuestion:
+      type: object
+      description: Learner-facing view of a question - no correct option/explanation, so answers aren't leaked.
+      properties:
+        questionId: { type: integer, format: int64 }
+        questionText: { type: string }
+        options: { type: array, items: { type: string } }
+
+    ListeningLibrarySection:
+      type: object
+      description: >
+        A section ready to play/answer: passage text, a fetchable audio URL (null until Supertonic
+        has finished synthesizing it), and its question pool.
+      properties:
+        sectionId: { type: integer, format: int64 }
+        passageText: { type: string }
+        audioUrl: { type: string, nullable: true }
+        questions: { type: array, items: { $ref: "#/components/schemas/ListeningLibrarySectionQuestion" } }
+
+    ApiResponseListeningLibrarySection:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/ListeningLibrarySection" }
+
+    SubmitListeningAnswersRequest:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId: { type: integer, format: int64 }
+              selectedOption: { type: string }
+
+    SubmitListeningAnswersResult:
+      type: object
+      properties:
+        score: { type: number, format: double }
+        correctCount: { type: integer }
+        totalQuestions: { type: integer }
+        topicPassed: { type: boolean }
+        nextTopicId: { type: integer, format: int64, nullable: true }
+        nextTopicUnlocked: { type: boolean }
+
+    ApiResponseSubmitListeningAnswers:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SubmitListeningAnswersResult" }
+
+    ListeningLibraryAttempt:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: string }
+        sectionId: { type: integer, format: int64 }
+        score: { type: number, format: double }
+        correctCount: { type: integer }
+        totalQuestions: { type: integer }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+
+    ApiResponseListeningLibraryAttemptList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/ListeningLibraryAttempt" } }
 
     GenerateListeningPracticeRequest:
       type: object

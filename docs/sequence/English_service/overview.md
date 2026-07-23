@@ -47,6 +47,10 @@ per-consumer detail lives in [english-get-transcript.md](english-get-transcript.
 - [Grammar library: 60-topic catalog + theory page + session practice](grammar-library.md) - a fixed
   grammar topic catalog with an AI-generated theory page + question pool per topic (generated once,
   reused forever) and a pass/retry/unlock-next-topic progression per learner.
+- [Listening library: fixed topic catalog + AI Section (passage + audio) + pass/unlock-next-topic](listening-library.md) -
+  a fixed listening topic catalog crossing Grammar Library's gating state machine with an
+  AI-generated passage + Supertonic audio + question pool per Section (generated once, reused
+  forever); `bff-service` does not yet proxy it (gap noted in the linked file).
 
 ## 1. Kafka consumers (ingestion)
 
