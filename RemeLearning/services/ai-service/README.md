@@ -15,6 +15,9 @@ Python AI service for RemeLearning. Responsibilities:
    sentences against that timeline in order, returning each sentence's `{start_ms, end_ms}` (null if a
    sentence couldn't be located). Called by `english-service`'s dictation `getClipDetail` the first time a
    clip's sentences are read without timestamps — see `app/align/sentence_aligner.py`.
+6. Expose `POST /api/v1/pronunciation/score` — Goodness-of-Pronunciation (GOP) scoring for the
+   Nói/Phát âm (speaking/pronunciation) practice feature, given a learner's recorded attempt at a
+   known target sentence. See `app/pronunciation/` below.
 
 See `RemeLearning/common/src/main/java/com/remelearning/common/constants/KafkaTopics.java` for the shared
 topic-name contract with the Java services.
@@ -52,6 +55,88 @@ forced-alignment pass of the *known* script text against the audio (e.g. `torcha
 versions) — since dictation already knows the exact target text, this is a forced-alignment problem,
 not free transcription. A VAD pass (Silero VAD/webrtcvad) to snap boundaries to actual silence could
 also replace the fixed `_PADDING_MS` heuristic with something acoustically grounded.
+
+### Pronunciation GOP scoring (`app/pronunciation/`)
+
+Goodness-of-Pronunciation (GOP) scoring for the "Nói/Phát âm" (speaking/pronunciation) practice
+skill: given a learner's recorded attempt at a known target sentence, scores how well an acoustic
+model's posteriors support each expected phone having actually occurred.
+
+Pipeline (`app/pronunciation/service.py` orchestrates all three stages, kept separate from the
+FastAPI route so it's callable/testable without an HTTP layer):
+
+1. **G2P** (`app/pronunciation/g2p.py`) — `G2pEnProvider` (the `g2p_en` backend, pure-Python,
+   CMUdict + a small seq2seq model for out-of-vocabulary words — no `espeak-ng` system dependency)
+   converts the expected English text into its ARPAbet phoneme sequence, split by word. Defined
+   behind a `G2pProvider` interface so a future switch to `phonemizer`/`espeak-ng` (better
+   out-of-CMUdict coverage, real IPA output) doesn't touch the scoring code.
+2. **Acoustic model** (`app/pronunciation/gop_model.py`) — `Wav2Vec2GopModel` lazily loads
+   `facebook/wav2vec2-lv-60-espeak-cv-ft` (default; overridable via `PRONUNCIATION_MODEL`) and runs
+   a forward pass to get per-frame (~20ms) log-probabilities over the model's own IPA/espeak phoneme
+   vocabulary. Deliberately bypasses `Wav2Vec2Processor`/`Wav2Vec2PhonemeCTCTokenizer` (which needs
+   the `phonemizer` package and its `espeak-ng` binary) — only `Wav2Vec2FeatureExtractor` plus a raw
+   `vocab.json` load is needed for the acoustic output this stage uses.
+3. **ARPAbet → IPA mapping** (`app/pronunciation/arpabet_ipa.py`) — maps `g2p_en`'s CMUdict/ARPAbet
+   phone symbols to the espeak/IPA symbols the acoustic model was fine-tuned on; checked against the
+   model's actual `vocab.json`, covers all 39 CMUdict phones.
+4. **GOP scorer** (`app/pronunciation/gop_scorer.py`) — greedy-decodes the model's most-likely phone
+   per frame and collapses repeats, edit-distance-aligns (Wagner-Fischer, the same algorithm
+   `DictationScorer.java` uses for words, applied to phones here) that recognized sequence against
+   the expected sequence, then scores each aligned expected phone by the mean posterior *of that
+   expected phone* over the frames the alignment assigned it (a deleted/unmatched expected phone
+   scores 0). Phones scoring below `WEAK_PHONEME_THRESHOLD` (0.4) are surfaced in `weak_phonemes`.
+
+**Endpoint:** `POST /api/v1/pronunciation/score` (multipart/form-data):
+
+- Request: `audio` (file, the learner's recording), `expected_text` (form field, the target
+  sentence), `language_code` (form field, default `"en"`, used only for the plain Whisper transcript
+  returned alongside the score).
+- Response (`PronunciationScoreResponse`):
+  ```json
+  {
+    "overall": 0.0,
+    "words": [
+      {
+        "word": "string",
+        "score": 0.0,
+        "phonemes": [{"ipa": "string", "score": 0.0}]
+      }
+    ],
+    "transcript": "string",
+    "weak_phonemes": ["string"]
+  }
+  ```
+- Returns `503` with a message to set `PRONUNCIATION_ENABLED=true` when the feature is disabled —
+  same gating pattern as `TTS_ENABLED`/`KAFKA_ENABLED`.
+
+**Env vars** (`app/config.py`):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `PRONUNCIATION_ENABLED` | `false` | Gates the whole feature. Off by default, same pattern as `KAFKA_ENABLED`/`VISION_ENABLED`: loading the wav2vec2 acoustic model costs real memory/CPU that shouldn't be paid on every ai-service instance until the feature is actually used (this machine's free-RAM headroom is tight — see project notes). |
+| `PRONUNCIATION_MODEL` | `facebook/wav2vec2-lv-60-espeak-cv-ft` | HuggingFace model id for the acoustic model (`app/pronunciation/gop_model.py`). |
+
+**New dependencies** (`pyproject.toml`) — `transformers==4.38.2`, `tokenizers>=0.14,<0.19`,
+`g2p_en>=2.1`. Pinned tight per the in-file comment: `transformers>=4.39` requires
+`tokenizers>=0.19`, but `huggingface_hub<0.26` (already pinned for `pyannote.audio`, see below) only
+ships releases compatible with `tokenizers<0.19` up to `huggingface_hub` 0.25.2's own tokenizers
+ceiling — `transformers==4.38.2` + `tokenizers==0.15.2` is the newest combination verified to
+coexist with the `pyannote.audio`/`huggingface_hub<0.26` pin without any package needing an
+upgrade. Bump only together with a re-check of both ceilings.
+
+**Known limitations (from `app/pronunciation/gop_scorer.py`'s module docstring):** this is a
+**simplified GOP, not the textbook forced-alignment version** (Viterbi/CTC forced segmentation of
+the acoustic model against the expected sequence, then log-posterior-ratio per aligned phone).
+Instead it (1) greedy-decodes the model's own most-likely phone per frame and collapses repeats
+("recognition", not alignment-to-expected), (2) edit-distance-aligns that recognized sequence
+against the expected sequence, (3) scores each aligned expected phone by the mean posterior of that
+expected phone over the frames the alignment assigned it, and (4) scores a deleted/unmatched
+expected phone as 0. For tightly-packed or reordered speech, this recognition-then-align approach
+can mis-segment frame ranges that true forced alignment would place correctly. This PoC has been
+verified against clean TTS-generated audio; accuracy against noisy/natural speech has not yet been
+validated. Upgrade path: replace the greedy-decode + edit-distance steps with proper CTC forced
+alignment (`torchaudio.functional.forced_align`, available in newer `torchaudio` — not the `2.2.2`
+pinned here) once accuracy against real graded audio shows this approximation isn't good enough.
 
 ## Run locally — detailed steps (Windows / PowerShell)
 
@@ -144,6 +229,9 @@ pip install "scipy<1.13"
 pip install "huggingface_hub<0.26"
 pip install "speechbrain==1.0.3"
 pip install "pyannote.audio==3.4.0"
+pip install "transformers==4.38.2"
+pip install "tokenizers>=0.14,<0.19"
+pip install "g2p_en>=2.1"
 ```
 
 | Library | Purpose |
@@ -163,6 +251,9 @@ pip install "pyannote.audio==3.4.0"
 | `huggingface_hub<0.26` | Bản ≥0.26 đã bỏ tham số `use_auth_token` mà `pyannote.audio` 3.4.0 gọi nội bộ khi tải model |
 | `speechbrain==1.0.3` | Dependency của `pyannote.audio`. Bản 1.1.0 có bug lazy-import `k2_fsa` làm crash khi load pipeline (không liên quan tới việc có dùng k2 hay không) |
 | `pyannote.audio==3.4.0` | Speaker diarization (`app/stt/diarization.py`) — needs `HF_TOKEN`. **Pin cứng**: bản ≥4.0 bắt buộc tải thêm model gated `pyannote/speaker-diarization-community-1` (cần được HuggingFace duyệt quyền riêng, không tự cài được) |
+| `transformers==4.38.2` | Loads the `facebook/wav2vec2-lv-60-espeak-cv-ft` acoustic model for GOP scoring (`app/pronunciation/gop_model.py`), gated by `PRONUNCIATION_ENABLED`. **Pin cứng**: `transformers>=4.39` yêu cầu `tokenizers>=0.19`, nhưng `huggingface_hub<0.26` (pin ở trên cho `pyannote.audio`) chỉ tương thích `tokenizers<0.19` — `4.38.2` + `tokenizers==0.15.2` là combo mới nhất đã verify không xung đột |
+| `tokenizers>=0.14,<0.19` | Dependency của `transformers`, giữ trần `<0.19` để không xung đột với `huggingface_hub<0.26` (xem dòng trên) |
+| `g2p_en>=2.1` | Grapheme-to-phoneme cho GOP scoring (`app/pronunciation/g2p.py`) — pure-Python (CMUdict + seq2seq cho từ ngoài từ điển), không cần binary hệ thống `espeak-ng` |
 
 Dev-only (chạy test):
 
@@ -183,8 +274,8 @@ nhận diện được package `app`:
 pip install -e . --no-deps
 ```
 
-**Lưu ý:** `torch`/`torchaudio`/`pyannote.audio`/`numpy`/`scipy`/`huggingface_hub`/`speechbrain` phải
-đúng version pin ở trên — đây là kết quả sau khi gỡ hàng loạt lỗi tương thích thực tế giữa các bản mới
+**Lưu ý:** `torch`/`torchaudio`/`pyannote.audio`/`numpy`/`scipy`/`huggingface_hub`/`speechbrain`/
+`transformers`/`tokenizers` phải đúng version pin ở trên — đây là kết quả sau khi gỡ hàng loạt lỗi tương thích thực tế giữa các bản mới
 nhất của những package này trên Windows. Chạy trên **Python 3.11 hoặc 3.12** trong virtualenv riêng
 (không dùng Python 3.13+/3.14 — một số bản pin ở trên không có wheel cho Python quá mới).
 

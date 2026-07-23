@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     db_username: str = "postgres"
     db_password: str = "postgres"
 
+    # Speaking/pronunciation GOP scoring (app/pronunciation/) - defaults off, same pattern as
+    # KAFKA_ENABLED/vision_enabled: loading the wav2vec2 acoustic model costs real memory/CPU that
+    # shouldn't be paid on every ai-service instance until the feature is actually used (see
+    # project memory on this machine's tight free-RAM headroom).
+    pronunciation_enabled: bool = False
+    pronunciation_model: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 

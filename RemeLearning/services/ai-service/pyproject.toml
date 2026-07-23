@@ -55,6 +55,19 @@ dependencies = [
     # On-device text-to-speech (app/tts/) for dictation AI-practice audio. 99M-param ONNX model,
     # runs on CPU (no GPU), 44.1kHz output - reuses the onnxruntime already pulled in by insightface.
     "supertonic>=0.1",
+    # Speaking/pronunciation GOP scoring (app/pronunciation/), gated by PRONUNCIATION_ENABLED
+    # (default false - see app/config.py). g2p_en: pure-Python grapheme-to-phoneme, no system
+    # `espeak-ng` dependency (deliberate stage-1 choice - see app/pronunciation/g2p.py's docstring
+    # for the phonemizer/espeak-ng upgrade path). transformers: loads
+    # facebook/wav2vec2-lv-60-espeak-cv-ft for the acoustic side.
+    # Pinned tight: transformers>=4.39 requires tokenizers>=0.19, but huggingface_hub<0.26 (pinned
+    # above for pyannote.audio) only ships tokenizers<0.19-compatible releases up to
+    # huggingface_hub 0.25.2's own tokenizers ceiling - transformers 4.38.2 + tokenizers 0.15.2 is
+    # the newest combination verified to coexist with the pyannote.audio/huggingface_hub<0.26 pin
+    # without any package needing an upgrade. Bump only together with a re-check of both ceilings.
+    "transformers==4.38.2",
+    "tokenizers>=0.14,<0.19",
+    "g2p_en>=2.1",
 ]
 
 [project.optional-dependencies]

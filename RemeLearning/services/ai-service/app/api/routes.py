@@ -14,7 +14,11 @@ from app.db.session import session_scope
 from app.face.enrollment import FaceEnrollmentService, NoFaceDetectedError
 from app.face.insightface_engine import InsightFaceEngine
 from app.face.pipeline import identify_speakers_by_face
+from app.pronunciation.g2p import G2pEnProvider
+from app.pronunciation.gop_model import Wav2Vec2GopModel
+from app.pronunciation.service import score_pronunciation_from_wav
 from app.schemas.align import SentenceTimingResponse
+from app.schemas.pronunciation import PhonemeScoreResponse, PronunciationScoreResponse, WordScoreResponse
 from app.schemas.events import (
     AnalysisRequestedEvent,
     EnrolledFaceResponse,
@@ -50,6 +54,8 @@ _face_engine: InsightFaceEngine | None = None
 _face_enrollment: FaceEnrollmentService | None = None
 _voice_auth_analyzer: HeuristicVoiceAuthenticityAnalyzer | None = None
 _tts_engine: SupertonicEngine | None = None
+_g2p_provider: G2pEnProvider | None = None
+_gop_model: Wav2Vec2GopModel | None = None
 
 
 def _get_whisper_engine() -> FasterWhisperEngine:
@@ -99,6 +105,20 @@ def _get_tts_engine() -> SupertonicEngine:
     if _tts_engine is None:
         _tts_engine = SupertonicEngine(settings.tts_default_voice, settings.tts_default_lang)
     return _tts_engine
+
+
+def _get_g2p_provider() -> G2pEnProvider:
+    global _g2p_provider
+    if _g2p_provider is None:
+        _g2p_provider = G2pEnProvider()
+    return _g2p_provider
+
+
+def _get_gop_model() -> Wav2Vec2GopModel:
+    global _gop_model
+    if _gop_model is None:
+        _gop_model = Wav2Vec2GopModel(settings.pronunciation_model)
+    return _gop_model
 
 
 def _add_vision_captions(result: TranscriptionResult, video_path: str) -> TranscriptionResult:
@@ -271,6 +291,58 @@ async def align_dictation_sentences(
     finally:
         os.remove(audio_path)
         os.remove(wav_path)
+
+
+@router.post("/api/v1/pronunciation/score", response_model=PronunciationScoreResponse)
+async def score_pronunciation_endpoint(
+    audio: UploadFile = File(...),
+    expected_text: str = Form(...),
+    language_code: str = Form("en"),
+) -> PronunciationScoreResponse:
+    """Scores a learner's spoken attempt at `expected_text` via Goodness-of-Pronunciation (GOP):
+    g2p_en converts the expected text to its ARPAbet phoneme sequence, the acoustic model
+    (`app.pronunciation.gop_model`, `facebook/wav2vec2-lv-60-espeak-cv-ft` by default) supplies
+    per-frame phoneme posteriors, and each expected phone is scored by how well those posteriors
+    support it having occurred (see `app/pronunciation/gop_scorer.py` for the algorithm and its
+    documented simplifications). `transcript` is a plain word-level ASR transcript from the same
+    Whisper engine `/api/v1/upload` uses, for the learner to compare against what they meant to say.
+
+    Gated by PRONUNCIATION_ENABLED (off by default) since loading the acoustic model costs real
+    memory/CPU that shouldn't be paid until the "Nói/Phát âm" skill is actually enabled.
+    """
+    if not settings.pronunciation_enabled:
+        raise HTTPException(
+            status_code=503, detail="Pronunciation scoring is disabled (set PRONUNCIATION_ENABLED=true)"
+        )
+
+    suffix = os.path.splitext(audio.filename or "")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        while chunk := await audio.read(UPLOAD_CHUNK_SIZE_BYTES):
+            tmp.write(chunk)
+        audio_path = tmp.name
+
+    wav_path = convert_to_wav(audio_path)
+    try:
+        gop = score_pronunciation_from_wav(wav_path, expected_text, _get_g2p_provider(), _get_gop_model())
+        segments = _get_whisper_engine().transcribe(wav_path, language_code)
+        transcript = " ".join(segment.text for segment in segments).strip()
+    finally:
+        os.remove(audio_path)
+        os.remove(wav_path)
+
+    return PronunciationScoreResponse(
+        overall=gop.overall,
+        words=[
+            WordScoreResponse(
+                word=word.word,
+                score=word.score,
+                phonemes=[PhonemeScoreResponse(ipa=p.ipa, score=p.score) for p in word.phonemes],
+            )
+            for word in gop.words
+        ],
+        transcript=transcript,
+        weak_phonemes=gop.weak_phonemes,
+    )
 
 
 @router.post("/api/v1/analyze", response_model=LearningGapAnalyzedEvent)
