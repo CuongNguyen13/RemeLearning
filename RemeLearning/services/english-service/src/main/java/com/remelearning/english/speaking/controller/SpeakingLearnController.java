@@ -1,6 +1,8 @@
 package com.remelearning.english.speaking.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.speaking.history.dto.SpeakingHistoryEntryDto;
+import com.remelearning.english.speaking.history.service.SpeakingHistoryService;
 import com.remelearning.english.speaking.dto.GenerateSpeakingPracticeRequest;
 import com.remelearning.english.speaking.dto.SpeakingAttemptDetailDto;
 import com.remelearning.english.speaking.dto.SpeakingAttemptHistoryEntryDto;
@@ -33,6 +35,7 @@ import java.util.List;
 public class SpeakingLearnController {
 
 	private final SpeakingLearnService speakingLearnService;
+	private final SpeakingHistoryService speakingHistoryService;
 
 	@Operation(summary = "Generate one AI speaking-practice sentence with a Supertonic sample recording, targeting the given focus words or (if omitted) the learner's own top pronunciation weak points")
 	@PostMapping("/{userId}/generate")
@@ -90,5 +93,11 @@ public class SpeakingLearnController {
 	public ApiResponse<List<SpeakingPracticeItemDto>> generateFromAttempt(
 			@PathVariable String userId, @PathVariable Long attemptId) {
 		return ApiResponse.ok(speakingLearnService.generatePracticeFromAttempt(userId, attemptId));
+	}
+
+	@Operation(summary = "A learner's merged speaking history: \"học thường\" attempts + Thư viện sentence attempts in one time-sorted list, tagged by source")
+	@GetMapping("/merged-history/{userId}")
+	public ApiResponse<List<SpeakingHistoryEntryDto>> getMergedHistory(@PathVariable String userId) {
+		return ApiResponse.ok(speakingHistoryService.getMergedHistory(userId));
 	}
 }

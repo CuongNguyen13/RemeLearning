@@ -176,7 +176,14 @@ Per-skill notes:
   returns the learner's refreshed practice-set list; `404` if the attempt doesn't exist or belongs
   to someone else. This shared generate-and-persist step (`generatePracticeForKeywords`) is also
   reused by Speaking Library's own "generate from section" endpoint below — one shared AI-practice
-  bank per domain, regardless of which flow the mistake came from.
+  bank per domain, regardless of which flow the mistake came from. `GET /merged-history/{userId}`
+  combines this skill's own attempt history with Speaking Library's sentence-attempt history (see
+  below) into one time-sorted list tagged by `source`, built by a new standalone
+  `SpeakingHistoryService` for the same circular-dependency-avoidance reason as Grammar's/Listening's
+  equivalents (`SpeakingLibraryServiceImpl` already depends on `SpeakingLearnService`). Library rows
+  stay at `SpeakingLibraryService#getHistory`'s existing granularity — one row per scored sentence
+  attempt, not rolled up per section (speaking-library scores per-sentence, unlike listening-library's
+  per-section scoring).
 
 ## Vocabulary Library
 

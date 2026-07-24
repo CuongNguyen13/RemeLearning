@@ -148,6 +148,44 @@ sequenceDiagram
     end
 ```
 
+## 4. Merged history (`GET /api/v1/learn/speaking/merged-history/{userId}`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as SpeakingLearnController
+    participant HSvc as SpeakingHistoryServiceImpl
+    participant LearnSvc as SpeakingLearnServiceImpl
+    participant LibSvc as SpeakingLibraryServiceImpl
+    participant SMapper as SpeakingMapper
+    participant LibAttemptMapper as SpeakingLibraryAttemptMapper
+    participant DB as reme_english DB
+
+    Caller->>Ctrl: GET /merged-history/{userId}
+    Ctrl->>HSvc: getMergedHistory(userId)
+    HSvc->>LearnSvc: getHistory(userId)
+    LearnSvc->>SMapper: findHistoryByUserId(userId)
+    SMapper->>DB: SELECT speaking_attempts JOIN speaking_practice_items
+    SMapper-->>LearnSvc: SpeakingAttemptHistoryRow[]
+    LearnSvc-->>HSvc: SpeakingAttemptHistoryEntryDto[] (score = overallScore)
+    HSvc->>LibSvc: getHistory(userId)
+    LibSvc->>LibAttemptMapper: findByUserId(userId) - one row per scored sentence attempt
+    LibAttemptMapper->>DB: SELECT speaking_library_attempts WHERE user_id=?
+    LibAttemptMapper-->>LibSvc: SpeakingLibraryAttempt[]
+    LibSvc-->>HSvc: SpeakingLibraryAttempt[] (raw domain rows, score = phonemeScore)
+    HSvc->>HSvc: normalize both into SpeakingHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?}<br/>merge + sort descending by completedAt
+    HSvc-->>Ctrl: SpeakingHistoryEntryDto[]
+    Ctrl-->>Caller: 200 ApiResponse
+```
+
+Note: `SpeakingHistoryServiceImpl` is a standalone service, not folded into either
+`SpeakingLearnServiceImpl` or `SpeakingLibraryServiceImpl`, for the same reason as
+`GrammarHistoryServiceImpl`/`ListeningHistoryServiceImpl` (see `grammar-learn.md` section 4) -
+`SpeakingLibraryServiceImpl` already depends on `SpeakingLearnService` (for
+`generatePracticeFromSection`), so a reverse dependency would form a circular bean. Library rows are
+merged at `SpeakingLibraryService#getHistory`'s existing granularity - one row per scored sentence
+attempt, not rolled up per section (unlike Listening Library, which scores a whole section at once).
+
 ## External calls
 
 | # | Call | From -> To | Notes |

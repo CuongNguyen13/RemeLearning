@@ -1029,6 +1029,21 @@ mistake đến từ luồng nào.
 - **Response `data`** — `SpeakingPracticeItemDto[]` (như `{userId}/items`).
 - **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
 
+### GET `/api/v1/learn/speaking/merged-history/{userId}`
+
+Gộp lịch sử "học thường" (`SpeakingLearnService.getHistory`) và "Thư viện"
+(`SpeakingLibraryService.getHistory`, mỗi dòng là **một lần chấm một câu** — speaking-library chấm
+theo câu chứ không theo cả section như listening — nên giữ nguyên độ chi tiết đó, không gộp lại theo
+section) thành một danh sách duy nhất, sắp xếp mới nhất trước, mỗi dòng gắn `source`. Được đặt trong
+một service riêng, `SpeakingHistoryService` (package `speaking.history`), lý do giống hệt Grammar's
+`merged-history` endpoint — `SpeakingLibraryServiceImpl` đã phụ thuộc `SpeakingLearnService` nên tránh
+vòng lặp bean.
+- **Path param**: `userId` (string)
+- **Response `data`** — `SpeakingHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"),
+  attemptOrSessionId, completedAt?, score?, sectionId?}`. `score` lấy từ `overallScore` (learn) hoặc
+  `phonemeScore` (library, đại diện chính cho mức độ phát âm đúng của attempt). `sectionId` chỉ có
+  giá trị khi `source = "LIBRARY"`; dòng `LEARN` luôn để `null`.
+
 ### Speaking Library — catalog chủ điểm luyện nói/phát âm, Section AI (câu mẫu + audio từng câu) + mở khóa tuần tự (package `speaking.library`)
 
 Song song `listening.library` nhưng cho kỹ năng nói: một catalog **cố định** các chủ điểm luyện nói
@@ -2127,6 +2142,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}` | lịch sử làm bài |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
 | english-service (speaking) | REST | POST | `/api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice` | sinh câu luyện nói nhắm vào các phoneme phát âm sai của 1 attempt (dùng chung generator với `generate`, lưu vào cùng `speaking_practice_items`); `404` |
+| english-service (speaking.history) | REST | GET | `/api/v1/learn/speaking/merged-history/{userId}` | gộp lịch sử học thường + Thư viện thành 1 danh sách theo thời gian, gắn `source` |
 | english-service (speaking.library) | REST | GET | `/api/v1/learn/speaking/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
 | english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: 5 câu mẫu + IPA + audio từng câu); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts` | multipart audio; chấm GOP từng câu qua `PronunciationScoringClient` (tái dùng dịch vụ chấm của `speaking.learn`), không đụng tiến độ chủ điểm; `404` nếu section/sentence không tồn tại |
