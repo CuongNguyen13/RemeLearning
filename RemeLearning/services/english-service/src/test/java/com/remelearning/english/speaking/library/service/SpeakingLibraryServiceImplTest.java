@@ -457,4 +457,24 @@ class SpeakingLibraryServiceImplTest {
 		assertThat(result).isEqualTo(generated);
 		verify(speakingLearnService).generatePracticeForKeywords("user-1", List.of("θ", "ð"), "B1", null);
 	}
+
+	@Test
+	void resolveTopicIdReturnsSectionsOwningTopicId() {
+		SpeakingLibraryTopicMapper topicMapper = mock(SpeakingLibraryTopicMapper.class);
+		SpeakingLibrarySectionMapper sectionMapper = mock(SpeakingLibrarySectionMapper.class);
+		SpeakingLibrarySentenceMapper sentenceMapper = mock(SpeakingLibrarySentenceMapper.class);
+		SpeakingTopicProgressMapper progressMapper = mock(SpeakingTopicProgressMapper.class);
+		SpeakingLibraryAttemptMapper attemptMapper = mock(SpeakingLibraryAttemptMapper.class);
+		LlmSpeakingLibraryGenerator generator = mock(LlmSpeakingLibraryGenerator.class);
+
+		SpeakingLibrarySection section = new SpeakingLibrarySection();
+		section.setId(100L);
+		section.setTopicId(7L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+
+		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator);
+
+		assertThat(service.resolveTopicId(100L)).isEqualTo(7L);
+		assertThat(service.resolveTopicId(999L)).isNull();
+	}
 }

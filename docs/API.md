@@ -949,8 +949,11 @@ lý do giống hệt Grammar's `merged-history` endpoint (xem mục Grammar Lear
 `ListeningLibraryServiceImpl` đã phụ thuộc `ListeningLearnService` nên tránh vòng lặp bean.
 - **Path param**: `userId` (string)
 - **Response `data`** — `ListeningHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"),
-  attemptOrSessionId, completedAt?, score?, sectionId?}`. `sectionId` chỉ có giá trị khi `source =
-  "LIBRARY"`; dòng `LEARN` luôn để `null`.
+  attemptOrSessionId, completedAt?, score?, sectionId?, topicId?}`. `sectionId`/`topicId` chỉ có giá
+  trị khi `source = "LIBRARY"`; dòng `LEARN` luôn để cả hai là `null`. `topicId` được
+  `ListeningHistoryServiceImpl` resolve từ `sectionId` qua `ListeningLibraryService#resolveTopicId`
+  (attempt gốc chỉ lưu `sectionId`) — đây là đích deep-link "Làm lại" của FE, trả `null` nếu section
+  không còn tồn tại thay vì lỗi.
 
 ### Speaking Learn — luyện nói/phát âm với AI (package `speaking`, đỉnh mới)
 
@@ -1040,10 +1043,13 @@ một service riêng, `SpeakingHistoryService` (package `speaking.history`), lý
 vòng lặp bean.
 - **Path param**: `userId` (string)
 - **Response `data`** — `SpeakingHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"),
-  attemptOrSessionId, completedAt?, score?, sectionId?}`. `score` lấy từ `overallScore` (learn) hoặc
-  trung bình cộng `(phonemeScore + wordScore) / 2` (library — cả hai điểm đều là tín hiệu có ý nghĩa
-  cho độ chính xác phát âm nên không dùng riêng `phonemeScore`). `sectionId` chỉ có
-  giá trị khi `source = "LIBRARY"`; dòng `LEARN` luôn để `null`.
+  attemptOrSessionId, completedAt?, score?, sectionId?, topicId?}`. `score` lấy từ `overallScore`
+  (learn) hoặc trung bình cộng `(phonemeScore + wordScore) / 2` (library — cả hai điểm đều là tín
+  hiệu có ý nghĩa cho độ chính xác phát âm nên không dùng riêng `phonemeScore`). `sectionId`/
+  `topicId` chỉ có giá trị khi `source = "LIBRARY"`; dòng `LEARN` luôn để cả hai là `null`. `topicId`
+  được `SpeakingHistoryServiceImpl` resolve từ `sectionId` qua `SpeakingLibraryService#resolveTopicId`
+  (attempt gốc chỉ lưu `sectionId`) — đây là đích deep-link "Làm lại" của FE, trả `null` nếu section
+  không còn tồn tại thay vì lỗi.
 
 ### Speaking Library — catalog chủ điểm luyện nói/phát âm, Section AI (câu mẫu + audio từng câu) + mở khóa tuần tự (package `speaking.library`)
 

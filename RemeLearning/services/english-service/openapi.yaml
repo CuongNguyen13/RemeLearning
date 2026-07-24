@@ -3016,7 +3016,8 @@ components:
         attemptOrSessionId: { type: integer, format: int64 }
         completedAt: { type: string, format: date-time, nullable: true }
         score: { type: number, format: double, nullable: true }
-        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows - the FE's \"Làm lại\" reopen-section navigation target." }
+        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows - kept for reference/debugging." }
+        topicId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows (resolved server-side from sectionId) - the FE's \"Làm lại\" deep-link navigation target." }
 
     ApiResponseListeningHistoryEntryList:
       allOf:
@@ -3392,7 +3393,8 @@ components:
         attemptOrSessionId: { type: integer, format: int64 }
         completedAt: { type: string, format: date-time, nullable: true }
         score: { type: number, format: double, nullable: true }
-        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows - the FE's \"Làm lại\" reopen-section navigation target." }
+        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows - kept for reference/debugging." }
+        topicId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows (resolved server-side from sectionId) - the FE's \"Làm lại\" deep-link navigation target." }
 
     ApiResponseSpeakingHistoryEntryList:
       allOf:

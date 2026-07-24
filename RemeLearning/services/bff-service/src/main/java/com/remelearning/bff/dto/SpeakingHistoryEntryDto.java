@@ -16,4 +16,5 @@ public class SpeakingHistoryEntryDto {
 	private Instant completedAt;
 	private Double score;
 	private Long sectionId;
+	private Long topicId;
 }

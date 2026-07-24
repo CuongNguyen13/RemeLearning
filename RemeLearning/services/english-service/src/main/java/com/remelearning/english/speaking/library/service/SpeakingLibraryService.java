@@ -42,6 +42,14 @@ public interface SpeakingLibraryService {
 	List<SpeakingLibraryAttempt> getHistory(String userId);
 
 	/**
+	 * Resolves the owning topicId for a section (the merged-history "Làm lại" deep-link target,
+	 * since {@code SpeakingLibraryAttempt} only carries {@code sectionId}). Returns {@code null} if
+	 * the section no longer exists rather than throwing, so a stale history row degrades to the
+	 * library topic list instead of erroring.
+	 */
+	Long resolveTopicId(Long sectionId);
+
+	/**
 	 * Generates AI practice targeted at this learner's own mispronunciations across every sentence
 	 * attempt they've made on this section (unioned - speaking-library scores per-sentence, not
 	 * per-section like {@code ListeningLibraryService}, so multiple attempts/sentences can each

@@ -423,4 +423,29 @@ class ListeningLibraryServiceImplTest {
 		verify(attemptAnswerMapper, org.mockito.Mockito.never()).findByAttemptId(400L);
 		verify(listeningLearnService).generatePracticeForKeywords("user-1", List.of("Airport announcements"), "B1", null);
 	}
+
+	@Test
+	void resolveTopicIdReturnsSectionsOwningTopicId() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(100L);
+		section.setTopicId(7L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		assertThat(service.resolveTopicId(100L)).isEqualTo(7L);
+		assertThat(service.resolveTopicId(999L)).isNull();
+	}
 }

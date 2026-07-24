@@ -31,6 +31,7 @@ class ListeningHistoryServiceImplTest {
 				ListeningAttemptHistoryEntryDto.builder().attemptId(11L).score(0.9).attemptedAt(newest).build()));
 		when(listeningLibraryService.getHistory("user-1")).thenReturn(List.of(
 				ListeningLibraryAttempt.builder().id(20L).sectionId(3L).score(1.0).completedAt(newer).build()));
+		when(listeningLibraryService.resolveTopicId(3L)).thenReturn(7L);
 
 		List<ListeningHistoryEntryDto> merged = service.getMergedHistory("user-1");
 
@@ -38,10 +39,25 @@ class ListeningHistoryServiceImplTest {
 		assertThat(merged.get(0).getAttemptOrSessionId()).isEqualTo(11L);
 		assertThat(merged.get(0).getSource()).isEqualTo("LEARN");
 		assertThat(merged.get(0).getSectionId()).isNull();
+		assertThat(merged.get(0).getTopicId()).isNull();
 		assertThat(merged.get(1).getAttemptOrSessionId()).isEqualTo(20L);
 		assertThat(merged.get(1).getSource()).isEqualTo("LIBRARY");
 		assertThat(merged.get(1).getSectionId()).isEqualTo(3L);
+		assertThat(merged.get(1).getTopicId()).isEqualTo(7L);
 		assertThat(merged.get(2).getAttemptOrSessionId()).isEqualTo(10L);
+	}
+
+	@Test
+	void getMergedHistoryLeavesTopicIdNullWhenSectionNoLongerResolves() {
+		when(listeningLearnService.getHistory("user-1")).thenReturn(List.of());
+		when(listeningLibraryService.getHistory("user-1")).thenReturn(List.of(
+				ListeningLibraryAttempt.builder().id(21L).sectionId(99L).score(0.5)
+						.completedAt(Instant.parse("2026-07-24T00:00:00Z")).build()));
+		when(listeningLibraryService.resolveTopicId(99L)).thenReturn(null);
+
+		List<ListeningHistoryEntryDto> merged = service.getMergedHistory("user-1");
+
+		assertThat(merged.get(0).getTopicId()).isNull();
 	}
 
 	@Test

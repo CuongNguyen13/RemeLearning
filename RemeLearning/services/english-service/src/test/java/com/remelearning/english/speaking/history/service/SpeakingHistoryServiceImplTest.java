@@ -31,6 +31,7 @@ class SpeakingHistoryServiceImplTest {
 				SpeakingAttemptHistoryEntryDto.builder().attemptId(11L).overallScore(0.9).attemptedAt(newest).build()));
 		when(speakingLibraryService.getHistory("user-1")).thenReturn(List.of(
 				SpeakingLibraryAttempt.builder().id(20L).sectionId(3L).phonemeScore(1.0).wordScore(1.0).createdAt(newer).build()));
+		when(speakingLibraryService.resolveTopicId(3L)).thenReturn(8L);
 
 		List<SpeakingHistoryEntryDto> merged = service.getMergedHistory("user-1");
 
@@ -38,9 +39,11 @@ class SpeakingHistoryServiceImplTest {
 		assertThat(merged.get(0).getAttemptOrSessionId()).isEqualTo(11L);
 		assertThat(merged.get(0).getSource()).isEqualTo("LEARN");
 		assertThat(merged.get(0).getSectionId()).isNull();
+		assertThat(merged.get(0).getTopicId()).isNull();
 		assertThat(merged.get(1).getAttemptOrSessionId()).isEqualTo(20L);
 		assertThat(merged.get(1).getSource()).isEqualTo("LIBRARY");
 		assertThat(merged.get(1).getSectionId()).isEqualTo(3L);
+		assertThat(merged.get(1).getTopicId()).isEqualTo(8L);
 		assertThat(merged.get(1).getScore()).isEqualTo(1.0);
 		assertThat(merged.get(2).getAttemptOrSessionId()).isEqualTo(10L);
 	}

@@ -52,6 +52,7 @@ public class SpeakingHistoryServiceImpl implements SpeakingHistoryService {
 				.completedAt(row.getAttemptedAt())
 				.score(row.getOverallScore())
 				.sectionId(null)
+				.topicId(null)
 				.build();
 	}
 
@@ -62,6 +63,7 @@ public class SpeakingHistoryServiceImpl implements SpeakingHistoryService {
 				.completedAt(row.getCreatedAt())
 				.score(averageOf(row.getPhonemeScore(), row.getWordScore()))
 				.sectionId(row.getSectionId())
+				.topicId(speakingLibraryService.resolveTopicId(row.getSectionId()))
 				.build();
 	}
 

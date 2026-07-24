@@ -282,6 +282,16 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 		return attemptMapper.findByUserId(userId);
 	}
 
+	// Looks up the section's owning topicId directly via the mapper - a section row already carries
+	// topicId (see SpeakingLibrarySection) - so the merged-history "Làm lại" deep-link can resolve a
+	// topicId from the sectionId an attempt carries. Returns null (not a thrown 404) for an unknown
+	// sectionId since this only backs a best-effort deep-link resolution, not a user-facing endpoint.
+	@Override
+	public Long resolveTopicId(Long sectionId) {
+		SpeakingLibrarySection section = sectionMapper.findById(sectionId);
+		return section == null ? null : section.getTopicId();
+	}
+
 	// Generates AI practice targeted at this learner's own mispronunciations on one section: unlike
 	// ListeningLibraryServiceImpl.generatePracticeFromSection (one attempt scores a whole section, so
 	// only the latest attempt matters), speaking-library scores one sentence per recorded attempt -

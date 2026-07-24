@@ -188,7 +188,8 @@ sequenceDiagram
     AMapper->>DB: SELECT listening_library_attempts WHERE user_id=?
     AMapper-->>LibSvc: ListeningLibraryAttempt[]
     LibSvc-->>HSvc: ListeningLibraryAttempt[] (raw domain rows - no dedicated history DTO for this skill)
-    HSvc->>HSvc: normalize both into ListeningHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?}<br/>merge + sort descending by completedAt
+    HSvc->>LibSvc: resolveTopicId(sectionId) per LIBRARY row (looks up ListeningLibrarySection.topicId)
+    HSvc->>HSvc: normalize both into ListeningHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?, topicId?}<br/>merge + sort descending by completedAt
     HSvc-->>Ctrl: ListeningHistoryEntryDto[]
     Ctrl-->>Caller: 200 ApiResponse
 ```

@@ -226,6 +226,16 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		return attemptMapper.findByUserId(userId);
 	}
 
+	// Looks up the section's owning topicId directly via the mapper rather than getTopics/getHistory
+	// - a section row already carries topicId (see ListeningLibrarySection), so no join/extra table
+	// is needed. Returns null (not a thrown 404) for an unknown sectionId since this only backs a
+	// best-effort deep-link resolution, not a user-facing endpoint of its own.
+	@Override
+	public Long resolveTopicId(Long sectionId) {
+		ListeningLibrarySection section = sectionMapper.findById(sectionId);
+		return section == null ? null : section.getTopicId();
+	}
+
 	// Generates AI practice targeted at this learner's own most recent completed attempt on one
 	// section's missed questions: finds that attempt (there is no dedicated "by section" query, so
 	// this filters the learner's own attempts and keeps the latest by completedAt), checks (via the

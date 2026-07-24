@@ -173,7 +173,8 @@ sequenceDiagram
     LibAttemptMapper->>DB: SELECT speaking_library_attempts WHERE user_id=?
     LibAttemptMapper-->>LibSvc: SpeakingLibraryAttempt[]
     LibSvc-->>HSvc: SpeakingLibraryAttempt[] (raw domain rows, score = avg(phonemeScore, wordScore))
-    HSvc->>HSvc: normalize both into SpeakingHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?}<br/>merge + sort descending by completedAt
+    HSvc->>LibSvc: resolveTopicId(sectionId) per LIBRARY row (looks up SpeakingLibrarySection.topicId)
+    HSvc->>HSvc: normalize both into SpeakingHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?, topicId?}<br/>merge + sort descending by completedAt
     HSvc-->>Ctrl: SpeakingHistoryEntryDto[]
     Ctrl-->>Caller: 200 ApiResponse
 ```

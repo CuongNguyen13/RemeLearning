@@ -29,6 +29,14 @@ public interface ListeningLibraryService {
 	List<ListeningLibraryAttempt> getHistory(String userId);
 
 	/**
+	 * Resolves the owning topicId for a section (the merged-history "Làm lại" deep-link target,
+	 * since {@code ListeningLibraryAttempt} only carries {@code sectionId}). Returns {@code null} if
+	 * the section no longer exists rather than throwing, so a stale history row degrades to the
+	 * library topic list instead of erroring.
+	 */
+	Long resolveTopicId(Long sectionId);
+
+	/**
 	 * Generates AI practice targeted at this learner's own most recent completed attempt on one
 	 * section's missed questions (the "Luyện tập với AI" action). A section has no per-question
 	 * topic tag of its own, so the target is the section's owning topic name - persists into the

@@ -50,6 +50,7 @@ public class ListeningHistoryServiceImpl implements ListeningHistoryService {
 				.completedAt(row.getAttemptedAt())
 				.score(row.getScore())
 				.sectionId(null)
+				.topicId(null)
 				.build();
 	}
 
@@ -60,6 +61,7 @@ public class ListeningHistoryServiceImpl implements ListeningHistoryService {
 				.completedAt(row.getCompletedAt())
 				.score(row.getScore())
 				.sectionId(row.getSectionId())
+				.topicId(listeningLibraryService.resolveTopicId(row.getSectionId()))
 				.build();
 	}
 }
