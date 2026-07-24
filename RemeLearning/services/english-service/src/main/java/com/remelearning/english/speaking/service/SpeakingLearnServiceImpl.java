@@ -30,6 +30,7 @@ import com.remelearning.english.speaking.dto.SpeakingAudioResource;
 import com.remelearning.english.speaking.dto.SpeakingPracticeItemDto;
 import com.remelearning.english.speaking.dto.WordScoreDto;
 import com.remelearning.english.speaking.generator.GeneratedSpeakingPractice;
+import com.remelearning.english.speaking.generator.SpeakingMistakeAnalyzer;
 import com.remelearning.english.speaking.generator.SpeakingPracticeGenerator;
 import com.remelearning.english.speaking.mapper.SpeakingMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -110,12 +111,48 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 	@Transactional
 	public SpeakingPracticeItemDto generate(String userId, GenerateSpeakingPracticeRequest request) {
 		List<String> targetWords = resolveTargetWords(userId, request.getFocusItems());
-		GeneratedSpeakingPractice generated = generator.generate(targetWords, request.getLevel(), request.getExamType());
+		return generateAndPersist(userId, targetWords, request.getLevel(), request.getExamType());
+	}
+
+	// Shared generate-and-persist step: builds one SpeakingPracticeItem from whatever target
+	// words/sounds/level/exam type the caller resolved (top weak points, explicit focus items, or a
+	// past attempt's weak phonemes), synthesizes its Supertonic sample, inserts it into the same
+	// speaking_practice_items bank generate() uses, and returns the learner's refreshed
+	// practice-set list - mirrors ListeningLearnServiceImpl.generatePracticeForKeywords.
+	@Override
+	@Transactional
+	public List<SpeakingPracticeItemDto> generatePracticeForKeywords(String userId, List<String> targetWords, String level, String examType) {
+		generateAndPersist(userId, targetWords, level, examType);
+		return listItems(userId);
+	}
+
+	// Generates AI practice targeted at one past attempt's mispronunciations: verifies the attempt
+	// belongs to this learner, extracts its persisted weakPhonemesJson via the pure
+	// SpeakingMistakeAnalyzer (already a flat list of short IPA symbols - no diffing/fallback needed
+	// the way listening's per-question results require), then reuses the exact same
+	// generate-and-persist pipeline generate() uses so the regenerated content lands in the same
+	// bank as a normal "học thường" item.
+	@Override
+	@Transactional
+	public List<SpeakingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId) {
+		SpeakingAttemptDetailRow attempt = speakingMapper.findAttemptDetailByIdAndUserId(attemptId, userId);
+		if (attempt == null) {
+			throw BusinessException.notFound("Speaking practice attempt not found: id=" + attemptId);
+		}
+		List<String> weakPhonemes = SpeakingMistakeAnalyzer.extractWeakPhonemes(attempt.getWeakPhonemesJson());
+		return generatePracticeForKeywords(userId, weakPhonemes, attempt.getLevel(), attempt.getExamType());
+	}
+
+	// Actual generation+persistence work shared by generate() and generatePracticeForKeywords():
+	// calls the AI generator, synthesizes the sample audio synchronously, inserts the item, then
+	// uploads and records its audio storage key.
+	private SpeakingPracticeItemDto generateAndPersist(String userId, List<String> targetWords, String level, String examType) {
+		GeneratedSpeakingPractice generated = generator.generate(targetWords, level, examType);
 
 		SpeakingPracticeItem item = SpeakingPracticeItem.builder()
 				.userId(userId)
-				.level(request.getLevel())
-				.examType(request.getExamType())
+				.level(level)
+				.examType(examType)
 				.topic(generated.topic())
 				.targetText(generated.targetText())
 				.translation(generated.translation())

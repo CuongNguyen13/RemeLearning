@@ -123,6 +123,35 @@ class SpeakingLearnServiceImplTest {
 		verify(scoringClient, org.mockito.Mockito.never()).score(any(), any(), any(), any());
 	}
 
+	@Test
+	void generatePracticeFromAttemptTargetsThePastAttemptsWeakPhonemes() {
+		SpeakingAttemptDetailRow attempt = SpeakingAttemptDetailRow.builder()
+				.attemptId(20L).level("B1").examType("TOEIC").topic("Practice").targetText("Think about the weather.")
+				.overallScore(0.72).wordScoresJson("[]").transcript("Sink about the weather.")
+				.weakPhonemesJson("[\"θ\", \"ð\"]").createdAt(Instant.now()).build();
+		when(mapper.findAttemptDetailByIdAndUserId(20L, "user-1")).thenReturn(attempt);
+		when(generator.generate(eq(List.of("θ", "ð")), eq("B1"), eq("TOEIC")))
+				.thenReturn(new GeneratedSpeakingPractice("Practice", "The path to the north is smooth.", "Con duong den phia bac rat bang phang."));
+		when(ttsClient.synthesize(any())).thenReturn(TtsAudio.builder().audioBytes("wav-bytes".getBytes()).build());
+		simulateGeneratedItemId(8L);
+		when(mapper.findItemsByUserId("user-1")).thenReturn(List.of(
+				SpeakingPracticeItem.builder().id(8L).userId("user-1").targetText("The path to the north is smooth.").build()));
+
+		List<SpeakingPracticeItemDto> items = service.generatePracticeFromAttempt("user-1", 20L);
+
+		assertThat(items).hasSize(1);
+		assertThat(items.get(0).getTargetText()).isEqualTo("The path to the north is smooth.");
+		verify(generator).generate(List.of("θ", "ð"), "B1", "TOEIC");
+	}
+
+	@Test
+	void generatePracticeFromAttemptThrowsNotFoundWhenAttemptDoesNotBelongToLearner() {
+		when(mapper.findAttemptDetailByIdAndUserId(99L, "user-1")).thenReturn(null);
+
+		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L))
+				.isInstanceOf(BusinessException.class);
+	}
+
 	private void simulateGeneratedItemId(Long id) {
 		org.mockito.Mockito.doAnswer(invocation -> {
 			SpeakingPracticeItem item = invocation.getArgument(0);

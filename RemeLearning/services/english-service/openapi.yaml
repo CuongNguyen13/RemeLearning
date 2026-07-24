@@ -1592,6 +1592,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingAttemptDetail"
 
+  /api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice:
+    post:
+      tags: [Speaking Learn]
+      summary: >
+        Generate AI practice targeted at one specific past attempt's mispronounced phonemes (the
+        "Luyện tập với AI" action from a history row) - extracts the attempt's persisted
+        weakPhonemesJson (a flat list of short IPA symbols), generates a new sentence targeting
+        only those phonemes, persists it into the shared speaking_practice_items bank, and returns
+        the learner's refreshed practice-set list
+      operationId: generateSpeakingPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
   /api/v1/learn/speaking/library/{userId}/topics:
     get:
       tags: [Speaking Library]
@@ -1718,6 +1751,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingLibraryAttemptList"
+
+  /api/v1/learn/speaking/library/{userId}/sections/{sectionId}/ai-practice:
+    post:
+      tags: [Speaking Library]
+      summary: >
+        Generate AI practice targeted at this learner's own mispronunciations across every
+        sentence attempt they've made on this section (the "Luyện tập với AI" action) - unions the
+        weakPhonemesJson of every one of this learner's own attempts tied to the section (not just
+        the latest, since speaking-library scores per sentence, not per section), generates a new
+        sentence targeting those phonemes, and persists into the same speaking_practice_items bank
+        the learn flow uses
+      operationId: generateSpeakingPracticeFromSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItemList"
+        "404":
+          description: Section not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
 
 components:
   schemas:

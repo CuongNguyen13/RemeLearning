@@ -1,5 +1,6 @@
 package com.remelearning.english.speaking.library.service;
 
+import com.remelearning.english.speaking.dto.SpeakingPracticeItemDto;
 import com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt;
 import com.remelearning.english.speaking.library.dto.FinishSectionResponse;
 import com.remelearning.english.speaking.library.dto.SentenceAttemptResultDto;
@@ -39,4 +40,14 @@ public interface SpeakingLibraryService {
 
 	/** This learner's scored sentence attempts, across all topics/sections. */
 	List<SpeakingLibraryAttempt> getHistory(String userId);
+
+	/**
+	 * Generates AI practice targeted at this learner's own mispronunciations across every sentence
+	 * attempt they've made on this section (unioned - speaking-library scores per-sentence, not
+	 * per-section like {@code ListeningLibraryService}, so multiple attempts/sentences can each
+	 * contribute their own weak phonemes). Persists into the same {@code speaking_practice_items}
+	 * bank the learn flow uses. Empty if the learner has no attempts on this section, or none of
+	 * them had a mispronounced phoneme.
+	 */
+	List<SpeakingPracticeItemDto> generatePracticeFromSection(String userId, Long sectionId);
 }

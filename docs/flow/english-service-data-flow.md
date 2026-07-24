@@ -161,6 +161,11 @@ flowchart TD
         SLScore["PronunciationScoringClient.score(audio, targetText, lang)<br/>-&gt; ai-service GOP endpoint (see note below)<br/>-&gt; {overall, words[{word, score, phonemes[{ipa, score}]}], transcript, weakPhonemes[]}"]
         SLInsertAttempt["insertAttempt (overallScore + wordScoresJson + transcript + weakPhonemesJson)"]
         SLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct word<br/>(score &gt;= 0.6 = correct) - itemId=pronunciation:&lt;word&gt;, category=pronunciation"]
+
+        SLHistoryAttemptReq["POST /api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice"]
+        SLReadAttempt["findAttemptDetailByIdAndUserId(attemptId, userId)<br/>404 if not found / not owned by userId"]
+        SLAnalyzeMissed["SpeakingMistakeAnalyzer.extractWeakPhonemes(weakPhonemesJson)<br/>-> distinct IPA symbols[] (already a flat, crisp retry target -<br/>no OPEN-vs-KEYWORD diffing/fallback needed like listening)"]
+        SLListRefreshed["findItemsByUserId(userId) -> refreshed practice-set list"]
     end
 
     subgraph VocabularyLibraryFlow["Vocabulary library (package vocabulary.library) - extends VocabLearnFlow"]
@@ -266,6 +271,14 @@ flowchart TD
         SLibPassCheck{"every sentence in the section has >=1 attempt<br/>with phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD)?"}
         SLibMarkPassed["speaking_topic_progress -> PASSED, passed_at=now()"]
         SLibUnlockNext["speaking_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
+
+        SLibHistorySectionReq["POST /.../library/{userId}/sections/{sectionId}/ai-practice"]
+        SLibFindOwnAttempts["findBySectionId(sectionId), filter to this userId<br/>(a section is a shared catalog object attemptable by any learner -<br/>unlike listening's single-attempt-per-section, speaking scores per-sentence,<br/>so any sentence/any retry by this learner all count)"]
+        SLibAnalyzeMissed["union: every filtered attempt's<br/>SpeakingMistakeAnalyzer.extractWeakPhonemes(weakPhonemesJson)<br/>-> distinct IPA symbols[] (not just the latest attempt, unlike listening;<br/>no topic-name fallback needed - phonemes are already a crisp target)"]
+        SLibHasMistakes{"any mispronounced phoneme across any attempt?"}
+        SLibNoRegen["return empty list (nothing to regenerate)"]
+        SLibTopicLookup["SpeakingLibraryTopicMapper.findById(topicId) -> topic.level"]
+        SLibDelegate["SpeakingLearnService.generatePracticeForKeywords(userId, weakPhonemes, topic.level, examType=null)<br/>delegates to speaking.learn's own generate-and-persist pipeline (SLGenerate/SLSynthesizeSample/SLListRefreshed)<br/>so both flows feed the same speaking_practice_items bank"]
     end
 
     subgraph Storage["reme_english DB"]
@@ -452,6 +465,12 @@ flowchart TD
     SLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
     SLFeed -.same.-> LockPrior
 
+    SLHistoryAttemptReq --> SLReadAttempt
+    T21 --> SLReadAttempt
+    SLReadAttempt --> SLAnalyzeMissed --> SLGenerate
+    SLSynthesizeSample --> SLListRefreshed
+    T20 --> SLListRefreshed
+
     T22 --> LibStartReq
     LibStartReq --> LibCountCheck
     LibCountCheck -->|yes, under-stocked| LibGenerate --> LibInsertWord --> T23
@@ -561,6 +580,14 @@ flowchart TD
     T41 --> SLibPassCheck
     SLibPassCheck -->|yes, every sentence passed| SLibMarkPassed --> T40
     SLibMarkPassed --> SLibUnlockNext --> T40
+
+    SLibHistorySectionReq --> SLibFindOwnAttempts
+    T41 --> SLibFindOwnAttempts
+    SLibFindOwnAttempts --> SLibAnalyzeMissed --> SLibHasMistakes
+    SLibHasMistakes -->|no| SLibNoRegen
+    SLibHasMistakes -->|yes| SLibTopicLookup
+    T37 --> SLibTopicLookup
+    SLibTopicLookup --> SLibDelegate --> SLGenerate
 ```
 
 ## Data shape at each stage
@@ -635,6 +662,8 @@ flowchart TD
 | `speaking_attempts` row | `{id, practice_item_id, user_id, audio_storage_key, overall_score, word_scores (JSON `WordScoreDto[]`), transcript?, weak_phonemes (JSON string[]), created_at}` | one row per recorded submission |
 | `SpeakingAttemptResultDto` | `{overall, words: [{word, score, phonemes: [{ipa, score}]}], transcript, weakPhonemes[], actionAdvice[]}` | REST grading response |
 | `PracticeAttemptRequest` fed from speaking learn | `{itemId: "pronunciation:<word>", category: "pronunciation", label, correct: score >= 0.6}` | one per distinct word in `words[]`; reuses `pronunciation_weak_points` (the same table ai-service's original forgetting-pattern pipeline and `english-service`'s own `pronunciation.kafka` consumer write to) - no new table, unlike `listening` |
+| `SpeakingMistakeAnalyzer.extractWeakPhonemes` output (in-memory) | `List<String>` distinct IPA symbols | pure function over one attempt's persisted `weakPhonemesJson` (both `speaking_attempts.weak_phonemes_json` for learn and `speaking_library_attempts.weak_phonemes_json` for library - Task 2 deliberately reused the same shape); unlike `ListeningMistakeAnalyzer.extractMissedTopics`, no per-question OPEN-vs-KEYWORD diffing/fallback is needed - ai-service's GOP scorer already reduced each mistake to a short, crisp IPA symbol, always a good-enough generator target on its own; feeds straight into `SpeakingPracticeGenerator.generate(weakPhonemes, level, examType)` for `POST /learn/speaking/history/{userId}/{attemptId}/ai-practice` |
+| `speaking_practice_items` row from a "generate from attempt/section" call | same shape as the `generate`-produced row above (including the synthesized sample audio) | both `POST /learn/speaking/history/{userId}/{attemptId}/ai-practice` and `POST /learn/speaking/library/{userId}/sections/{sectionId}/ai-practice` insert into this same table via `SpeakingLearnServiceImpl.generatePracticeForKeywords` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library section) the mistake came from |
 | `vocabulary_topics` row | `{id, name, description?, created_at}` | fixed topic list (Du lịch, Công việc, Đời sống hàng ngày, Ẩm thực, Công nghệ, Sức khỏe, Giáo dục, Môi trường), seeded once, not learner-specific |
 | `GeneratedLibraryWord` | `{word, wordType, meaningVi, exampleEn}` | LLM JSON, one per new word `LlmLibraryWordGenerator` asks Gemini for when a topic is under-stocked; empty list (not a template) on any call/parse failure |
 | `vocabulary_library_words` row | `{id, topic_id, word, word_type, meaning_vi, example_en, audio_storage_key?, created_at}` | one row per generated word; `audio_storage_key` set right after synthesis, so a TTS failure still leaves the word itself usable (just no audio) |
@@ -689,6 +718,7 @@ flowchart TD
 | `FinishSectionResponse` (REST) | `{totalSentences, passedSentences, passed, nextTopicId?, nextTopicUnlocked}` | `POST .../sections/{sectionId}/finish` response; `passed` requires every sentence to have at least one qualifying attempt (not necessarily its most recent one) |
 | `SpeakingLibraryAttempt` (REST, history) | `{id, userId, sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey?, weakPhonemesJson?, createdAt}` | `GET .../{userId}/sections/history` response; the domain row is returned directly, same simplification as `ListeningLibraryAttempt` |
 | speaking library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | same deliberate scope cut as `listening.library`: scoring here writes only to `speaking_library_attempts`/`speaking_topic_progress`, not to `pronunciation_weak_points` (unlike `speaking.learn`, which does feed that table via the same `PronunciationScoringClient` call) |
+| `SpeakingMistakeAnalyzer.extractWeakPhonemes` output, unioned across attempts (in-memory) | `List<String>` distinct IPA symbols | unlike `ListeningMistakeAnalyzer.hasAnyMissedQuestion` (only the section's single latest attempt matters, since one attempt scores a whole section), speaking-library scores **per sentence** - a section has several sentences, each retried any number of times - so `SpeakingLibraryServiceImpl.generatePracticeFromSection` first filters `attemptMapper.findBySectionId(sectionId)` down to this learner's own rows (the mapper itself is not user-scoped, since a Section is a shared catalog object any learner may have attempted), then unions every one of those attempts' `extractWeakPhonemes` output (distinct, first-seen order) rather than reading just the latest one. Empty if no attempts, or none had a mispronounced phoneme - generation is skipped and an empty list returned, same as `listening.library`. When non-empty, feeds directly into `SpeakingPracticeGenerator.generate(...)` via `SpeakingLearnService.generatePracticeForKeywords(userId, weakPhonemes, topic.level, examType=null)` - unlike Grammar/Listening Library's topic-name fallback, no such fallback is needed here since the phonemes themselves are already crisp generator targets |
 
 ## Where data comes from / where it can go next
 

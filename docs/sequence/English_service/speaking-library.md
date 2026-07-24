@@ -208,6 +208,46 @@ sequenceDiagram
     Ctrl-->>Caller: 200 ApiResponse
 ```
 
+## 6. Generate from this learner's own attempts on a section (`POST /{userId}/sections/{sectionId}/ai-practice`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as SpeakingLibraryController
+    participant Svc as SpeakingLibraryServiceImpl
+    participant SMapper as SpeakingLibrarySectionMapper
+    participant AMapper as SpeakingLibraryAttemptMapper
+    participant Analyzer as SpeakingMistakeAnalyzer (pure)
+    participant TMapper as SpeakingLibraryTopicMapper
+    participant LearnSvc as SpeakingLearnService
+    participant DB as reme_english DB
+
+    Caller->>Ctrl: POST /{userId}/sections/{sectionId}/ai-practice
+    Ctrl->>Svc: generatePracticeFromSection(userId, sectionId)
+    Svc->>SMapper: findById(sectionId)
+    alt section not found
+        Svc-->>Ctrl: BusinessException.notFound -> 404
+    else section found
+        Svc->>AMapper: findBySectionId(sectionId)
+        AMapper->>DB: SELECT speaking_library_attempts WHERE section_id = ?
+        Svc->>Svc: filter to this userId's own attempts only<br/>(a section can be attempted by any learner, unlike listening's per-user query)
+        loop each of this learner's attempts on this section (any sentence, any retry)
+            Svc->>Analyzer: extractWeakPhonemes(attempt.weakPhonemesJson)
+            Note over Analyzer: unlike listening (one attempt scores a whole section, so only the<br/>latest matters), speaking scores per-SENTENCE - a section has several<br/>sentences, each retried any number of times - so every attempt's weak<br/>phonemes are unioned (distinct, first-seen order), not just the latest one
+        end
+        alt no attempts, or none had a mispronounced phoneme
+            Svc-->>Ctrl: [] (nothing to regenerate)
+        else at least one mispronounced phoneme found
+            Svc->>TMapper: findById(section.topicId)
+            Svc->>LearnSvc: generatePracticeForKeywords(userId, weakPhonemes, topic.level, examType=null)
+            Note over Svc,LearnSvc: same generate-and-persist step "speaking-learn.md" section 1 uses -<br/>generator.generate(...) -> synthesize sample -> insertItem -> listItems(userId)
+            LearnSvc-->>Svc: List<SpeakingPracticeItemDto> (refreshed practice-set list)
+            Svc-->>Ctrl: List<SpeakingPracticeItemDto>
+        end
+        Ctrl-->>Caller: 200 ApiResponse
+    end
+```
+
 ## External calls
 
 | # | Call | From -> To | Notes |
@@ -215,8 +255,9 @@ sequenceDiagram
 | 1 | HTTPS | english-service -> Gemini API | `LlmSpeakingLibraryGenerator` via `AiContentClient`, first-read Section generation only; same "no static-template fallback, `AiContentException` propagates" behavior as `LlmListeningLibraryGenerator` |
 | 2 | Supertonic TTS (in-process/local call, via `DialogueAudioSynthesizer`) | english-service -> Supertonic | synthesizes each generated sentence individually as a single-speaker ("Narrator") monologue - one clip per sentence, unlike listening's one clip per whole passage |
 | 3 | HTTPS | english-service -> ai-service | `PronunciationScoringClient.score(...)` -> `POST /api/v1/pronunciation/score` (wav2vec2 GOP model) - the exact same call `speaking.learn`'s `SpeakingLearnServiceImpl.submit` already makes, reused as-is rather than reimplemented |
-| 4 | `StorageClient` (S3/local, per `common.storage`) | english-service -> storage backend | writes/reads each sentence's sample audio (`speaking-library/{topicId}/{uuid}.wav`) and each learner's recorded attempt audio (`speaking-library/attempts/{userId}/{uuid}.wav`) |
+| 4 | `StorageClient` (S3/local, per `common.storage`) | english-service -> storage backend | writes/reads each sentence's sample audio (`speaking-library/{topicId}/{uuid}.wav`) and each learner's recorded attempt audio (`speaking-library/attempts/{userId}/{uuid}.wav`), plus (flow 6) the regenerated practice item's own sample audio |
 | 5 | Postgres | english-service -> `reme_english` | `speaking_library_topics`, `speaking_library_sections`, `speaking_library_sentences`, `speaking_topic_progress`, `speaking_library_attempts` |
+| 6 | In-process | english-service -> `SpeakingLearnService#generatePracticeForKeywords` | fired only by flow 6 (generate-from-section); delegates the actual generate-and-persist step (including sample-audio synthesis) to `speaking.learn` so both flows feed the same `speaking_practice_items` bank |
 
 ## Notes
 
@@ -251,5 +292,24 @@ sequenceDiagram
   and does not call `PracticeService#redo` - scoring here only writes to `speaking_library_attempts`
   and `speaking_topic_progress`, not to `pronunciation_weak_points` (unlike `speaking.learn`, which
   does feed that table) - a deliberate scope cut mirroring `listening.library`'s equivalent gap.
-- `bff-service` proxies all five of these endpoints through its own `LearnerController` (backed by
-  `EnglishServiceClient`), the same pass-through pattern already used for `listening.library`.
+- `bff-service` proxies the first five of these endpoints through its own `LearnerController` (backed
+  by `EnglishServiceClient`), the same pass-through pattern already used for `listening.library`.
+  Flow 6 (`ai-practice`) is new in this service and is **not yet** proxied by `bff-service` - out of
+  scope for this change, same as Listening Library's own `ai-practice` endpoint when it was first added.
+- Flow 6 is a new dependency of `SpeakingLibraryServiceImpl` on `SpeakingLearnService` (interface, not
+  the concrete `SpeakingLearnServiceImpl`) - the only cross-package collaborator this service has,
+  added specifically so both the learn and library "Luyện tập với AI" actions share exactly one
+  persistence path (`speaking_practice_items`) instead of the library growing its own parallel bank.
+  See `speaking-learn.md` section 3 for the shared step's own diagram.
+- Unlike `listening.library`'s `findLatestAttemptForSection` (only the single most-recent attempt
+  matters, since one attempt scores a whole section) and unlike Grammar/Listening Library's
+  topic-name fallback (needed when the per-question/per-prompt text is too diffuse a retry target),
+  flow 6 neither takes only the latest attempt nor falls back to the topic name: every one of this
+  learner's own attempts on the section is unioned (a section has several sentences, each retried any
+  number of times, so different attempts can each surface different mispronunciations), and the
+  phonemes themselves - already short IPA symbols computed by ai-service's GOP scorer - are always a
+  good-enough generator target on their own, with no per-sentence taxonomy needed.
+- `attemptMapper.findBySectionId` (also used by `finishSection`, see flow 4) is not itself scoped to
+  one learner - a Section is a shared catalog object, so it can carry attempts from any learner who
+  has ever tried it. Flow 6 filters that list down to `userId`'s own rows before unioning phonemes, so
+  regenerated practice only ever targets the calling learner's own mistakes, never another learner's.

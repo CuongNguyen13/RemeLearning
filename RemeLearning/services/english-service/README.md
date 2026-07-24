@@ -157,7 +157,17 @@ Per-skill notes:
   `practiceItemId`), scored via `common`'s `PronunciationScoringClient`
   (`common.ai.pronunciation`) calling ai-service's wav2vec2 GOP-scoring endpoint, and feeds the
   existing `pronunciation_weak_points` table/Kafka consumer via `PracticeService.redo` — no new
-  weak-point table.
+  weak-point table. `POST /history/{userId}/{attemptId}/ai-practice` ("Luyện tập với AI" from a
+  history row) reads the same attempt's persisted `weakPhonemesJson` via the pure
+  `SpeakingMistakeAnalyzer.extractWeakPhonemes` (already a flat JSON array of short IPA symbols —
+  ai-service's GOP scorer has already reduced each mispronunciation to a crisp retry target, so
+  unlike `ListeningMistakeAnalyzer` there's no per-question OPEN-vs-KEYWORD diffing/fallback needed
+  here), generates a new sentence targeting those phonemes via the same
+  `LlmSpeakingPracticeGenerator`, persists it into the same `speaking_practice_items` bank, and
+  returns the learner's refreshed practice-set list; `404` if the attempt doesn't exist or belongs
+  to someone else. This shared generate-and-persist step (`generatePracticeForKeywords`) is also
+  reused by Speaking Library's own "generate from section" endpoint below — one shared AI-practice
+  bank per domain, regardless of which flow the mistake came from.
 
 ## Vocabulary Library
 
@@ -294,14 +304,34 @@ under `SpeakingLibraryController` (`/api/v1/learn/speaking/library`):
   least one attempt scoring ≥ 0.7 on both `phonemeScore` and `wordScore`; if so, marks the topic
   `PASSED` and unlocks the next topic by `sequenceOrder` (`404` if the section doesn't exist).
 - `GET /{userId}/sections/history` — the learner's scored sentence attempts across all topics/sections.
+- `POST /{userId}/sections/{sectionId}/ai-practice` — "Luyện tập với AI" from a Section: unlike
+  Listening Library (one attempt scores a whole section, so only the latest attempt matters),
+  speaking-library scores **per sentence** — a section has several sentences, each retried any
+  number of times — so this reads every `SpeakingLibraryAttempt` tied to the section
+  (`SpeakingLibraryAttemptMapper.findBySectionId`, itself not user-scoped since a Section is a
+  shared catalog object any learner may have attempted), filters down to this learner's own rows,
+  and **unions** their `weakPhonemesJson` via `SpeakingMistakeAnalyzer.extractWeakPhonemes` (not
+  just the latest attempt). No attempts at all, or none with a mispronounced phoneme, both return an
+  empty list without regenerating anything; otherwise **delegates the actual generate-and-persist
+  step to `SpeakingLearnService.generatePracticeForKeywords`** with the unioned phonemes as the
+  target — the exact same pipeline `speaking.learn`'s own "generate from attempt" endpoint uses — so
+  the regenerated content (including a fresh sample recording) lands in the shared
+  `speaking_practice_items` bank, not a Speaking-Library-only table. Unlike Grammar/Listening
+  Library's topic-name fallback, no such fallback is needed here: the phonemes themselves are
+  already short, crisp generator targets on their own, even though a Section maps to exactly one
+  topic with no finer per-sentence taxonomy. Returns the learner's refreshed
+  `SpeakingPracticeItemDto[]` (same shape as `speaking.learn`'s own listing); `404` if the section
+  doesn't exist.
 
 Migration: `V20__speaking_library.sql` (`speaking_library_topics`, `speaking_library_sections`,
 `speaking_library_sentences`, `speaking_topic_progress`, `speaking_library_attempts`), plus
 `V22__speaking_library_weak_phonemes.sql` adding `speaking_library_attempts.weak_phonemes_json`. Like Listening
 Library, scoring here does **not** call `PracticeService.redo(...)` — it only writes
 `speaking_library_attempts`/`speaking_topic_progress`, not `pronunciation_weak_points` (unlike
-`speaking.learn`, which does feed that table via the same scoring client). `bff-service` now proxies
-these five endpoints too (via `EnglishServiceClient`/`LearnerController`), same as Listening Library. See
+`speaking.learn`, which does feed that table via the same scoring client). `bff-service` proxies the
+first five endpoints (via `EnglishServiceClient`/`LearnerController`), same as Listening Library — the
+new `ai-practice` endpoint is not yet proxied, same as Listening Library's own `ai-practice` endpoint
+when it was first added. See
 [`docs/sequence/English_service/speaking-library.md`](../../../docs/sequence/English_service/speaking-library.md)
 and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-service-data-flow.md).
 

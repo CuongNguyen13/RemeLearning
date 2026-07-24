@@ -25,4 +25,16 @@ public interface SpeakingLearnService {
 	List<SpeakingAttemptHistoryEntryDto> getHistory(String userId);
 
 	SpeakingAttemptDetailDto getAttemptDetail(String userId, Long attemptId);
+
+	/**
+	 * Shared generate-and-persist step: builds one {@link SpeakingPracticeItemDto} targeting the
+	 * given words/sounds/level/exam type (same {@code speaking_practice_items} bank {@link #generate}
+	 * uses) and returns the learner's refreshed practice-set list. Used both by
+	 * {@link #generatePracticeFromAttempt} and by the Speaking Library flow
+	 * ({@code SpeakingLibraryService#generatePracticeFromSection}).
+	 */
+	List<SpeakingPracticeItemDto> generatePracticeForKeywords(String userId, List<String> targetWords, String level, String examType);
+
+	/** Generates AI practice targeted at one past learn-flow attempt's weak phonemes. */
+	List<SpeakingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId);
 }

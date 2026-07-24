@@ -1,6 +1,7 @@
 package com.remelearning.english.speaking.library.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.speaking.dto.SpeakingPracticeItemDto;
 import com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt;
 import com.remelearning.english.speaking.library.dto.FinishSectionResponse;
 import com.remelearning.english.speaking.library.dto.SentenceAttemptResultDto;
@@ -60,5 +61,12 @@ public class SpeakingLibraryController {
 	@GetMapping("/{userId}/sections/history")
 	public ApiResponse<List<SpeakingLibraryAttempt>> getHistory(@PathVariable String userId) {
 		return ApiResponse.ok(speakingLibraryService.getHistory(userId));
+	}
+
+	@Operation(summary = "Generate AI practice targeted at this learner's own mispronunciations across every sentence attempt on one section (the \"Luyện tập với AI\" action) - persists into the same speaking_practice_items bank the learn flow uses")
+	@PostMapping("/{userId}/sections/{sectionId}/ai-practice")
+	public ApiResponse<List<SpeakingPracticeItemDto>> generateFromSection(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return ApiResponse.ok(speakingLibraryService.generatePracticeFromSection(userId, sectionId));
 	}
 }

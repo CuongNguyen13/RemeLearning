@@ -104,6 +104,50 @@ sequenceDiagram
     end
 ```
 
+## 3. Generate from one past attempt's mistakes (`POST /api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as SpeakingLearnController
+    participant Svc as SpeakingLearnServiceImpl
+    participant SMapper as SpeakingMapper
+    participant DB as reme_english DB
+    participant Analyzer as SpeakingMistakeAnalyzer (pure)
+    participant Gen as LlmSpeakingPracticeGenerator
+    participant Tts as TtsClient (Supertonic)
+    participant AiSvc as ai-service /api/v1/tts/synthesize
+    participant Store as StorageClient (common)
+
+    Caller->>Ctrl: POST /history/{userId}/{attemptId}/ai-practice
+    Ctrl->>Svc: generatePracticeFromAttempt(userId, attemptId)
+    Svc->>SMapper: findAttemptDetailByIdAndUserId(attemptId, userId)
+    alt not found / not owned by userId
+        Svc-->>Ctrl: BusinessException.notFound -> 404
+    else found
+        SMapper-->>Svc: SpeakingAttemptDetailRow{level, examType, topic, weakPhonemesJson}
+        Svc->>Analyzer: extractWeakPhonemes(weakPhonemesJson)
+        Note over Analyzer: weakPhonemesJson is already a flat JSON array of short IPA symbols<br/>(ai-service's GOP scorer already reduced each mistake to a crisp retry<br/>target) - no per-question OPEN-vs-KEYWORD diffing/fallback needed the<br/>way listening's resultsJson requires
+        Analyzer-->>Svc: distinct mispronounced phonemes[]
+        Svc->>Svc: generatePracticeForKeywords(userId, weakPhonemes, attempt.level, attempt.examType)
+        Note over Svc: same generate-and-persist step "1. Generate" uses -<br/>generator.generate(...) -> synthesize sample -> insertItem -> listItems(userId)
+        Svc->>Gen: generate(weakPhonemes, level, examType)
+        Gen-->>Svc: GeneratedSpeakingPractice{topic, targetText, translation}
+        Svc->>SMapper: insertItem({userId, level, examType, topic, targetText, translation})
+        SMapper->>DB: INSERT INTO speaking_practice_items
+        Svc->>Tts: synthesize({text: targetText, languageCode, voice: ttsVoice})
+        Tts->>AiSvc: POST /api/v1/tts/synthesize
+        AiSvc-->>Tts: {audio_base64, mime_type, sample_rate}
+        Svc->>Store: write("speaking/sample/{userId}/{itemId}.wav", audioBytes)
+        Svc->>SMapper: updateItemStorageKey(itemId, key)
+        SMapper->>DB: UPDATE speaking_practice_items SET storage_key = ?
+        Svc->>SMapper: findItemsByUserId(userId)
+        SMapper-->>Svc: refreshed practice-item rows
+        Svc-->>Ctrl: SpeakingPracticeItemDto[] (refreshed list)
+        Ctrl-->>Caller: 200 ApiResponse
+    end
+```
+
 ## External calls
 
 | # | Call | From -> To | Notes |
@@ -111,7 +155,7 @@ sequenceDiagram
 | 1 | HTTPS | english-service -> Gemini API | `LlmSpeakingPracticeGenerator` via `AiContentClient`/`LlmClient`; falls back to a template on any failure |
 | 2 | HTTP | english-service -> ai-service `/api/v1/tts/synthesize` | Supertonic TTS, one fixed voice (`speaking.tts.voice`, default `F1`), single call (no per-speaker/per-line split like listening's dialogue) |
 | 3 | HTTP (multipart) | english-service -> ai-service `/api/v1/pronunciation/score` | `AiServicePronunciationScoringClient` (`PronunciationScoringClient`); wav2vec2 GOP scoring against `item.targetText` |
-| 4 | StorageClient write/read | english-service -> local FS (or S3) | both the Supertonic sample audio (generate) and the learner's uploaded recording (submit) |
+| 4 | StorageClient write/read | english-service -> local FS (or S3) | both the Supertonic sample audio (generate/regenerate) and the learner's uploaded recording (submit) |
 | 5 | Kafka produce | english-service -> `learning.gap.analysis.requested` | via `PracticeService#redo` -> `AnalysisRequestedProducer` |
 | 6 | Postgres | english-service -> `reme_english` | `speaking_practice_items`, `speaking_attempts`, plus `pronunciation_weak_points` (upserted by `WeakPointScoringOrchestrator`) |
 
@@ -130,3 +174,13 @@ sequenceDiagram
   route anywhere).
 - Word-level correctness for the weak-point feed is binary (`score >= 0.6`), not the continuous GOP
   score itself - same simplification `ListeningLearnServiceImpl` applies to its KEYWORD questions.
+- `generatePracticeForKeywords` (section 3) is the shared generate-and-persist step both
+  `generatePracticeFromAttempt` and Speaking Library's own `generatePracticeFromSection` delegate to
+  (see `speaking-library.md` section 3) - there is only one AI-practice destination
+  (`speaking_practice_items`) per domain, regardless of which flow (learn attempt vs. library
+  section) the mistake came from. Mirrors `listening-learn.md` section 3's same pattern.
+- `SpeakingMistakeAnalyzer.extractWeakPhonemes` needs no OPEN-question-style fallback the way
+  `ListeningMistakeAnalyzer.extractMissedTopics` does: `weakPhonemesJson` (both here and in Task 2's
+  `SpeakingLibraryAttempt`) is already a flat JSON array of short IPA symbols computed by
+  ai-service's GOP scorer (`WEAK_PHONEME_THRESHOLD`), never a full-sentence model answer, so it's
+  always a crisp, generator-ready retry target on its own.

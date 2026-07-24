@@ -84,4 +84,11 @@ public class SpeakingLearnController {
 	public ApiResponse<SpeakingAttemptDetailDto> getAttemptDetail(@PathVariable String userId, @PathVariable Long attemptId) {
 		return ApiResponse.ok(speakingLearnService.getAttemptDetail(userId, attemptId));
 	}
+
+	@Operation(summary = "Generate AI practice targeted at one specific past attempt's mispronounced phonemes (the \"Luyện tập với AI\" action from a history row)")
+	@PostMapping("/history/{userId}/{attemptId}/ai-practice")
+	public ApiResponse<List<SpeakingPracticeItemDto>> generateFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return ApiResponse.ok(speakingLearnService.generatePracticeFromAttempt(userId, attemptId));
+	}
 }

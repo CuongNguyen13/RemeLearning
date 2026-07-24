@@ -982,6 +982,24 @@ Chi tiết một lần làm bài — `SpeakingAttemptDetailDto`: `{attemptId, le
 overallScore, words: WordScoreDto[], transcript, weakPhonemes: string[], attemptedAt}`. **Lỗi**: `404`
 nếu không tồn tại hoặc không thuộc về `userId`.
 
+### POST `/api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một dòng lịch sử cụ thể (mirror Listening Learn's cùng tên endpoint, xem
+mục trên). Đọc lại `weakPhonemesJson` đã lưu sẵn của đúng attempt đó qua
+`SpeakingMapper.findAttemptDetailByIdAndUserId` (không chấm lại). Khác `resultsJson` của Listening
+(cần phân biệt `KEYWORD`/`MCQ`/`OPEN` để chọn mục tiêu sinh lại), `weakPhonemesJson` đã là một mảng
+JSON phẳng các ký hiệu IPA ngắn gọn (ai-service's GOP scorer đã rút gọn mỗi lỗi phát âm thành một mục
+tiêu sinh lại rõ ràng sẵn) — `SpeakingMistakeAnalyzer.extractWeakPhonemes(weakPhonemesJson)` chỉ cần
+parse thẳng ra `List<String>`, **không cần fallback theo tên topic** như Listening's câu `OPEN`. Sau
+đó gọi **cùng** `SpeakingLearnService.generatePracticeForKeywords(userId, weakPhonemes, level,
+examType)` (level/examType lấy nguyên từ attempt gốc) mà `generate` dùng bên trong, lưu bộ đề mới
+(kèm audio mẫu Supertonic mới) vào cùng bảng `speaking_practice_items`, và trả về toàn bộ danh sách bộ
+đề đã làm mới. Bước generate-và-lưu này (`generatePracticeForKeywords`) cũng được Speaking Library tái
+sử dụng (xem endpoint tương ứng bên dưới) — chỉ có một "kho" AI-practice luyện nói duy nhất, bất kể
+mistake đến từ luồng nào.
+- **Response `data`** — `SpeakingPracticeItemDto[]` (như `{userId}/items`).
+- **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
+
 ### Speaking Library — catalog chủ điểm luyện nói/phát âm, Section AI (câu mẫu + audio từng câu) + mở khóa tuần tự (package `speaking.library`)
 
 Song song `listening.library` nhưng cho kỹ năng nói: một catalog **cố định** các chủ điểm luyện nói
@@ -1050,6 +1068,24 @@ Toàn bộ attempt (từng câu) đã chấm của learner, trên mọi chủ đ
 - **Response `data`** — `SpeakingLibraryAttempt[]`: `{id, userId, sectionId, sentenceId,
   phonemeScore, wordScore, recordedAudioStorageKey?, weakPhonemesJson? (JSON array các IPA yếu của
   attempt đó), createdAt}`.
+
+### POST `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/ai-practice`
+
+Nút "Luyện tập với AI" cho một Section cụ thể (mirror Listening Library's cùng tên endpoint) — nhưng
+khác Listening (một attempt chấm cả section, nên chỉ cần đọc attempt gần nhất), Speaking Library chấm
+**từng câu một**, một Section có nhiều câu, mỗi câu có thể được thử lại nhiều lần: `SpeakingLibraryServiceImpl.generatePracticeFromSection` đọc
+`attemptMapper.findBySectionId(sectionId)` (**không** tự lọc theo learner — một Section là đối tượng
+catalog dùng chung, ai cũng có thể đã từng thử), lọc lại còn đúng các attempt của `userId` này, rồi
+**hợp nhất (union)** `weakPhonemesJson` của **mọi** attempt đó qua
+`SpeakingMistakeAnalyzer.extractWeakPhonemes` (không chỉ attempt gần nhất). Không có attempt nào, hoặc
+không attempt nào có phoneme sai, đều trả về danh sách rỗng (không sinh gì cả). Nếu có ít nhất một
+phoneme sai, gọi **cùng** `SpeakingLearnService.generatePracticeForKeywords(userId, weakPhonemes,
+topic.level, examType=null)` mà `speaking.learn`'s endpoint `ai-practice` dùng bên trong, lưu vào cùng
+bảng `speaking_practice_items`. **Không cần fallback theo tên topic** (khác Grammar/Listening
+Library) — các ký hiệu IPA vốn đã ngắn gọn, đủ làm mục tiêu sinh lại cho generator, dù Section chỉ ứng
+với đúng một topic và không có taxonomy nhỏ hơn theo từng câu.
+- **Response `data`** — `SpeakingPracticeItemDto[]` (như `{userId}/items`).
+- **Lỗi**: `404` nếu `sectionId` không tồn tại.
 
 ### Cơ chế chấm điểm (Java scoring engine, package `common.scoring`)
 
@@ -2059,11 +2095,13 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (speaking) | REST | POST | `/api/v1/learn/speaking/{userId}/attempts` | multipart audio; chấm GOP qua ai-service `/api/v1/pronunciation/score`, feed category `pronunciation` (tái dùng, không tạo mới) |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}` | lịch sử làm bài |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
+| english-service (speaking) | REST | POST | `/api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice` | sinh câu luyện nói nhắm vào các phoneme phát âm sai của 1 attempt (dùng chung generator với `generate`, lưu vào cùng `speaking_practice_items`); `404` |
 | english-service (speaking.library) | REST | GET | `/api/v1/learn/speaking/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
 | english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: 5 câu mẫu + IPA + audio từng câu); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts` | multipart audio; chấm GOP từng câu qua `PronunciationScoringClient` (tái dùng dịch vụ chấm của `speaking.learn`), không đụng tiến độ chủ điểm; `404` nếu section/sentence không tồn tại |
 | english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/finish` | hoàn thành section: nếu mọi câu đều có attempt đạt ngưỡng (≥0.7 cả phoneme/word) → `PASSED` + mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |
 | english-service (speaking.library) | REST | GET | `/api/v1/learn/speaking/library/{userId}/sections/history` | lịch sử toàn bộ attempt (từng câu) đã chấm của learner |
+| english-service (speaking.library) | REST | POST | `/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/ai-practice` | hợp nhất (union) các phoneme phát âm sai từ mọi attempt của learner này trên 1 section (không chỉ attempt gần nhất), ủy quyền lưu cho `SpeakingLearnService.generatePracticeForKeywords` (cùng bảng `speaking_practice_items`); `404` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/facets` | facets thư viện (skill/level/topic/examType) + `minListensForHint` |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/clips` | duyệt clip thư viện theo facets |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/folders` | (rev 2) danh sách folder (chủ đề) + `lessonCount` |

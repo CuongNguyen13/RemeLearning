@@ -6,6 +6,8 @@ import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
+import com.remelearning.english.speaking.dto.SpeakingPracticeItemDto;
+import com.remelearning.english.speaking.generator.SpeakingMistakeAnalyzer;
 import com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt;
 import com.remelearning.english.speaking.library.domain.SpeakingLibrarySection;
 import com.remelearning.english.speaking.library.domain.SpeakingLibrarySentence;
@@ -22,6 +24,7 @@ import com.remelearning.english.speaking.library.mapper.SpeakingLibrarySectionMa
 import com.remelearning.english.speaking.library.mapper.SpeakingLibrarySentenceMapper;
 import com.remelearning.english.speaking.library.mapper.SpeakingLibraryTopicMapper;
 import com.remelearning.english.speaking.library.mapper.SpeakingTopicProgressMapper;
+import com.remelearning.english.speaking.service.SpeakingLearnService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +64,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 	private final StorageClient storageClient;
 	private final ObjectMapper objectMapper;
 	private final String ttsLang;
+	private final SpeakingLearnService speakingLearnService;
 
 	public SpeakingLibraryServiceImpl(
 			SpeakingLibraryTopicMapper topicMapper,
@@ -72,7 +76,8 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 			PronunciationScoringClient pronunciationScoringClient,
 			StorageClient storageClient,
 			ObjectMapper objectMapper,
-			@Value("${speaking.tts.lang:en}") String ttsLang) {
+			@Value("${speaking.tts.lang:en}") String ttsLang,
+			SpeakingLearnService speakingLearnService) {
 		this.topicMapper = topicMapper;
 		this.sectionMapper = sectionMapper;
 		this.sentenceMapper = sentenceMapper;
@@ -83,6 +88,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 		this.storageClient = storageClient;
 		this.objectMapper = objectMapper;
 		this.ttsLang = ttsLang;
+		this.speakingLearnService = speakingLearnService;
 	}
 
 	// Bootstraps the very first topic to UNLOCKED for a new learner, then reports every catalog
@@ -270,6 +276,36 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 	@Override
 	public List<SpeakingLibraryAttempt> getHistory(String userId) {
 		return attemptMapper.findByUserId(userId);
+	}
+
+	// Generates AI practice targeted at this learner's own mispronunciations on one section: unlike
+	// ListeningLibraryServiceImpl.generatePracticeFromSection (one attempt scores a whole section, so
+	// only the latest attempt matters), speaking-library scores one sentence per recorded attempt -
+	// a section can have several sentences, each retried multiple times - so every one of this
+	// learner's own attempts tied to the section is diffed via the pure SpeakingMistakeAnalyzer and
+	// their weak phonemes unioned (distinct, first-seen order) rather than just reading the latest
+	// attempt. A Speaking Library section maps to exactly one topic with no finer per-sentence
+	// taxonomy, but unlike Listening/Grammar's raw prompt/answer text, the weak phonemes here are
+	// already short IPA symbols - a good generator target on their own - so no topic-name fallback
+	// is needed even though there's no per-sentence taxonomy to diff against. No attempts at all, or
+	// no mispronounced phoneme across every attempt, both mean nothing to regenerate.
+	@Override
+	@Transactional
+	public List<SpeakingPracticeItemDto> generatePracticeFromSection(String userId, Long sectionId) {
+		SpeakingLibrarySection section = sectionMapper.findById(sectionId);
+		if (section == null) {
+			throw BusinessException.notFound("Speaking library section not found: id=" + sectionId);
+		}
+		List<String> weakPhonemes = attemptMapper.findBySectionId(sectionId).stream()
+				.filter(a -> userId.equals(a.getUserId()))
+				.flatMap(a -> SpeakingMistakeAnalyzer.extractWeakPhonemes(a.getWeakPhonemesJson()).stream())
+				.distinct()
+				.toList();
+		if (weakPhonemes.isEmpty()) {
+			return List.of();
+		}
+		SpeakingLibraryTopic topic = requireTopic(section.getTopicId());
+		return speakingLearnService.generatePracticeForKeywords(userId, weakPhonemes, topic.getLevel(), null);
 	}
 
 	// Serializes the weak-phoneme list to JSON for storage - same helper shape
