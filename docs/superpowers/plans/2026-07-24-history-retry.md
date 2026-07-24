@@ -888,3 +888,27 @@ now shown together in one combined history list per skill.
   implementer must resolve by reading real code rather than the plan
   guessing an answer — this is intentional given neither could be verified
   without the code these tasks themselves are producing.
+- **RESOLVED (2026-07-24 follow-up fix) — Tasks 11-12's deep-link gap:** Task
+  10's Step 4 snippet (mirrored verbatim by Tasks 11-12 per their "Steps 1-8
+  mirror Task 10 exactly" instruction) assumed Listening/Speaking would have
+  a routed page keyed by `sectionId` the same way Grammar's
+  `/learn/grammar/library/topics/{topicId}` does, and wrote
+  `navigate(`/learn/listening/library/topics/${entry.sectionId}`)`
+  accordingly. No such route exists for Listening/Speaking — their library
+  Sections are managed entirely by local component state inside
+  `TopicLibraryPanel`/`SectionRunner`, not a dedicated route — so the actual
+  Tasks 11-12 implementation correctly deviated from the plan and shipped a
+  plain `setTab("library")` (reopening the inline tab without landing on the
+  exact topic/section), noting the gap inline as a comment. A follow-up fix
+  (separate from this plan, see commits
+  `feat(english-service,bff-service): resolve topicId for listening/speaking
+  library history rows` and `feat(listening,speaking): deep-link "Làm lại" to
+  the exact topic/section from history`) closed this: english-service now
+  resolves and returns `topicId` on Listening/Speaking's merged-history
+  LIBRARY rows (previously only `sectionId`, which the FE had no way to map
+  to a topic), and `TopicLibraryPanel` gained an `initialTopicId` prop that
+  auto-starts that exact topic's Section on mount (falling back to the plain
+  topic grid if the topic is now LOCKED). The mechanism is lifted component
+  state, not a new route or `location.state`, since clicking "Làm lại" never
+  navigates to a different page for these two domains — both already render
+  the library tab inline on the same page.
