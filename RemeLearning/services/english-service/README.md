@@ -154,7 +154,12 @@ Per-skill notes:
   attempt doesn't exist or belongs to someone else. The persist-and-synthesize-and-refresh step
   (`generatePracticeForKeywords`) is also reused by Listening Library's own "generate from section"
   endpoint below — one shared AI-practice bank per domain, regardless of which flow the mistake came
-  from.
+  from. `GET /merged-history/{userId}` combines this skill's own attempt history with Listening
+  Library's attempt history (see below) into one time-sorted list tagged by `source`, built by a new
+  standalone `ListeningHistoryService` for the same circular-dependency-avoidance reason as Grammar's
+  equivalent (`ListeningLibraryServiceImpl` already depends on `ListeningLearnService`). Unlike
+  Grammar, `ListeningLibraryService.getHistory(userId)` already spanned every section (no per-section
+  filter existed), so no new mapper query was needed for the library side of the merge.
 - **Speaking** — also a new domain. Generation produces a target sentence/passage plus a Supertonic
   sample (model) recording (`GET /items/{itemId}/sample-audio`). Grading
   (`POST /api/v1/learn/speaking/{userId}/attempts`) is multipart (learner's recorded audio +

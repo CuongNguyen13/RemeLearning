@@ -1,6 +1,8 @@
 package com.remelearning.english.listening.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.listening.history.dto.ListeningHistoryEntryDto;
+import com.remelearning.english.listening.history.service.ListeningHistoryService;
 import com.remelearning.english.listening.dto.GenerateListeningPracticeRequest;
 import com.remelearning.english.listening.dto.ListeningAttemptDetailDto;
 import com.remelearning.english.listening.dto.ListeningAttemptHistoryEntryDto;
@@ -33,6 +35,7 @@ import java.util.List;
 public class ListeningLearnController {
 
 	private final ListeningLearnService listeningLearnService;
+	private final ListeningHistoryService listeningHistoryService;
 
 	@Operation(summary = "Generate one AI listening passage (Gemini transcript+questions, Supertonic audio), targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords")
 	@PostMapping("/{userId}/generate")
@@ -87,5 +90,11 @@ public class ListeningLearnController {
 	public ApiResponse<List<ListeningPracticeItemDto>> generateFromAttempt(
 			@PathVariable String userId, @PathVariable Long attemptId) {
 		return ApiResponse.ok(listeningLearnService.generatePracticeFromAttempt(userId, attemptId));
+	}
+
+	@Operation(summary = "A learner's merged listening history: \"học thường\" attempts + Thư viện section attempts in one time-sorted list, tagged by source")
+	@GetMapping("/merged-history/{userId}")
+	public ApiResponse<List<ListeningHistoryEntryDto>> getMergedHistory(@PathVariable String userId) {
+		return ApiResponse.ok(listeningHistoryService.getMergedHistory(userId));
 	}
 }

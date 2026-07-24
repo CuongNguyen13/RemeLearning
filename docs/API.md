@@ -939,6 +939,19 @@ từ luồng nào.
 - **Response `data`** — `ListeningPracticeItemDto[]` (như `{userId}/items`).
 - **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
 
+### GET `/api/v1/learn/listening/merged-history/{userId}`
+
+Gộp lịch sử "học thường" (`ListeningLearnService.getHistory`) và "Thư viện" (
+`ListeningLibraryService.getHistory`, vốn đã trả về mọi attempt của learner trên **mọi** section chứ
+không lọc theo 1 section) thành một danh sách duy nhất, sắp xếp mới nhất trước, mỗi dòng gắn
+`source`. Được đặt trong một service riêng, `ListeningHistoryService` (package `listening.history`),
+lý do giống hệt Grammar's `merged-history` endpoint (xem mục Grammar Learn) —
+`ListeningLibraryServiceImpl` đã phụ thuộc `ListeningLearnService` nên tránh vòng lặp bean.
+- **Path param**: `userId` (string)
+- **Response `data`** — `ListeningHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"),
+  attemptOrSessionId, completedAt?, score?, sectionId?}`. `sectionId` chỉ có giá trị khi `source =
+  "LIBRARY"`; dòng `LEARN` luôn để `null`.
+
 ### Speaking Learn — luyện nói/phát âm với AI (package `speaking`, đỉnh mới)
 
 Sinh một câu/đoạn luyện nói kèm audio mẫu Supertonic, rồi chấm bản ghi âm của learner bằng GOP
@@ -2105,6 +2118,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}` | lịch sử làm bài |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
 | english-service (listening) | REST | POST | `/api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice` | sinh bộ đề nhắm vào đúng câu sai của 1 attempt (dùng chung generator với `generate`, lưu vào cùng `listening_practice_items`); `404` |
+| english-service (listening.history) | REST | GET | `/api/v1/learn/listening/merged-history/{userId}` | gộp lịch sử học thường + Thư viện thành 1 danh sách theo thời gian, gắn `source` |
 | english-service (speaking) | REST | POST | `/api/v1/learn/speaking/{userId}/generate` | sinh câu luyện nói + audio mẫu Supertonic |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/items/{itemId}` | chi tiết bài (targetText hiển thị sẵn); `404` |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/{userId}/items` | danh sách bài đã sinh của learner |

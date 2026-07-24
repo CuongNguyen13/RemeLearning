@@ -163,6 +163,43 @@ sequenceDiagram
     end
 ```
 
+## 4. Merged history (`GET /api/v1/learn/listening/merged-history/{userId}`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as ListeningLearnController
+    participant HSvc as ListeningHistoryServiceImpl
+    participant LearnSvc as ListeningLearnServiceImpl
+    participant LibSvc as ListeningLibraryServiceImpl
+    participant LMapper as ListeningMapper
+    participant AMapper as ListeningLibraryAttemptMapper
+    participant DB as reme_english DB
+
+    Caller->>Ctrl: GET /merged-history/{userId}
+    Ctrl->>HSvc: getMergedHistory(userId)
+    HSvc->>LearnSvc: getHistory(userId)
+    LearnSvc->>LMapper: findHistoryByUserId(userId)
+    LMapper->>DB: SELECT listening_attempts JOIN listening_practice_items
+    LMapper-->>LearnSvc: ListeningAttemptHistoryRow[]
+    LearnSvc-->>HSvc: ListeningAttemptHistoryEntryDto[]
+    HSvc->>LibSvc: getHistory(userId)
+    LibSvc->>AMapper: findByUserId(userId) - already spans all sections, no per-section filter
+    AMapper->>DB: SELECT listening_library_attempts WHERE user_id=?
+    AMapper-->>LibSvc: ListeningLibraryAttempt[]
+    LibSvc-->>HSvc: ListeningLibraryAttempt[] (raw domain rows - no dedicated history DTO for this skill)
+    HSvc->>HSvc: normalize both into ListeningHistoryEntryDto{source, attemptOrSessionId, completedAt, score, sectionId?}<br/>merge + sort descending by completedAt
+    HSvc-->>Ctrl: ListeningHistoryEntryDto[]
+    Ctrl-->>Caller: 200 ApiResponse
+```
+
+Note: `ListeningHistoryServiceImpl` is a standalone service, not folded into either
+`ListeningLearnServiceImpl` or `ListeningLibraryServiceImpl`, for the same reason as
+`GrammarHistoryServiceImpl` (see `grammar-learn.md` section 4) - `ListeningLibraryServiceImpl` already
+depends on `ListeningLearnService` (for `generatePracticeFromSection`), so a reverse dependency would
+form a circular bean. Unlike Grammar, `ListeningLibraryService.getHistory(userId)` already spanned all
+sections (no per-section filter existed to begin with), so no new mapper query was needed here.
+
 ## External calls
 
 | # | Call | From -> To | Notes |
