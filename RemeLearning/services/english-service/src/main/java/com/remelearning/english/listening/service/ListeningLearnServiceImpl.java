@@ -157,6 +157,7 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 					.correct(correct)
 					.subScore(subScore)
 					.explanation(explanation)
+					.type(question.getType())
 					.build());
 		}
 
@@ -240,7 +241,7 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 		if (attempt == null) {
 			throw BusinessException.notFound("Listening practice attempt not found: id=" + attemptId);
 		}
-		List<String> missedTopics = ListeningMistakeAnalyzer.extractMissedTopics(attempt.getResultsJson());
+		List<String> missedTopics = ListeningMistakeAnalyzer.extractMissedTopics(attempt.getResultsJson(), attempt.getTopic());
 		return generatePracticeForKeywords(userId, missedTopics, attempt.getLevel(), attempt.getExamType());
 	}
 

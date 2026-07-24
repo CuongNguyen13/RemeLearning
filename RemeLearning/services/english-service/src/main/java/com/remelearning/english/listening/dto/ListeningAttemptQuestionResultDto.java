@@ -1,5 +1,7 @@
 package com.remelearning.english.listening.dto;
 
+import com.remelearning.english.listening.domain.ListeningQuestionType;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -26,4 +28,12 @@ public class ListeningAttemptQuestionResultDto {
 	/** 0..1 partial credit - meaningful for KEYWORD (WER-based) and OPEN (LLM-graded); 0/1 for MCQ. */
 	private double subScore;
 	private String explanation;
+	/**
+	 * The source question's shape - added so {@link com.remelearning.english.listening.generator.ListeningMistakeAnalyzer}
+	 * can tell OPEN questions (whose {@link #correctAnswer} is a full model-answer sentence, too
+	 * diffuse to use as a generator retry keyword) apart from KEYWORD/MCQ (whose {@code correctAnswer}
+	 * is already a crisp keyword/option). {@code null} for attempts persisted before this field
+	 * existed - treated the same as KEYWORD/MCQ (falls back to the old correctAnswer-only behavior).
+	 */
+	private ListeningQuestionType type;
 }

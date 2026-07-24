@@ -2926,6 +2926,7 @@ components:
         correct: { type: boolean }
         subScore: { type: number, format: double, description: "0..1 partial credit - meaningful for KEYWORD (WER-based) and OPEN (LLM-graded); 0/1 for MCQ" }
         explanation: { type: string, nullable: true }
+        type: { type: string, enum: [MCQ, KEYWORD, OPEN], nullable: true, description: "Source question's shape; null for attempts persisted before this field existed. Used server-side (not by the client) to tell OPEN questions apart from KEYWORD/MCQ when regenerating AI practice from a past attempt's mistakes - an OPEN correctAnswer is a full model-answer sentence, too diffuse to use as a retry target keyword, so that case falls back to the attempt's topic name instead." }
 
     ListeningAttemptResult:
       type: object

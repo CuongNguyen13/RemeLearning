@@ -884,7 +884,10 @@ Chấm điểm một lần làm bài.
 - **Response `data`** — `ListeningAttemptResultDto`: `{accuracy, results:
   ListeningAttemptQuestionResultDto[], transcript, translation, actionAdvice[]}` — đây là lúc
   transcript/translation được tiết lộ. `ListeningAttemptQuestionResultDto`: `{index, prompt,
-  yourAnswer, correctAnswer, correct, subScore, explanation}`.
+  yourAnswer, correctAnswer, correct, subScore, explanation, type}`. `type` (`MCQ`\|`KEYWORD`\|`OPEN`,
+  `null` cho attempt lưu trước khi field này tồn tại) là field mới — không dùng ở FE, chỉ để
+  `ListeningMistakeAnalyzer.extractMissedTopics` (xem endpoint `ai-practice` bên dưới) phân biệt câu
+  `OPEN` với `KEYWORD`/`MCQ` khi sinh lại bài luyện từ lịch sử.
 
 ### GET `/api/v1/learn/listening/history/{userId}`
 
@@ -904,10 +907,13 @@ mục trên) — khác `generate` ở trên (dùng weak keyword/focus items), en
 một attempt** (`attemptId`): đọc lại `resultsJson` đã chấm sẵn của đúng attempt đó qua
 `ListeningMapper.findAttemptDetailByIdAndUserId` (không chấm lại — dùng nguyên cờ `correct` đã lưu từ
 lúc nộp bài). `resultsJson` (`ListeningAttemptQuestionResultDto`) không mang tag "topic"/"skill" riêng
-từng câu như `ListeningQuestionItem` gốc (chỉ có `prompt`/`correctAnswer`/`explanation`), nên
-`ListeningMistakeAnalyzer.extractMissedTopics` dùng `correctAnswer` của mỗi câu sai làm mục tiêu sinh
-lại (với câu `KEYWORD` đây chính là từ khóa bị bỏ lỡ; với `MCQ`/`OPEN` là đáp án đúng/mẫu — vẫn là nội
-dung có ý nghĩa để generator tái sử dụng tự nhiên trong đoạn văn mới). Sau đó gọi **cùng**
+từng câu như `ListeningQuestionItem` gốc (chỉ có `prompt`/`correctAnswer`/`explanation`/`type`), nên
+`ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, attempt.topic)` dùng `correctAnswer` của
+mỗi câu sai làm mục tiêu sinh lại **cho `KEYWORD`/`MCQ`** (với `KEYWORD` đây chính là từ khóa bị bỏ
+lỡ; với `MCQ` là đáp án đúng — vẫn là nội dung có ý nghĩa để generator tái sử dụng tự nhiên trong đoạn
+văn mới); **quyết định sản phẩm**: câu `OPEN` có `correctAnswer` là cả câu/đoạn đáp án mẫu tự do, quá
+lan man để làm "từ khóa mục tiêu", nên với `OPEN` dùng **tên topic của attempt** (`attempt.topic`)
+thay thế. Sau đó gọi **cùng**
 `ListeningLearnService.generatePracticeForKeywords(userId, missedTopics, level, examType)` (level/
 examType lấy nguyên từ attempt gốc) mà `generate` dùng bên trong, lưu bộ đề mới (kèm audio tổng hợp
 mới) vào cùng bảng `listening_practice_items`, và trả về toàn bộ danh sách bộ đề đã làm mới. Bước

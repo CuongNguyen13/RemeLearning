@@ -1,6 +1,7 @@
 package com.remelearning.english.listening.generator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.english.listening.domain.ListeningQuestionType;
 import com.remelearning.english.listening.dto.ListeningAttemptQuestionResultDto;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer;
 
@@ -18,24 +19,28 @@ class ListeningMistakeAnalyzerTest {
 	void extractMissedTopicsReturnsEmptyWhenAllAnswersCorrect() {
 		String resultsJson = toJson(List.of(
 				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
-						.correctAnswer("A flight departure").correct(true).subScore(1.0).build(),
+						.correctAnswer("A flight departure").correct(true).subScore(1.0)
+						.type(ListeningQuestionType.MCQ).build(),
 				ListeningAttemptQuestionResultDto.builder().index(1).prompt("p2")
-						.correctAnswer("departing").correct(true).subScore(1.0).build()));
+						.correctAnswer("departing").correct(true).subScore(1.0)
+						.type(ListeningQuestionType.KEYWORD).build()));
 
-		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson);
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
 
 		assertThat(missed).isEmpty();
 	}
 
 	@Test
-	void extractMissedTopicsReturnsDistinctCorrectAnswersOfWrongQuestions() {
+	void extractMissedTopicsReturnsDistinctCorrectAnswersOfWrongKeywordAndMcqQuestions() {
 		String resultsJson = toJson(List.of(
 				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
-						.correctAnswer("A flight departure").correct(false).subScore(0.0).build(),
+						.correctAnswer("A flight departure").correct(false).subScore(0.0)
+						.type(ListeningQuestionType.MCQ).build(),
 				ListeningAttemptQuestionResultDto.builder().index(1).prompt("p2")
-						.correctAnswer("departing").correct(true).subScore(1.0).build()));
+						.correctAnswer("departing").correct(true).subScore(1.0)
+						.type(ListeningQuestionType.KEYWORD).build()));
 
-		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson);
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
 
 		assertThat(missed).containsExactly("A flight departure");
 	}
@@ -44,13 +49,53 @@ class ListeningMistakeAnalyzerTest {
 	void extractMissedTopicsDeduplicatesTheSameCorrectAnswerAcrossMultipleWrongQuestions() {
 		String resultsJson = toJson(List.of(
 				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
-						.correctAnswer("departing").correct(false).subScore(0.0).build(),
+						.correctAnswer("departing").correct(false).subScore(0.0)
+						.type(ListeningQuestionType.KEYWORD).build(),
 				ListeningAttemptQuestionResultDto.builder().index(1).prompt("p2")
-						.correctAnswer("departing").correct(false).subScore(0.2).build()));
+						.correctAnswer("departing").correct(false).subScore(0.2)
+						.type(ListeningQuestionType.KEYWORD).build()));
 
-		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson);
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
 
 		assertThat(missed).containsExactly("departing");
+	}
+
+	@Test
+	void extractMissedTopicsUsesTopicNameInsteadOfCorrectAnswerForMissedOpenQuestions() {
+		String resultsJson = toJson(List.of(
+				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
+						.correctAnswer("The speaker is worried the flight will be delayed because of the storm.")
+						.correct(false).subScore(0.2).type(ListeningQuestionType.OPEN).build()));
+
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
+
+		assertThat(missed).containsExactly("Travel");
+	}
+
+	@Test
+	void extractMissedTopicsKeepsUsingCorrectAnswerForKeywordAndMcqAlongsideAMissedOpenQuestion() {
+		String resultsJson = toJson(List.of(
+				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
+						.correctAnswer("departing").correct(false).subScore(0.0)
+						.type(ListeningQuestionType.KEYWORD).build(),
+				ListeningAttemptQuestionResultDto.builder().index(1).prompt("p2")
+						.correctAnswer("The speaker feels relieved the trip is finally over.")
+						.correct(false).subScore(0.1).type(ListeningQuestionType.OPEN).build()));
+
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
+
+		assertThat(missed).containsExactly("departing", "Travel");
+	}
+
+	@Test
+	void extractMissedTopicsTreatsNullTypeAsNonOpenForBackwardCompatibility() {
+		String resultsJson = toJson(List.of(
+				ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
+						.correctAnswer("A flight departure").correct(false).subScore(0.0).build()));
+
+		List<String> missed = ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, "Travel");
+
+		assertThat(missed).containsExactly("A flight departure");
 	}
 
 	@Test

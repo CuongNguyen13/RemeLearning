@@ -171,6 +171,35 @@ class ListeningLearnServiceImplTest {
 		assertThat(result).isNotNull();
 	}
 
+	@Test
+	void generatePracticeFromAttemptUsesTheAttemptTopicNameForMissedOpenQuestions() {
+		ListeningAttemptDetailRow attempt = ListeningAttemptDetailRow.builder()
+				.attemptId(31L).level("B1").examType("TOEIC").topic("Travel")
+				.transcript("We will be departing shortly.").translation(null)
+				.resultsJson(toJson(List.of(
+						ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
+								.correctAnswer("The speaker is worried about missing the connecting flight.")
+								.correct(false).subScore(0.1).type(ListeningQuestionType.OPEN).build())))
+				.score(0.1)
+				.createdAt(Instant.now())
+				.build();
+		when(mapper.findAttemptDetailByIdAndUserId(31L, "user-1")).thenReturn(attempt);
+		when(mapper.findItemsByUserId("user-1")).thenReturn(List.of());
+		when(generator.generate(eq(List.of("Travel")), eq("B1"), eq("TOEIC"), any())).thenReturn(
+				new GeneratedListeningPractice("Travel retry",
+						List.of(new DialogueLine("A", "Flight 204 is now boarding.", null)),
+						List.of(ListeningQuestionItem.builder().type(ListeningQuestionType.MCQ).skill("main-idea")
+								.prompt("What is this about?").options(List.of("A flight", "A train")).answer("A flight").explanation("x").build())));
+		when(audioSynthesizer.synthesize(any(), eq("en"))).thenReturn(
+				new SynthesizedDialogue("wav-bytes".getBytes(), "Flight 204 is now boarding.", null));
+		simulateGeneratedItemId(7L);
+
+		List<ListeningPracticeItemDto> result = service.generatePracticeFromAttempt("user-1", 31L);
+
+		verify(generator).generate(eq(List.of("Travel")), eq("B1"), eq("TOEIC"), any());
+		assertThat(result).isNotNull();
+	}
+
 	private void simulateGeneratedItemId(Long id) {
 		org.mockito.Mockito.doAnswer(invocation -> {
 			ListeningPracticeItem item = invocation.getArgument(0);

@@ -3,6 +3,7 @@ package com.remelearning.english.listening.generator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.english.listening.domain.ListeningQuestionType;
 import com.remelearning.english.listening.dto.ListeningAttemptQuestionResultDto;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer;
 
@@ -15,12 +16,15 @@ import java.util.Set;
  * Pure diff logic behind the "generate AI practice targeting a past attempt's mistakes" feature
  * for listening (both the "học thường" learn flow and the Thư viện/library flow) - mirrors
  * {@code GrammarMistakeAnalyzer}. The learn flow's persisted {@code resultsJson} (see
- * {@link ListeningAttemptQuestionResultDto}) carries only {@code prompt}/{@code correctAnswer}/
- * {@code explanation} per question - no per-question "topic"/"skill" tag the way the source
- * {@link com.remelearning.english.listening.domain.ListeningQuestionItem} does - so
+ * {@link ListeningAttemptQuestionResultDto}) carries {@code prompt}/{@code correctAnswer}/
+ * {@code explanation}/{@code type} per question - no per-question "topic"/"skill" tag the way the
+ * source {@link com.remelearning.english.listening.domain.ListeningQuestionItem} does - so
  * {@link #extractMissedTopics} uses each missed question's {@code correctAnswer} as the retry
- * target text: for KEYWORD questions this literally is the missed keyword, and for MCQ/OPEN
- * questions it's the correct option/model-answer text, which still gives
+ * target text for KEYWORD (literally the missed keyword) and MCQ (the correct option, still a
+ * crisp phrase) questions. OPEN questions are graded against a free-text model answer, which is
+ * often a full sentence/paragraph rather than a keyword - too diffuse a "target keyword" for the
+ * generator - so for those the caller-supplied attempt topic name is used instead (product
+ * decision; see task-4-report.md). Either way the result still gives
  * {@link LlmListeningPracticeGenerator} meaningful content to naturally reuse in a fresh passage.
  * The library flow has no per-question taxonomy at all (a Section is scoped to one topic already,
  * same as Grammar Library), so it only reports whether anything was missed at all; the caller
@@ -38,16 +42,24 @@ public final class ListeningMistakeAnalyzer {
 
 	// Learn flow: re-reads the attempt's already-graded resultsJson (grading itself is never
 	// redone here - the stored `correct` flag is exactly what the learner saw at submit time) and
-	// collects the distinct correctAnswer of every question that came back incorrect, preserving
-	// first-seen order.
-	public static List<String> extractMissedTopics(String resultsJson) {
+	// collects the distinct retry-target text of every question that came back incorrect,
+	// preserving first-seen order. KEYWORD/MCQ questions use their own correctAnswer (unchanged
+	// behavior - it's already a crisp keyword/option); OPEN questions fall back to the caller-
+	// supplied attempt topic name instead, since an OPEN correctAnswer is a full model-answer
+	// sentence/paragraph, too diffuse to hand the generator as a "target keyword". `topicName` is
+	// passed in rather than looked up here so this stays a pure function over already-loaded data.
+	public static List<String> extractMissedTopics(String resultsJson, String topicName) {
 		List<ListeningAttemptQuestionResultDto> results = readValue(
 				resultsJson, new TypeReference<List<ListeningAttemptQuestionResultDto>>() { });
 
 		Set<String> missedTopics = new LinkedHashSet<>();
 		for (ListeningAttemptQuestionResultDto result : results) {
-			if (!result.isCorrect() && result.getCorrectAnswer() != null) {
-				missedTopics.add(result.getCorrectAnswer());
+			if (result.isCorrect()) {
+				continue;
+			}
+			String target = result.getType() == ListeningQuestionType.OPEN ? topicName : result.getCorrectAnswer();
+			if (target != null) {
+				missedTopics.add(target);
 			}
 		}
 		return new ArrayList<>(missedTopics);

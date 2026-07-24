@@ -141,10 +141,10 @@ sequenceDiagram
     alt not found / not owned by userId
         Svc-->>Ctrl: BusinessException.notFound -> 404
     else found
-        LMapper-->>Svc: ListeningAttemptDetailRow{level, examType, resultsJson}
-        Svc->>Analyzer: extractMissedTopics(resultsJson)
-        Note over Analyzer: resultsJson (ListeningAttemptQuestionResultDto) carries no per-question<br/>topic/skill tag of its own (only prompt/correctAnswer/explanation) - each<br/>wrong question's own correctAnswer is used as the retry target text<br/>(the missed keyword itself for KEYWORD, the correct option/model<br/>answer for MCQ/OPEN)
-        Analyzer-->>Svc: distinct correctAnswer[] of every wrong question
+        LMapper-->>Svc: ListeningAttemptDetailRow{level, examType, topic, resultsJson}
+        Svc->>Analyzer: extractMissedTopics(resultsJson, attempt.topic)
+        Note over Analyzer: resultsJson (ListeningAttemptQuestionResultDto) carries no per-question<br/>skill tag of its own (prompt/correctAnswer/explanation/type) - each wrong<br/>question's own correctAnswer is used as the retry target text for KEYWORD<br/>(the missed keyword itself) and MCQ (the correct option), but OPEN falls<br/>back to the attempt's topic name instead, since an OPEN correctAnswer is a<br/>full model-answer sentence/paragraph, too diffuse a "target keyword"<br/>(product decision, see task-4-report.md)
+        Analyzer-->>Svc: distinct retry-target text[] of every wrong question<br/>(correctAnswer for KEYWORD/MCQ, topic name for OPEN)
         Svc->>Svc: generatePracticeForKeywords(userId, missedTopics, attempt.level, attempt.examType)
         Note over Svc: same generate-and-persist step "1. Generate" uses -<br/>generator.generate(...) -> synthesize audio -> insertItem -> listItems(userId)
         Svc->>Gen: generate(missedTopics, level, examType, translationLang=null)
