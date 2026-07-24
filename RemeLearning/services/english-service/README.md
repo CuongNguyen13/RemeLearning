@@ -192,15 +192,16 @@ Six endpoints under `GrammarLibraryController` (`/api/v1/learn/grammar/library`)
   inline in the session — never added to the shared question pool).
 - `GET /{userId}/topics/{topicId}/history` — the learner's completed sessions for a topic.
 - `POST /{userId}/sessions/{sessionId}/ai-practice` — "Luyện tập với AI" from a past session: verifies
-  the session belongs to `userId`, diffs its stored `questionsJson` against its submitted answers via
-  `GrammarMistakeAnalyzer.extractMissedRulesFromSession` (library questions carry no explicit rule tag
-  of their own since a session is scoped to one topic, so each wrong question's own prompt is used as
-  the tag), then **delegates the actual generate-and-persist step to
-  `GrammarLearnService.generatePracticeForRules`** — the exact same pipeline `grammar.learn`'s own
-  "generate from attempt" endpoint uses — so the regenerated content lands in the shared
-  `grammar_practice_items` bank, not a Grammar-Library-only table. Returns the learner's refreshed
-  `GrammarPracticeItemDto[]` (same shape as `grammar.learn`'s own listing); `404` if the session
-  doesn't exist or belongs to someone else.
+  the session belongs to `userId`, then checks whether it had any wrong answer via
+  `GrammarMistakeAnalyzer.hasAnyMissedQuestion` (library questions carry no explicit rule tag of their
+  own, and a session is already scoped to one topic, so there is nothing more specific to target than
+  that topic). If there were no mistakes, returns an empty list without regenerating anything;
+  otherwise **delegates the actual generate-and-persist step to
+  `GrammarLearnService.generatePracticeForRules`** with `[topic.name]` as the target-rules list — the
+  exact same pipeline `grammar.learn`'s own "generate from attempt" endpoint uses — so the regenerated
+  content lands in the shared `grammar_practice_items` bank, not a Grammar-Library-only table. Returns
+  the learner's refreshed `GrammarPracticeItemDto[]` (same shape as `grammar.learn`'s own listing);
+  `404` if the session doesn't exist or belongs to someone else.
 
 Migration: `V17__grammar_library.sql` (`grammar_library_topics`, `grammar_library_contents`,
 `grammar_library_questions`, `grammar_topic_progress`, `grammar_library_sessions`,

@@ -142,14 +142,18 @@ sequenceDiagram
         Svc-->>Ctrl: BusinessException.notFound -> 404
     else owned by userId
         Svc->>SMapper: findAnswersBySessionId(sessionId)
-        Svc->>Analyzer: extractMissedRulesFromSession(session.questionsJson, answers)
-        Note over Analyzer: library questions carry no explicit targetRule of their own<br/>(a session is scoped to one topic) - each wrong question's own<br/>prompt is used as the best available per-question tag
-        Analyzer-->>Svc: distinct prompt[] of every wrong answer
-        Svc->>TMapper: findById(session.topicId)
-        TMapper-->>Svc: GrammarLibraryTopic{level}
-        Svc->>LearnSvc: generatePracticeForRules(userId, missedPrompts, topic.level, examType=null)
-        Note over LearnSvc: same generate-and-persist step grammar.learn's own<br/>generatePracticeFromAttempt uses - see grammar-learn.md section 3<br/>(generator.generate -> insertItem into grammar_practice_items -> listItems)
-        LearnSvc-->>Svc: List<GrammarPracticeItemDto> (refreshed list)
+        Svc->>Analyzer: hasAnyMissedQuestion(session.questionsJson, answers)
+        Note over Analyzer: library questions carry no explicit targetRule of their own,<br/>and a session is scoped to one topic already, so there is no<br/>per-question rule to diff out - this only answers yes/no
+        Analyzer-->>Svc: boolean hasMistakes
+        alt no mistakes
+            Svc-->>Ctrl: empty list (nothing to regenerate)
+        else at least one wrong answer
+            Svc->>TMapper: findById(session.topicId)
+            TMapper-->>Svc: GrammarLibraryTopic{name, level}
+            Svc->>LearnSvc: generatePracticeForRules(userId, [topic.name], topic.level, examType=null)
+            Note over LearnSvc: same generate-and-persist step grammar.learn's own<br/>generatePracticeFromAttempt uses - see grammar-learn.md section 3<br/>(generator.generate -> insertItem into grammar_practice_items -> listItems)
+            LearnSvc-->>Svc: List<GrammarPracticeItemDto> (refreshed list)
+        end
         Svc-->>Ctrl: List<GrammarPracticeItemDto>
         Ctrl-->>Caller: 200 ApiResponse
     end

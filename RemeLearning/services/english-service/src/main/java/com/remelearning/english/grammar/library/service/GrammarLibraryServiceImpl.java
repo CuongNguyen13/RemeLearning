@@ -212,12 +212,14 @@ public class GrammarLibraryServiceImpl implements GrammarLibraryService {
 	}
 
 	// Generates AI practice targeted at one past library session's missed questions: verifies the
-	// session belongs to this learner, diffs its stored session questions against the stored answers
-	// via the pure GrammarMistakeAnalyzer to find every missed "rule" (a library question's own
-	// prompt, since library questions carry no explicit rule tag of their own), then delegates the
-	// actual generate-and-persist step to GrammarLearnService.generatePracticeForRules so the
-	// regenerated content lands in the exact same grammar_practice_items bank the learn flow uses -
-	// there is only one AI-practice destination per domain.
+	// session belongs to this learner, then checks (via the pure GrammarMistakeAnalyzer) whether the
+	// session had any wrong answer at all. A Grammar Library session is scoped to exactly one topic
+	// (one grammar rule concept) and its questions carry no per-question rule tag of their own, so
+	// there is nothing more specific to target than that topic itself - every miss in the session
+	// means the SAME topic's rule, so the topic's name is the target-rules entry fed into
+	// GrammarLearnService.generatePracticeForRules (landing in the exact same grammar_practice_items
+	// bank the learn flow uses - there is only one AI-practice destination per domain). No mistakes
+	// means nothing to regenerate, mirroring finishSession's all-correct -> no-retry-session path.
 	@Override
 	@Transactional
 	public List<GrammarPracticeItemDto> generatePracticeFromSession(String userId, Long sessionId) {
@@ -225,10 +227,13 @@ public class GrammarLibraryServiceImpl implements GrammarLibraryService {
 		if (session == null || !session.getUserId().equals(userId)) {
 			throw BusinessException.notFound("Grammar library session not found: id=" + sessionId);
 		}
-		List<String> missedRules = GrammarMistakeAnalyzer.extractMissedRulesFromSession(
+		boolean hasMistakes = GrammarMistakeAnalyzer.hasAnyMissedQuestion(
 				session.getQuestionsJson(), sessionMapper.findAnswersBySessionId(sessionId));
+		if (!hasMistakes) {
+			return List.of();
+		}
 		GrammarLibraryTopic topic = requireTopic(session.getTopicId());
-		return grammarLearnService.generatePracticeForRules(userId, missedRules, topic.getLevel(), null);
+		return grammarLearnService.generatePracticeForRules(userId, List.of(topic.getName()), topic.getLevel(), null);
 	}
 
 	// --- helpers ---

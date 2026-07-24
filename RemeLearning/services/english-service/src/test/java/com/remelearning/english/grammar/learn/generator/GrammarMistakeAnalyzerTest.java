@@ -59,20 +59,20 @@ class GrammarMistakeAnalyzerTest {
 	}
 
 	@Test
-	void extractMissedRulesFromSessionReturnsEmptyWhenAllAnswersCorrect() {
+	void hasAnyMissedQuestionReturnsFalseWhenAllAnswersCorrect() {
 		String questionsJson = toJson(List.of(
 				GrammarLibrarySessionQuestion.builder().questionRef("q-1").type(GrammarQuestionType.MCQ)
 						.prompt("She ___ every day.").answer("works").build()));
 		List<GrammarLibrarySessionAnswer> answers = List.of(
 				GrammarLibrarySessionAnswer.builder().questionRef("q-1").submittedAnswer("works").correct(true).build());
 
-		List<String> missed = GrammarMistakeAnalyzer.extractMissedRulesFromSession(questionsJson, answers);
+		boolean hasMistakes = GrammarMistakeAnalyzer.hasAnyMissedQuestion(questionsJson, answers);
 
-		assertThat(missed).isEmpty();
+		assertThat(hasMistakes).isFalse();
 	}
 
 	@Test
-	void extractMissedRulesFromSessionReturnsTagsOfWrongAnswers() {
+	void hasAnyMissedQuestionReturnsTrueWhenAtLeastOneAnswerIsWrong() {
 		String questionsJson = toJson(List.of(
 				GrammarLibrarySessionQuestion.builder().questionRef("q-1").type(GrammarQuestionType.MCQ)
 						.prompt("She ___ every day.").answer("works").build(),
@@ -82,23 +82,22 @@ class GrammarMistakeAnalyzerTest {
 				GrammarLibrarySessionAnswer.builder().questionRef("q-1").submittedAnswer("work").correct(false).build(),
 				GrammarLibrarySessionAnswer.builder().questionRef("q-2").submittedAnswer("went").correct(true).build());
 
-		List<String> missed = GrammarMistakeAnalyzer.extractMissedRulesFromSession(questionsJson, answers);
+		boolean hasMistakes = GrammarMistakeAnalyzer.hasAnyMissedQuestion(questionsJson, answers);
 
-		assertThat(missed).containsExactly("She ___ every day.");
+		assertThat(hasMistakes).isTrue();
 	}
 
 	@Test
-	void extractMissedRulesFromSessionDeduplicatesTheSameQuestionAnsweredWrongTwice() {
+	void hasAnyMissedQuestionIgnoresAnswersForQuestionRefsNotInTheSession() {
 		String questionsJson = toJson(List.of(
 				GrammarLibrarySessionQuestion.builder().questionRef("q-1").type(GrammarQuestionType.MCQ)
 						.prompt("She ___ every day.").answer("works").build()));
 		List<GrammarLibrarySessionAnswer> answers = List.of(
-				GrammarLibrarySessionAnswer.builder().questionRef("q-1").submittedAnswer("work").correct(false).build(),
-				GrammarLibrarySessionAnswer.builder().questionRef("q-1").submittedAnswer("working").correct(false).build());
+				GrammarLibrarySessionAnswer.builder().questionRef("q-unknown").submittedAnswer("work").correct(false).build());
 
-		List<String> missed = GrammarMistakeAnalyzer.extractMissedRulesFromSession(questionsJson, answers);
+		boolean hasMistakes = GrammarMistakeAnalyzer.hasAnyMissedQuestion(questionsJson, answers);
 
-		assertThat(missed).containsExactly("She ___ every day.");
+		assertThat(hasMistakes).isFalse();
 	}
 
 	private String toJson(Object value) {

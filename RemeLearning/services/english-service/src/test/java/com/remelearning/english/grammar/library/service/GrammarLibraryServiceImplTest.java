@@ -228,7 +228,7 @@ class GrammarLibraryServiceImplTest {
 	}
 
 	@Test
-	void generatePracticeFromSessionDelegatesMissedPromptsToGrammarLearnService() {
+	void generatePracticeFromSessionDelegatesTopicNameToGrammarLearnServiceWhenSomeAnswersAreWrong() {
 		GrammarLibrarySession session = GrammarLibrarySession.builder()
 				.id(300L).userId("user-1").topicId(1L).status(GrammarSessionStatus.COMPLETED)
 				.questionsJson(toJson(List.of(GrammarLibrarySessionQuestion.builder()
@@ -239,13 +239,31 @@ class GrammarLibraryServiceImplTest {
 				GrammarLibrarySessionAnswer.builder().sessionId(300L).questionRef("q-5").submittedAnswer("work").correct(false).build()));
 		when(topicMapper.findById(1L)).thenReturn(topic());
 		List<GrammarPracticeItemDto> refreshed = List.of(GrammarPracticeItemDto.builder().practiceItemId(40L).build());
-		when(grammarLearnService.generatePracticeForRules("user-1", List.of("She ___ every day."), "beginner", null))
+		when(grammarLearnService.generatePracticeForRules("user-1", List.of("Present Simple"), "beginner", null))
 				.thenReturn(refreshed);
 
 		List<GrammarPracticeItemDto> result = service.generatePracticeFromSession("user-1", 300L);
 
 		assertThat(result).isEqualTo(refreshed);
-		verify(grammarLearnService).generatePracticeForRules("user-1", List.of("She ___ every day."), "beginner", null);
+		verify(grammarLearnService).generatePracticeForRules("user-1", List.of("Present Simple"), "beginner", null);
+	}
+
+	@Test
+	void generatePracticeFromSessionReturnsEmptyWithoutCallingGeneratorWhenAllAnswersCorrect() {
+		GrammarLibrarySession session = GrammarLibrarySession.builder()
+				.id(300L).userId("user-1").topicId(1L).status(GrammarSessionStatus.COMPLETED)
+				.questionsJson(toJson(List.of(GrammarLibrarySessionQuestion.builder()
+						.questionRef("q-5").type(GrammarQuestionType.MCQ).prompt("She ___ every day.").answer("works").build())))
+				.build();
+		when(sessionMapper.findById(300L)).thenReturn(session);
+		when(sessionMapper.findAnswersBySessionId(300L)).thenReturn(List.of(
+				GrammarLibrarySessionAnswer.builder().sessionId(300L).questionRef("q-5").submittedAnswer("works").correct(true).build()));
+
+		List<GrammarPracticeItemDto> result = service.generatePracticeFromSession("user-1", 300L);
+
+		assertThat(result).isEmpty();
+		verify(topicMapper, never()).findById(any());
+		verify(grammarLearnService, never()).generatePracticeForRules(any(), any(), any(), any());
 	}
 
 	private void simulateGeneratedSessionId(Long id) {

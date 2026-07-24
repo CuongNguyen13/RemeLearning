@@ -207,8 +207,11 @@ flowchart TD
 
         GLibHistorySessionReq["POST /.../library/{userId}/sessions/{sessionId}/ai-practice"]
         GLibOwnerCheck{"session found &amp; session.userId == userId?"}
-        GLibAnalyzeMissed["GrammarMistakeAnalyzer.extractMissedRulesFromSession(questionsJson, answers)<br/>-> distinct prompt[] of every wrong answer<br/>(library questions carry no explicit rule tag - a session is scoped to one topic)"]
-        GLibDelegate["GrammarLearnService.generatePracticeForRules(userId, missedPrompts, topic.level, examType=null)<br/>delegates to grammar.learn's own generate-and-persist pipeline (GLGenerate/GLInsertItem/GLListRefreshed)<br/>so both flows feed the same grammar_practice_items bank"]
+        GLibAnalyzeMissed["GrammarMistakeAnalyzer.hasAnyMissedQuestion(questionsJson, answers)<br/>-> boolean (library questions carry no explicit rule tag - a session is<br/>already scoped to one topic, so there is nothing per-question to diff out)"]
+        GLibHasMistakes{"any question missed?"}
+        GLibNoRegen["return empty list (nothing to regenerate)"]
+        GLibTopicLookup["GrammarLibraryTopicMapper.findById(topicId) -> topic.name, topic.level"]
+        GLibDelegate["GrammarLearnService.generatePracticeForRules(userId, [topic.name], topic.level, examType=null)<br/>delegates to grammar.learn's own generate-and-persist pipeline (GLGenerate/GLInsertItem/GLListRefreshed)<br/>so both flows feed the same grammar_practice_items bank"]
     end
 
     subgraph ListeningLibraryFlow["Listening library (package listening.library) - fixed topic catalog + AI Section (passage+audio), generated once"]
@@ -479,8 +482,11 @@ flowchart TD
     T30 --> GLibOwnerCheck
     GLibOwnerCheck -->|yes| GLibAnalyzeMissed
     T31 --> GLibAnalyzeMissed
-    T29 --> GLibAnalyzeMissed
-    GLibAnalyzeMissed --> GLibDelegate --> GLGenerate
+    GLibAnalyzeMissed --> GLibHasMistakes
+    GLibHasMistakes -->|no| GLibNoRegen
+    GLibHasMistakes -->|yes| GLibTopicLookup
+    T26 --> GLibTopicLookup
+    GLibTopicLookup --> GLibDelegate --> GLGenerate
 
     T32 --> LLibSectionReq
     LLibSectionReq --> LLibLockCheck
@@ -572,8 +578,8 @@ flowchart TD
 | `VocabAttemptResultDto` / `GrammarAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, translation}], actionAdvice[]}` (+ `translationVi` per result on `GrammarAttemptResultDto` only) | REST grading response |
 | `PracticeAttemptRequest` fed from vocabulary/grammar learn | `{itemId: "vocab:<word>"\|"grammar:<rule>", category: "vocabulary"\|"grammar", label, correct}` | one per distinct target word/rule in the submitted attempt (dedup by lower-cased label), passed straight into `PracticeService.redo(...)` - **not** a new event, reuses `PracticeFlow`'s existing scoring/dispatch |
 | `GrammarMistakeAnalyzer.extractMissedRules` output (in-memory) | `List<String>` distinct `targetRule` values | pure function over an attempt's stored `itemsJson`/`answersJson`, re-scored with the same `GrammarAttemptScorer` the original attempt used; feeds straight into `GrammarPracticeGenerator.generate(missedRules, level, examType)` for `POST /learn/grammar/history/{userId}/{attemptId}/ai-practice` |
-| `GrammarMistakeAnalyzer.extractMissedRulesFromSession` output (in-memory) | `List<String>` distinct question `prompt` values | pure function over a Grammar Library session's `questionsJson` + its answers; library questions carry no explicit rule tag of their own (a session is scoped to one topic), so each wrong question's own prompt stands in as the per-question tag; feeds into the same `GrammarPracticeGenerator.generate(...)` via `GrammarLearnService.generatePracticeForRules` |
-| `grammar_practice_items` row from a "generate from attempt/session" call | same shape as the `generate`-produced row above | both `POST /learn/grammar/history/{userId}/{attemptId}/ai-practice` and `POST /learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` insert into this same table via `GrammarLearnServiceImpl.generatePracticeForRules` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library session) the mistake came from |
+| `GrammarMistakeAnalyzer.hasAnyMissedQuestion` output (in-memory) | `boolean` | pure function over a Grammar Library session's `questionsJson` + its answers; library questions carry no explicit rule tag of their own and a session is already scoped to one topic, so there is no per-question rule to diff out - this only answers whether the session had any mistake. When `true`, the call site (`GrammarLibraryServiceImpl.generatePracticeFromSession`) builds the target-rules list itself as `List.of(topic.getName())` (the session's single topic name) and feeds that into `GrammarPracticeGenerator.generate(...)` via `GrammarLearnService.generatePracticeForRules`; when `false`, generation is skipped entirely and an empty list is returned |
+| `grammar_practice_items` row from a "generate from attempt/session" call | same shape as the `generate`-produced row above | both `POST /learn/grammar/history/{userId}/{attemptId}/ai-practice` and `POST /learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` insert into this same table via `GrammarLearnServiceImpl.generatePracticeForRules` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library session) the mistake came from; the library flow's `target_rules` is always the single-element `[topic.name]`, not per-question text |
 | `GenerateListeningPracticeRequest` | `{level?, examType?, translationLang?, focusItems?}` | REST request body |
 | `listening_practice_items` row | `{id, user_id, level?, exam_type?, topic, transcript, translation?, questions (JSON `ListeningQuestionItem[]`), storage_key?, created_at}` | one row per generated passage; audio synthesized synchronously in the same call, `storage_key` set before the row is returned |
 | `ListeningQuestionItem` | `{type: MCQ\|KEYWORD\|OPEN, skill, prompt, options?, answer, explanation}` | `skill` (e.g. "main-idea"/"detail"/"attitude"/"keyword") doubles as the weak-point label for non-`KEYWORD` questions; `options` only for `MCQ`; `answer` is the correct option (`MCQ`), expected phrase (`KEYWORD`, scored by WER), or model answer (`OPEN`, used as the LLM grading reference) |
