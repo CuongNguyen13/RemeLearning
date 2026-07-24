@@ -266,6 +266,37 @@ class GrammarLibraryServiceImplTest {
 		verify(grammarLearnService, never()).generatePracticeForRules(any(), any(), any(), any());
 	}
 
+	@Test
+	void getHistoryIncludesTopicIdForFeReopenNavigation() {
+		GrammarLibrarySession session = GrammarLibrarySession.builder()
+				.id(500L).userId("user-1").topicId(1L).sessionType(GrammarSessionType.INITIAL)
+				.correctCount(4).totalCount(5).build();
+		when(sessionMapper.findCompletedByUserIdAndTopicId("user-1", 1L)).thenReturn(List.of(session));
+
+		List<com.remelearning.english.grammar.library.dto.GrammarLibraryHistoryEntryDto> history =
+				service.getHistory("user-1", 1L);
+
+		assertThat(history).hasSize(1);
+		assertThat(history.get(0).getTopicId()).isEqualTo(1L);
+		assertThat(history.get(0).getAccuracy()).isEqualTo(0.8);
+	}
+
+	@Test
+	void getHistoryForUserReturnsSessionsAcrossAllTopics() {
+		GrammarLibrarySession sessionTopic1 = GrammarLibrarySession.builder()
+				.id(500L).userId("user-1").topicId(1L).sessionType(GrammarSessionType.INITIAL)
+				.correctCount(4).totalCount(5).build();
+		GrammarLibrarySession sessionTopic2 = GrammarLibrarySession.builder()
+				.id(501L).userId("user-1").topicId(2L).sessionType(GrammarSessionType.INITIAL)
+				.correctCount(3).totalCount(3).build();
+		when(sessionMapper.findCompletedByUserId("user-1")).thenReturn(List.of(sessionTopic1, sessionTopic2));
+
+		List<com.remelearning.english.grammar.library.dto.GrammarLibraryHistoryEntryDto> history =
+				service.getHistoryForUser("user-1");
+
+		assertThat(history).extracting("topicId").containsExactly(1L, 2L);
+	}
+
 	private void simulateGeneratedSessionId(Long id) {
 		AtomicLong holder = new AtomicLong(id);
 		org.mockito.Mockito.doAnswer(invocation -> {

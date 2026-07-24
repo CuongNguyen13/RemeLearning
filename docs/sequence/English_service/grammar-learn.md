@@ -122,6 +122,42 @@ sequenceDiagram
     end
 ```
 
+## 4. Merged history (`GET /api/v1/learn/grammar/merged-history/{userId}`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as GrammarLearnController
+    participant HSvc as GrammarHistoryServiceImpl
+    participant LearnSvc as GrammarLearnServiceImpl
+    participant LibSvc as GrammarLibraryServiceImpl
+    participant GMapper as GrammarPracticeMapper
+    participant SMapper as GrammarLibrarySessionMapper
+    participant DB as reme_english DB
+
+    Caller->>Ctrl: GET /merged-history/{userId}
+    Ctrl->>HSvc: getMergedHistory(userId)
+    HSvc->>LearnSvc: getHistory(userId)
+    LearnSvc->>GMapper: findHistoryByUserId(userId)
+    GMapper->>DB: SELECT grammar_practice_attempts JOIN grammar_practice_items
+    GMapper-->>LearnSvc: GrammarAttemptHistoryRow[]
+    LearnSvc-->>HSvc: GrammarAttemptHistoryEntryDto[]
+    HSvc->>LibSvc: getHistoryForUser(userId)
+    LibSvc->>SMapper: findCompletedByUserId(userId) - all topics, not filtered by topicId
+    SMapper->>DB: SELECT grammar_library_sessions WHERE user_id=? AND status='COMPLETED'
+    SMapper-->>LibSvc: GrammarLibrarySession[]
+    LibSvc-->>HSvc: GrammarLibraryHistoryEntryDto[] (each carries topicId)
+    HSvc->>HSvc: normalize both into GrammarHistoryEntryDto{source, attemptOrSessionId, completedAt, score, topicId?}<br/>merge + sort descending by completedAt
+    HSvc-->>Ctrl: GrammarHistoryEntryDto[]
+    Ctrl-->>Caller: 200 ApiResponse
+```
+
+Note: `GrammarHistoryServiceImpl` is a standalone service, not folded into either
+`GrammarLearnServiceImpl` or `GrammarLibraryServiceImpl` - `GrammarLibraryServiceImpl` already depends
+on `GrammarLearnService` (for `generatePracticeFromSession`'s delegation, section 3), so a reverse
+dependency from `GrammarLearnServiceImpl` back to `GrammarLibraryService` would form a circular bean
+dependency. `GrammarHistoryServiceImpl` depends on both interfaces one level up instead.
+
 ## External calls
 
 | # | Call | From -> To | Notes |

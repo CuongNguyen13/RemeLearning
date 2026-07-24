@@ -21,6 +21,9 @@ public interface GrammarLibrarySessionMapper {
 	/** Completed sessions for a learner's topic, newest first. */
 	List<GrammarLibrarySession> findCompletedByUserIdAndTopicId(@Param("userId") String userId, @Param("topicId") Long topicId);
 
+	/** Completed sessions for a learner across every topic, newest first - used by the merged history endpoint. */
+	List<GrammarLibrarySession> findCompletedByUserId(@Param("userId") String userId);
+
 	/** Inserts one graded in-session answer; the generated id is written back into {@code answer.id}. */
 	void insertAnswer(GrammarLibrarySessionAnswer answer);
 

@@ -971,6 +971,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseError"
 
+  /api/v1/learn/grammar/merged-history/{userId}:
+    get:
+      tags: [Grammar Learn]
+      summary: >
+        A learner's merged grammar history: "học thường" attempts + Thư viện sessions combined into
+        one time-sorted list, each tagged by source (LEARN or LIBRARY)
+      operationId: getGrammarMergedHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarHistoryEntryList"
+
   /api/v1/learn/grammar/library/{userId}/topics:
     get:
       tags: [Grammar Library]
@@ -2825,6 +2845,7 @@ components:
       type: object
       properties:
         sessionId: { type: integer, format: int64 }
+        topicId: { type: integer, format: int64 }
         sessionType: { type: string, enum: [INITIAL, RETRY] }
         correctCount: { type: integer }
         totalCount: { type: integer }
@@ -2837,6 +2858,25 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: "#/components/schemas/GrammarLibraryHistoryEntry" } }
+
+    GrammarHistoryEntry:
+      type: object
+      description: >
+        One row in the merged grammar history list - either a "học thường" (learn) attempt or a
+        "Thư viện" (library) session, normalized to one shape and tagged by source.
+      properties:
+        source: { type: string, enum: [LEARN, LIBRARY] }
+        attemptOrSessionId: { type: integer, format: int64 }
+        completedAt: { type: string, format: date-time, nullable: true }
+        score: { type: number, format: double, nullable: true }
+        topicId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows - the FE's \"Làm lại\" reopen-topic navigation target." }
+
+    ApiResponseGrammarHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/GrammarHistoryEntry" } }
 
     ListeningLibraryTopic:
       type: object

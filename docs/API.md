@@ -746,8 +746,9 @@ session vào pipeline weak-point. Nếu còn câu sai → sinh một session `RE
 
 Lịch sử các session đã hoàn thành (`INITIAL`/`RETRY`) của learner cho một chủ điểm, mới nhất trước.
 - **Path param**: `userId` (string), `topicId` (int64)
-- **Response `data`** — `GrammarLibraryHistoryEntryDto[]`: `{sessionId, sessionType, correctCount,
-  totalCount, accuracy, completedAt?}`.
+- **Response `data`** — `GrammarLibraryHistoryEntryDto[]`: `{sessionId, topicId, sessionType,
+  correctCount, totalCount, accuracy, completedAt?}`. `topicId` mới thêm (Task 6) để endpoint gộp
+  lịch sử bên dưới tái sử dụng được cho FE điều hướng "Làm lại".
 
 ### POST `/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice`
 
@@ -765,6 +766,21 @@ nằm trong bảng `grammar_practice_items`, không có bảng/luồng AI-practi
 - **Response `data`** — `GrammarPracticeItemDto[]` (giống hệt shape của `grammar.learn`'s
   `{userId}/items`, vì nội dung sinh ra nằm chung một bảng).
 - **Lỗi**: `404` nếu `sessionId` không tồn tại hoặc không thuộc về `userId`.
+
+### GET `/api/v1/learn/grammar/merged-history/{userId}`
+
+Gộp lịch sử "học thường" (`grammar.learn`'s `getHistory`) và "Thư viện" (`grammar.library`'s
+`getHistoryForUser`, session hoàn thành trên **mọi** chủ điểm chứ không lọc theo 1 `topicId`) thành
+một danh sách duy nhất, sắp xếp mới nhất trước, mỗi dòng gắn `source`. Được đặt trong một service
+riêng, `GrammarHistoryService` (package `grammar.history`), thay vì gộp vào `GrammarLearnServiceImpl`
+hay `GrammarLibraryServiceImpl` — `GrammarLibraryServiceImpl` đã phụ thuộc vào `GrammarLearnService`
+(cho `generatePracticeFromSession`), nên nếu `GrammarLearnServiceImpl` phụ thuộc ngược lại
+`GrammarLibraryService` sẽ tạo circular bean dependency; `GrammarHistoryService` phụ thuộc cả hai
+interface một tầng phía trên nên tránh được vòng lặp.
+- **Path param**: `userId` (string)
+- **Response `data`** — `GrammarHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"), attemptOrSessionId,
+  completedAt?, score?, topicId?}`. `topicId` chỉ có giá trị khi `source = "LIBRARY"` (mục tiêu điều
+  hướng "Làm lại" của FE); dòng `LEARN` luôn để `null`.
 
 ### Listening Library — catalog chủ điểm nghe-hiểu, Section AI (đoạn văn + audio) + mở khóa tuần tự (package `listening.library`)
 
@@ -2075,6 +2091,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/sessions/{sessionId}/finish` | hoàn thành session: PASSED + mở khóa chủ điểm kế tiếp, hoặc trả session RETRY cho câu sai; `409` |
 | english-service (grammar.library) | REST | GET | `/api/v1/learn/grammar/library/{userId}/topics/{topicId}/history` | lịch sử session đã hoàn thành của 1 chủ điểm |
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` | sinh bộ đề nhắm vào câu sai của 1 session, ủy quyền lưu cho `GrammarLearnService.generatePracticeForRules` (cùng bảng `grammar_practice_items`); `404` |
+| english-service (grammar.history) | REST | GET | `/api/v1/learn/grammar/merged-history/{userId}` | gộp lịch sử học thường + Thư viện thành 1 danh sách theo thời gian, gắn `source` |
 | english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: đoạn văn + audio); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers` | chấm toàn bộ câu trả lời 1 Section; `PASSED` (≥0.7) mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |

@@ -30,6 +30,14 @@
         ORDER BY completed_at DESC
     </select>
 
+    <select id="findCompletedByUserId" resultType="com.remelearning.english.grammar.library.domain.GrammarLibrarySession">
+        SELECT id, user_id, topic_id, session_type, questions_json, status, correct_count, total_count,
+               started_at, completed_at
+        FROM grammar_library_sessions
+        WHERE user_id = #{userId} AND status = 'COMPLETED'
+        ORDER BY completed_at DESC
+    </select>
+
     <insert id="insertAnswer" parameterType="com.remelearning.english.grammar.library.domain.GrammarLibrarySessionAnswer"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO grammar_library_session_answers (session_id, question_ref, submitted_answer, correct)

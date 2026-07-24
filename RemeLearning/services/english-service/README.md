@@ -129,7 +129,11 @@ Per-skill notes:
   attempt doesn't exist or belongs to someone else. The persist-and-refresh step
   (`generatePracticeForRules`) is also reused by Grammar Library's own "generate from session"
   endpoint below — one shared AI-practice bank per domain, regardless of which flow the mistake
-  came from.
+  came from. `GET /merged-history/{userId}` combines this skill's own attempt history with Grammar
+  Library's session history (see below) into one time-sorted list tagged by `source`
+  (`"LEARN"`/`"LIBRARY"`), built by a new standalone `GrammarHistoryService` rather than either
+  existing service — `GrammarLibraryServiceImpl` already depends on `GrammarLearnService` (for
+  `generatePracticeFromSession`), so the reverse dependency would create a circular bean.
 - **Listening** — a new domain, no pre-existing table to fall back to. Generation
   (`POST /api/v1/learn/listening/{userId}/generate`) produces a Gemini transcript + questions, then
   synthesizes multi-speaker audio via `DialogueAudioSynthesizer`; the transcript/translation and audio
@@ -210,7 +214,9 @@ Six endpoints under `GrammarLibraryController` (`/api/v1/learn/grammar/library`)
   + unlocks the next topic by `sequenceOrder`, or returns a fresh `RETRY` session covering only the
   questions still wrong (each replaced by one newly AI-generated question of the same type, stored
   inline in the session — never added to the shared question pool).
-- `GET /{userId}/topics/{topicId}/history` — the learner's completed sessions for a topic.
+- `GET /{userId}/topics/{topicId}/history` — the learner's completed sessions for a topic
+  (`GrammarLibraryHistoryEntryDto` now also carries `topicId`, so the same shape works for the
+  cross-topic merged-history endpoint above).
 - `POST /{userId}/sessions/{sessionId}/ai-practice` — "Luyện tập với AI" from a past session: verifies
   the session belongs to `userId`, then checks whether it had any wrong answer via
   `GrammarMistakeAnalyzer.hasAnyMissedQuestion` (library questions carry no explicit rule tag of their

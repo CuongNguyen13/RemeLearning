@@ -10,6 +10,7 @@ import java.time.Instant;
 @Builder
 public class GrammarLibraryHistoryEntryDto {
 	private Long sessionId;
+	private Long topicId;
 	private GrammarSessionType sessionType;
 	private int correctCount;
 	private int totalCount;

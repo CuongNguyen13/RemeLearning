@@ -1,6 +1,8 @@
 package com.remelearning.english.grammar.learn.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.grammar.history.dto.GrammarHistoryEntryDto;
+import com.remelearning.english.grammar.history.service.GrammarHistoryService;
 import com.remelearning.english.grammar.learn.dto.GenerateGrammarPracticeRequest;
 import com.remelearning.english.grammar.learn.dto.SubmitGrammarAttemptRequest;
 import com.remelearning.english.grammar.learn.dto.GrammarAttemptDetailDto;
@@ -28,6 +30,7 @@ import java.util.List;
 public class GrammarLearnController {
 
 	private final GrammarLearnService grammarLearnService;
+	private final GrammarHistoryService grammarHistoryService;
 
 	@Operation(summary = "Generate one AI grammar practice set, targeting the given focus rules or (if omitted) the learner's own top weak points")
 	@PostMapping("/{userId}/generate")
@@ -71,5 +74,11 @@ public class GrammarLearnController {
 	public ApiResponse<List<GrammarPracticeItemDto>> generateFromAttempt(
 			@PathVariable String userId, @PathVariable Long attemptId) {
 		return ApiResponse.ok(grammarLearnService.generatePracticeFromAttempt(userId, attemptId));
+	}
+
+	@Operation(summary = "A learner's merged grammar history: \"học thường\" attempts + Thư viện sessions in one time-sorted list, tagged by source")
+	@GetMapping("/merged-history/{userId}")
+	public ApiResponse<List<GrammarHistoryEntryDto>> getMergedHistory(@PathVariable String userId) {
+		return ApiResponse.ok(grammarHistoryService.getMergedHistory(userId));
 	}
 }

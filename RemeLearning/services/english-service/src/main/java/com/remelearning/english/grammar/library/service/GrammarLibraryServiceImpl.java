@@ -202,13 +202,26 @@ public class GrammarLibraryServiceImpl implements GrammarLibraryService {
 	@Override
 	public List<GrammarLibraryHistoryEntryDto> getHistory(String userId, Long topicId) {
 		return sessionMapper.findCompletedByUserIdAndTopicId(userId, topicId).stream()
-				.map(session -> GrammarLibraryHistoryEntryDto.builder()
-						.sessionId(session.getId()).sessionType(session.getSessionType())
-						.correctCount(session.getCorrectCount()).totalCount(session.getTotalCount())
-						.accuracy(session.getTotalCount() == 0 ? 0.0 : (double) session.getCorrectCount() / session.getTotalCount())
-						.completedAt(session.getCompletedAt())
-						.build())
+				.map(this::toHistoryEntryDto)
 				.toList();
+	}
+
+	// All of a learner's completed library sessions across every topic, newest first - the library
+	// side of the merged (learn + library) history endpoint exposed via GrammarHistoryService.
+	@Override
+	public List<GrammarLibraryHistoryEntryDto> getHistoryForUser(String userId) {
+		return sessionMapper.findCompletedByUserId(userId).stream()
+				.map(this::toHistoryEntryDto)
+				.toList();
+	}
+
+	private GrammarLibraryHistoryEntryDto toHistoryEntryDto(GrammarLibrarySession session) {
+		return GrammarLibraryHistoryEntryDto.builder()
+				.sessionId(session.getId()).topicId(session.getTopicId()).sessionType(session.getSessionType())
+				.correctCount(session.getCorrectCount()).totalCount(session.getTotalCount())
+				.accuracy(session.getTotalCount() == 0 ? 0.0 : (double) session.getCorrectCount() / session.getTotalCount())
+				.completedAt(session.getCompletedAt())
+				.build();
 	}
 
 	// Generates AI practice targeted at one past library session's missed questions: verifies the

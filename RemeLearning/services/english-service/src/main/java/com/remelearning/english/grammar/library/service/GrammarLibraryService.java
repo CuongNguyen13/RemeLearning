@@ -31,6 +31,9 @@ public interface GrammarLibraryService {
 	/** A learner's completed sessions for one topic, newest first. */
 	List<GrammarLibraryHistoryEntryDto> getHistory(String userId, Long topicId);
 
+	/** A learner's completed sessions across every topic, newest first - the library-side feed for the merged (learn + library) history endpoint. */
+	List<GrammarLibraryHistoryEntryDto> getHistoryForUser(String userId);
+
 	/**
 	 * Generates one new AI practice set targeting a past session's missed questions (the "Luyện tập
 	 * với AI" action from a library session), persisting it into the same
