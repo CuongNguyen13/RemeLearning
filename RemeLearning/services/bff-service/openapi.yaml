@@ -1002,6 +1002,86 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseGrammarLibraryHistoryEntryList"
 
+  /api/v1/learners/{userId}/learn/grammar/history/{attemptId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at one specific past grammar attempt's mistakes (the "Luyện
+        tập với AI" history action); thin proxy to english-service
+      operationId: generateGrammarPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/grammar/library/sessions/{sessionId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at one past grammar-library session's missed questions (the
+        "Luyện tập với AI" action); thin proxy to english-service
+      operationId: generateGrammarPracticeFromSession
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItemList"
+        "404":
+          description: Session not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/grammar/merged-history:
+    get:
+      tags: [Learners]
+      summary: >
+        A learner's merged grammar history: "học thường" attempts + Thư viện sessions in one
+        time-sorted list, tagged by source; thin proxy to english-service
+      operationId: getGrammarMergedHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarHistoryEntryList"
+
   /api/v1/learners/{userId}/learn/listening/generate:
     post:
       tags: [Learners]
@@ -1250,6 +1330,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseListeningLibraryHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/listening/history/{attemptId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at one specific past listening attempt's mistakes (the
+        "Luyện tập với AI" history action); thin proxy to english-service
+      operationId: generateListeningPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at one listening-library section's missed questions (the
+        "Luyện tập với AI" action); thin proxy to english-service
+      operationId: generateListeningPracticeFromSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItemList"
+        "404":
+          description: No completed attempt on this section for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/listening/merged-history:
+    get:
+      tags: [Learners]
+      summary: >
+        A learner's merged listening history: "học thường" attempts + Thư viện section attempts in
+        one time-sorted list, tagged by source; thin proxy to english-service
+      operationId: getListeningMergedHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningHistoryEntryList"
 
   /api/v1/learners/{userId}/learn/speaking/generate:
     post:
@@ -1535,6 +1695,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingLibraryHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/speaking/history/{attemptId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at one specific past speaking attempt's mispronounced
+        phonemes (the "Luyện tập với AI" history action); thin proxy to english-service
+      operationId: generateSpeakingPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate AI practice targeted at this learner's own mispronunciations across every
+        sentence attempt on one speaking-library section (the "Luyện tập với AI" action); thin
+        proxy to english-service
+      operationId: generateSpeakingPracticeFromSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingPracticeItemList"
+        "404":
+          description: No attempts on this section for this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
+  /api/v1/learners/{userId}/learn/speaking/merged-history:
+    get:
+      tags: [Learners]
+      summary: >
+        A learner's merged speaking history: "học thường" attempts + Thư viện sentence attempts in
+        one time-sorted list, tagged by source; thin proxy to english-service
+      operationId: getSpeakingMergedHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSpeakingHistoryEntryList"
 
 components:
   schemas:
@@ -2515,6 +2756,7 @@ components:
       type: object
       properties:
         sessionId: { type: integer, format: int64 }
+        topicId: { type: integer, format: int64 }
         sessionType: { type: string, enum: [INITIAL, RETRY] }
         correctCount: { type: integer }
         totalCount: { type: integer }
@@ -2962,3 +3204,63 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: "#/components/schemas/SpeakingLibraryHistoryEntry" } }
+
+    GrammarHistoryEntry:
+      type: object
+      description: >
+        One row in the merged grammar history list - either a "học thường" (learn) attempt or a
+        "Thư viện" (library) session, normalized to one shape and tagged by source. Proxied
+        verbatim from english-service.
+      properties:
+        source: { type: string, enum: [LEARN, LIBRARY] }
+        attemptOrSessionId: { type: integer, format: int64 }
+        completedAt: { type: string, format: date-time, nullable: true }
+        score: { type: number, format: double, nullable: true }
+        topicId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows." }
+
+    ApiResponseGrammarHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/GrammarHistoryEntry" } }
+
+    ListeningHistoryEntry:
+      type: object
+      description: >
+        One row in the merged listening history list - either a "học thường" (learn) attempt or a
+        "Thư viện" (library) section attempt, normalized to one shape and tagged by source.
+        Proxied verbatim from english-service.
+      properties:
+        source: { type: string, enum: [LEARN, LIBRARY] }
+        attemptOrSessionId: { type: integer, format: int64 }
+        completedAt: { type: string, format: date-time, nullable: true }
+        score: { type: number, format: double, nullable: true }
+        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows." }
+
+    ApiResponseListeningHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/ListeningHistoryEntry" } }
+
+    SpeakingHistoryEntry:
+      type: object
+      description: >
+        One row in the merged speaking history list - either a "học thường" (learn) attempt or a
+        "Thư viện" (library) sentence attempt, normalized to one shape and tagged by source.
+        Proxied verbatim from english-service.
+      properties:
+        source: { type: string, enum: [LEARN, LIBRARY] }
+        attemptOrSessionId: { type: integer, format: int64 }
+        completedAt: { type: string, format: date-time, nullable: true }
+        score: { type: number, format: double, nullable: true }
+        sectionId: { type: integer, format: int64, nullable: true, description: "Only populated for LIBRARY rows." }
+
+    ApiResponseSpeakingHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: "#/components/schemas/SpeakingHistoryEntry" } }

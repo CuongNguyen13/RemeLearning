@@ -1,13 +1,19 @@
 package com.remelearning.bff.client;
 
 import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
+import com.remelearning.bff.dto.GrammarHistoryEntryDto;
+import com.remelearning.bff.dto.GrammarPracticeItemDto;
 import com.remelearning.bff.dto.ListeningAnswerItemDto;
+import com.remelearning.bff.dto.ListeningHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibrarySectionDto;
 import com.remelearning.bff.dto.ListeningLibraryTopicDto;
+import com.remelearning.bff.dto.ListeningPracticeItemDto;
 import com.remelearning.bff.dto.SentenceAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibrarySectionDto;
+import com.remelearning.bff.dto.SpeakingPracticeItemDto;
 import com.remelearning.bff.dto.SubmitListeningAnswersRequest;
 import com.remelearning.bff.dto.SubmitListeningAnswersResponse;
 import org.junit.jupiter.api.Test;
@@ -210,6 +216,140 @@ class EnglishServiceClientTest {
 					SpeakingLibraryHistoryEntryDto entry = history.get(0);
 					assertThat(entry.getSentenceId()).isEqualTo(1L);
 					assertThat(entry.getPhonemeScore()).isEqualTo(0.9);
+				})
+				.verifyComplete();
+	}
+
+	@Test
+	void generateGrammarPracticeFromAttemptPostsToHistoryAiPracticeRouteAndDecodesItemList() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":50,\"level\":\"B1\",\"topic\":\"Present Simple\"}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/grammar/history/user-1/10/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateGrammarPracticeFromAttempt("user-1", 10L))
+				.assertNext((List<GrammarPracticeItemDto> items) -> {
+					assertThat(items).hasSize(1);
+					assertThat(items.get(0).getPracticeItemId()).isEqualTo(50L);
+				})
+				.verifyComplete();
+	}
+
+	@Test
+	void generateGrammarPracticeFromSessionPostsToLibraryAiPracticeRoute() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":51,\"level\":\"B1\"}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/grammar/library/user-1/sessions/300/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateGrammarPracticeFromSession("user-1", 300L))
+				.assertNext(items -> assertThat(items).hasSize(1))
+				.verifyComplete();
+	}
+
+	@Test
+	void getGrammarMergedHistoryDecodesSourceTaggedEntries() {
+		String json = "{\"success\":true,\"data\":[{\"source\":\"LEARN\",\"attemptOrSessionId\":10,\"score\":0.9},"
+				+ "{\"source\":\"LIBRARY\",\"attemptOrSessionId\":300,\"topicId\":1,\"score\":1.0}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.GET);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/grammar/merged-history/user-1");
+		}, json);
+
+		StepVerifier.create(client.getGrammarMergedHistory("user-1"))
+				.assertNext((List<GrammarHistoryEntryDto> history) -> {
+					assertThat(history).hasSize(2);
+					assertThat(history.get(0).getSource()).isEqualTo("LEARN");
+					assertThat(history.get(1).getSource()).isEqualTo("LIBRARY");
+					assertThat(history.get(1).getTopicId()).isEqualTo(1L);
+				})
+				.verifyComplete();
+	}
+
+	@Test
+	void generateListeningPracticeFromAttemptPostsToHistoryAiPracticeRoute() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":60}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/listening/history/user-1/20/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateListeningPracticeFromAttempt("user-1", 20L))
+				.assertNext((List<ListeningPracticeItemDto> items) -> assertThat(items).hasSize(1))
+				.verifyComplete();
+	}
+
+	@Test
+	void generateListeningPracticeFromSectionPostsToLibraryAiPracticeRoute() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":61}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/listening/library/user-1/sections/100/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateListeningPracticeFromSection("user-1", 100L))
+				.assertNext(items -> assertThat(items).hasSize(1))
+				.verifyComplete();
+	}
+
+	@Test
+	void getListeningMergedHistoryDecodesSourceTaggedEntries() {
+		String json = "{\"success\":true,\"data\":[{\"source\":\"LEARN\",\"attemptOrSessionId\":20,\"score\":0.7},"
+				+ "{\"source\":\"LIBRARY\",\"attemptOrSessionId\":9,\"sectionId\":100,\"score\":0.8}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.GET);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/listening/merged-history/user-1");
+		}, json);
+
+		StepVerifier.create(client.getListeningMergedHistory("user-1"))
+				.assertNext((List<ListeningHistoryEntryDto> history) -> {
+					assertThat(history).hasSize(2);
+					assertThat(history.get(1).getSectionId()).isEqualTo(100L);
+				})
+				.verifyComplete();
+	}
+
+	@Test
+	void generateSpeakingPracticeFromAttemptPostsToHistoryAiPracticeRoute() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":70}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/speaking/history/user-1/30/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateSpeakingPracticeFromAttempt("user-1", 30L))
+				.assertNext((List<SpeakingPracticeItemDto> items) -> assertThat(items).hasSize(1))
+				.verifyComplete();
+	}
+
+	@Test
+	void generateSpeakingPracticeFromSectionPostsToLibraryAiPracticeRoute() {
+		String json = "{\"success\":true,\"data\":[{\"practiceItemId\":71}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/speaking/library/user-1/sections/200/ai-practice");
+		}, json);
+
+		StepVerifier.create(client.generateSpeakingPracticeFromSection("user-1", 200L))
+				.assertNext(items -> assertThat(items).hasSize(1))
+				.verifyComplete();
+	}
+
+	@Test
+	void getSpeakingMergedHistoryDecodesSourceTaggedEntries() {
+		String json = "{\"success\":true,\"data\":[{\"source\":\"LEARN\",\"attemptOrSessionId\":30,\"score\":0.6},"
+				+ "{\"source\":\"LIBRARY\",\"attemptOrSessionId\":11,\"sectionId\":200,\"score\":0.9}]}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.GET);
+			assertThat(request.url().toString()).endsWith("/api/v1/learn/speaking/merged-history/user-1");
+		}, json);
+
+		StepVerifier.create(client.getSpeakingMergedHistory("user-1"))
+				.assertNext((List<SpeakingHistoryEntryDto> history) -> {
+					assertThat(history).hasSize(2);
+					assertThat(history.get(1).getSectionId()).isEqualTo(200L);
 				})
 				.verifyComplete();
 	}

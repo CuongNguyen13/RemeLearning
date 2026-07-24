@@ -22,6 +22,7 @@ import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarAttemptResultDto;
 import com.remelearning.bff.dto.GrammarLibraryAnswerResultDto;
 import com.remelearning.bff.dto.GrammarLibraryContentDto;
+import com.remelearning.bff.dto.GrammarHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarLibraryTopicDto;
 import com.remelearning.bff.dto.GrammarPracticeItemDto;
@@ -29,6 +30,7 @@ import com.remelearning.bff.dto.GenerateListeningPracticeRequestDto;
 import com.remelearning.bff.dto.ListeningAttemptDetailDto;
 import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibrarySectionDto;
 import com.remelearning.bff.dto.ListeningLibraryTopicDto;
@@ -38,6 +40,7 @@ import com.remelearning.bff.dto.SentenceAttemptResultDto;
 import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
 import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibrarySectionDto;
 import com.remelearning.bff.dto.SpeakingLibraryTopicDto;
@@ -539,6 +542,36 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch grammar attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
 	}
 
+	/** Generates AI practice targeted at one specific past grammar attempt's mistakes (the "Luyện tập với AI" history action). */
+	public Mono<List<GrammarPracticeItemDto>> generateGrammarPracticeFromAttempt(String userId, Long attemptId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/history/{userId}/{attemptId}/ai-practice", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate grammar practice from attempt for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Generates AI practice targeted at one past grammar-library session's missed questions (the "Luyện tập với AI" action). */
+	public Mono<List<GrammarPracticeItemDto>> generateGrammarPracticeFromSession(String userId, Long sessionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice", userId, sessionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate grammar practice from session for userId={}, sessionId={}", userId, sessionId, ex));
+	}
+
+	/** Fetches a learner's merged grammar history (learn attempts + library sessions in one time-sorted list, tagged by source). */
+	public Mono<List<GrammarHistoryEntryDto>> getGrammarMergedHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/grammar/merged-history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<GrammarHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get grammar merged history for userId={}", userId, ex));
+	}
+
 	/** Generates one AI listening passage (Gemini transcript+questions, Supertonic audio), targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords. */
 	public Mono<ListeningPracticeItemDto> generateListeningPractice(String userId, GenerateListeningPracticeRequestDto request) {
 		return englishServiceClient.post()
@@ -733,6 +766,36 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to get listening library history for userId={}", userId, ex));
 	}
 
+	/** Generates AI practice targeted at one specific past listening attempt's mistakes (the "Luyện tập với AI" history action). */
+	public Mono<List<ListeningPracticeItemDto>> generateListeningPracticeFromAttempt(String userId, Long attemptId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate listening practice from attempt for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Generates AI practice targeted at this learner's own mispronunciations across one listening-library section's missed questions (the "Luyện tập với AI" action). */
+	public Mono<List<ListeningPracticeItemDto>> generateListeningPracticeFromSection(String userId, Long sectionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/listening/library/{userId}/sections/{sectionId}/ai-practice", userId, sectionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate listening practice from section for userId={}, sectionId={}", userId, sectionId, ex));
+	}
+
+	/** Fetches a learner's merged listening history (learn attempts + library section attempts in one time-sorted list, tagged by source). */
+	public Mono<List<ListeningHistoryEntryDto>> getListeningMergedHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/merged-history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get listening merged history for userId={}", userId, ex));
+	}
+
 	/** Fetches every speaking-library catalog topic with this learner's own progression status (bootstraps the first topic to UNLOCKED). */
 	public Mono<List<SpeakingLibraryTopicDto>> getSpeakingLibraryTopics(String userId) {
 		return englishServiceClient.get()
@@ -790,6 +853,36 @@ public class EnglishServiceClient {
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingLibraryHistoryEntryDto>>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to get speaking library history for userId={}", userId, ex));
+	}
+
+	/** Generates AI practice targeted at one specific past speaking attempt's mispronounced phonemes (the "Luyện tập với AI" history action). */
+	public Mono<List<SpeakingPracticeItemDto>> generateSpeakingPracticeFromAttempt(String userId, Long attemptId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/history/{userId}/{attemptId}/ai-practice", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate speaking practice from attempt for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Generates AI practice targeted at this learner's own mispronunciations across every sentence attempt on one speaking-library section (the "Luyện tập với AI" action). */
+	public Mono<List<SpeakingPracticeItemDto>> generateSpeakingPracticeFromSection(String userId, Long sectionId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/speaking/library/{userId}/sections/{sectionId}/ai-practice", userId, sectionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate speaking practice from section for userId={}, sectionId={}", userId, sectionId, ex));
+	}
+
+	/** Fetches a learner's merged speaking history (learn attempts + library sentence attempts in one time-sorted list, tagged by source). */
+	public Mono<List<SpeakingHistoryEntryDto>> getSpeakingMergedHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/speaking/merged-history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to get speaking merged history for userId={}", userId, ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.

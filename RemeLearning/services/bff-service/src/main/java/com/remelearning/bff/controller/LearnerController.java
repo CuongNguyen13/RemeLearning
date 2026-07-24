@@ -21,6 +21,7 @@ import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
 import com.remelearning.bff.dto.GrammarAttemptDetailDto;
 import com.remelearning.bff.dto.GrammarAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarAttemptResultDto;
+import com.remelearning.bff.dto.GrammarHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarLibraryAnswerResultDto;
 import com.remelearning.bff.dto.GrammarLibraryContentDto;
 import com.remelearning.bff.dto.GrammarLibraryHistoryEntryDto;
@@ -31,6 +32,7 @@ import com.remelearning.bff.dto.LearnerOverviewResponse;
 import com.remelearning.bff.dto.ListeningAttemptDetailDto;
 import com.remelearning.bff.dto.ListeningAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningAttemptResultDto;
+import com.remelearning.bff.dto.ListeningHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibrarySectionDto;
 import com.remelearning.bff.dto.ListeningLibraryTopicDto;
@@ -48,6 +50,7 @@ import com.remelearning.bff.dto.GenerateSpeakingPracticeRequestDto;
 import com.remelearning.bff.dto.SpeakingAttemptDetailDto;
 import com.remelearning.bff.dto.SpeakingAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingAttemptResultDto;
+import com.remelearning.bff.dto.SpeakingHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.SpeakingLibrarySectionDto;
 import com.remelearning.bff.dto.SpeakingLibraryTopicDto;
@@ -411,6 +414,26 @@ public class LearnerController {
 		return englishServiceClient.getGrammarLibraryHistory(userId, topicId).map(ApiResponse::ok);
 	}
 
+	@Operation(summary = "Generate AI practice targeted at one specific past grammar attempt's mistakes (the \"Luyện tập với AI\" history action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/history/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<GrammarPracticeItemDto>>> generateGrammarPracticeFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.generateGrammarPracticeFromAttempt(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI practice targeted at one past grammar-library session's missed questions (the \"Luyện tập với AI\" action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/grammar/library/sessions/{sessionId}/ai-practice")
+	public Mono<ApiResponse<List<GrammarPracticeItemDto>>> generateGrammarPracticeFromSession(
+			@PathVariable String userId, @PathVariable Long sessionId) {
+		return englishServiceClient.generateGrammarPracticeFromSession(userId, sessionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's merged grammar history: \"học thường\" attempts + Thư viện sessions in one time-sorted list, tagged by source; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/grammar/merged-history")
+	public Mono<ApiResponse<List<GrammarHistoryEntryDto>>> getGrammarMergedHistory(@PathVariable String userId) {
+		return englishServiceClient.getGrammarMergedHistory(userId).map(ApiResponse::ok);
+	}
+
 	@Operation(summary = "Generate one AI listening passage, targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; thin proxy to english-service")
 	@PostMapping("/{userId}/learn/listening/generate")
 	public Mono<ApiResponse<ListeningPracticeItemDto>> generateListeningPractice(
@@ -484,6 +507,26 @@ public class LearnerController {
 	@GetMapping("/{userId}/learn/listening/library/sections/history")
 	public Mono<ApiResponse<List<ListeningLibraryHistoryEntryDto>>> getListeningLibraryHistory(@PathVariable String userId) {
 		return englishServiceClient.getListeningLibraryHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI practice targeted at one specific past listening attempt's mistakes (the \"Luyện tập với AI\" history action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/history/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<ListeningPracticeItemDto>>> generateListeningPracticeFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.generateListeningPracticeFromAttempt(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI practice targeted at one listening-library section's missed questions (the \"Luyện tập với AI\" action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/listening/library/sections/{sectionId}/ai-practice")
+	public Mono<ApiResponse<List<ListeningPracticeItemDto>>> generateListeningPracticeFromSection(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return englishServiceClient.generateListeningPracticeFromSection(userId, sectionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's merged listening history: \"học thường\" attempts + Thư viện section attempts in one time-sorted list, tagged by source; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/listening/merged-history")
+	public Mono<ApiResponse<List<ListeningHistoryEntryDto>>> getListeningMergedHistory(@PathVariable String userId) {
+		return englishServiceClient.getListeningMergedHistory(userId).map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Generate one AI speaking-practice sentence with a Supertonic sample recording, targeting the given focus words or (if omitted) the learner's own top pronunciation weak points; thin proxy to english-service")
@@ -569,5 +612,25 @@ public class LearnerController {
 	@GetMapping("/{userId}/learn/speaking/library/sections/history")
 	public Mono<ApiResponse<List<SpeakingLibraryHistoryEntryDto>>> getSpeakingLibraryHistory(@PathVariable String userId) {
 		return englishServiceClient.getSpeakingLibraryHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI practice targeted at one specific past speaking attempt's mispronounced phonemes (the \"Luyện tập với AI\" history action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/speaking/history/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<SpeakingPracticeItemDto>>> generateSpeakingPracticeFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.generateSpeakingPracticeFromAttempt(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate AI practice targeted at this learner's own mispronunciations across every sentence attempt on one speaking-library section (the \"Luyện tập với AI\" action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/speaking/library/sections/{sectionId}/ai-practice")
+	public Mono<ApiResponse<List<SpeakingPracticeItemDto>>> generateSpeakingPracticeFromSection(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return englishServiceClient.generateSpeakingPracticeFromSection(userId, sectionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's merged speaking history: \"học thường\" attempts + Thư viện sentence attempts in one time-sorted list, tagged by source; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/speaking/merged-history")
+	public Mono<ApiResponse<List<SpeakingHistoryEntryDto>>> getSpeakingMergedHistory(@PathVariable String userId) {
+		return englishServiceClient.getSpeakingMergedHistory(userId).map(ApiResponse::ok);
 	}
 }

@@ -16,7 +16,9 @@ recording-service + user-service), [weak-points.md](weak-points.md) (fan-out to 
 [recording-upload-proxy.md](recording-upload-proxy.md) (multipart streaming proxy), and
 [listening-speaking-library.md](listening-speaking-library.md) (9 thin 1:1 proxies to
 english-service's `listening.library`/`speaking.library` endpoints, including a multipart
-sentence-attempt upload). `UserController` (thin `GET`/`PATCH /api/v1/users/{userId}` proxies to
+sentence-attempt upload), and [history-retry-proxy.md](history-retry-proxy.md) (9 thin 1:1 proxies:
+grammar/listening/speaking's generate-from-attempt + generate-from-session/section + merged-history
+endpoints). `UserController` (thin `GET`/`PATCH /api/v1/users/{userId}` proxies to
 user-service) isn't broken out into its own sequence file since it's a 1:1 forward with the same
 shape as `auth-proxy.md`; likewise the `vocabulary.library`/`grammar.library` proxies aren't
 diagrammed separately (same 1:1 shape, see `docs/API.md` for their endpoint list).

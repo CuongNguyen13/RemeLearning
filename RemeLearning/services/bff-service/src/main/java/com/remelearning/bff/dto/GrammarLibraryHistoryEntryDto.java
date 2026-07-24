@@ -8,6 +8,7 @@ import java.time.Instant;
 @Data
 public class GrammarLibraryHistoryEntryDto {
 	private Long sessionId;
+	private Long topicId;
 	private String sessionType;
 	private int correctCount;
 	private int totalCount;

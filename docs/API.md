@@ -1557,6 +1557,41 @@ class riêng trong `com.remelearning.bff.dto`, field giống 1-1: `SpeakingLibra
 - **GET `/api/v1/learners/{userId}/learn/speaking/library/sections/history`** →
   `SpeakingLibraryHistoryEntryDto[]`.
 
+### History-retry proxy (BFF) — generate-from-attempt/session + merged-history (grammar/listening/speaking)
+
+Thin 1:1 proxy sang 9 endpoint mới của `english-service` (Tasks 3-8 của history-retry plan): với mỗi
+domain grammar/listening/speaking, một endpoint "sinh bài luyện từ 1 attempt học thường", một
+endpoint "sinh bài luyện từ 1 session/section Thư viện", và một endpoint gộp lịch sử (học thường +
+Thư viện). 6 endpoint generate-from-attempt/session trả về **cùng shape** DTO danh sách practice-item
+mà luồng "học thường" generate của domain đó đã trả về sẵn (`GrammarPracticeItemDto[]`/
+`ListeningPracticeItemDto[]`/`SpeakingPracticeItemDto[]`) — không cần DTO mới. Chỉ 3 endpoint gộp
+lịch sử cần DTO mới: `GrammarHistoryEntryDto`/`ListeningHistoryEntryDto`/`SpeakingHistoryEntryDto`
+(field giống 1-1 bản english-service tương ứng: `{source, attemptOrSessionId, completedAt?, score?,
+topicId?/sectionId?}`). `GrammarLibraryHistoryEntryDto` (bff) cũng có thêm field `topicId`, mirror
+thay đổi tương ứng bên english-service.
+
+- **POST `/api/v1/learners/{userId}/learn/grammar/history/{attemptId}/ai-practice`** →
+  `GrammarPracticeItemDto[]`; `404` nếu attempt không tồn tại/không thuộc `userId`.
+- **POST `/api/v1/learners/{userId}/learn/grammar/library/sessions/{sessionId}/ai-practice`** →
+  `GrammarPracticeItemDto[]`; `404` nếu session không tồn tại/không thuộc `userId`.
+- **GET `/api/v1/learners/{userId}/learn/grammar/merged-history`** → `GrammarHistoryEntryDto[]`.
+- **POST `/api/v1/learners/{userId}/learn/listening/history/{attemptId}/ai-practice`** →
+  `ListeningPracticeItemDto[]`; `404` nếu attempt không tồn tại/không thuộc `userId`.
+- **POST `/api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/ai-practice`** →
+  `ListeningPracticeItemDto[]`; `404` nếu chưa có attempt hoàn thành nào trên section đó.
+- **GET `/api/v1/learners/{userId}/learn/listening/merged-history`** → `ListeningHistoryEntryDto[]`.
+- **POST `/api/v1/learners/{userId}/learn/speaking/history/{attemptId}/ai-practice`** →
+  `SpeakingPracticeItemDto[]`; `404` nếu attempt không tồn tại/không thuộc `userId`.
+- **POST `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/ai-practice`** →
+  `SpeakingPracticeItemDto[]`; `404` nếu section chưa có attempt nào.
+- **GET `/api/v1/learners/{userId}/learn/speaking/merged-history`** → `SpeakingHistoryEntryDto[]`.
+
+Đường dẫn bff mount theo đúng convention sẵn có của controller này
+(`/{userId}/learn/<domain>/history/{attemptId}`, `/{userId}/learn/<domain>/library/sessions-or-
+sections/{id}/answers`, v.v.) thay vì đoán đường dẫn mới — xem
+`docs/sequence/Bff_service/history-retry-proxy.md` để có bảng map đầy đủ bff route ↔ english-service
+route.
+
 ### Dictation — proxy sang `english-service` (mục 1)
 
 Tất cả là proxy thuần túy; endpoint audio **relay nguyên** luồng bytes (status/headers/body) từ
@@ -2064,6 +2099,15 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/sentences/{sentenceId}/attempts` | proxy multipart streaming (không buffer file) sang english-service, chấm GOP qua ai-service |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/finish` | proxy hoàn thành section (PASSED/mở khóa chủ điểm kế tiếp) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/library/sections/history` | proxy lịch sử attempt (từng câu) đã chấm |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/grammar/history/{attemptId}/ai-practice` | proxy sinh bài luyện từ 1 attempt grammar học thường; `404` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/grammar/library/sessions/{sessionId}/ai-practice` | proxy sinh bài luyện từ 1 session grammar Thư viện; `404` |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/grammar/merged-history` | proxy gộp lịch sử grammar học thường + Thư viện |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/history/{attemptId}/ai-practice` | proxy sinh bài luyện từ 1 attempt listening học thường; `404` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/ai-practice` | proxy sinh bài luyện từ 1 section listening Thư viện; `404` |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/merged-history` | proxy gộp lịch sử listening học thường + Thư viện |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/history/{attemptId}/ai-practice` | proxy sinh bài luyện từ 1 attempt speaking học thường; `404` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/speaking/library/sections/{sectionId}/ai-practice` | proxy sinh bài luyện từ mọi attempt speaking Thư viện trên 1 section; `404` |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/speaking/merged-history` | proxy gộp lịch sử speaking học thường + Thư viện |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/facets` | proxy facets thư viện dictation (nay có `minListensForHint`) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/clips` | proxy duyệt clip theo skill/level/topic/examType |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/folders` | proxy `/api/v1/dictation/folders` (rev 2, folder→file) |
