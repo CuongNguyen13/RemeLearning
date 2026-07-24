@@ -140,7 +140,8 @@ sequenceDiagram
             Scoring-->>Svc: PronunciationScore
             Svc->>Svc: wordScore = average(words[].score), phonemeScore = average(words[].phonemes[].score)<br/>(falls back to overall if either list is empty)
             Svc->>Svc: passed = phonemeScore >= 0.7 AND wordScore >= 0.7
-            Svc->>AMapper: insert(attempt{userId, sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey})
+            Svc->>Svc: weakPhonemesJson = writeJson(weakPhonemes)<br/>(verbatim ai-service GOP list, same field/threshold speaking.learn persists - no new logic)
+            Svc->>AMapper: insert(attempt{userId, sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey, weakPhonemesJson})
             AMapper->>DB: INSERT INTO speaking_library_attempts
             Note over Svc,DB: does NOT touch speaking_topic_progress - see finishSection below
             Svc-->>Ctrl: SentenceAttemptResultDto{sentenceId, phonemeScore, wordScore, passed, transcript}
@@ -237,7 +238,10 @@ sequenceDiagram
   per-word scores and over every word's `phonemes()`' per-phoneme scores respectively - `speaking.learn`
   keeps the full per-word/per-phoneme breakdown in its response (`WordScoreDto[]`), but this library
   skill only needs two single numbers per attempt for its pass/fail gate, so the breakdown is collapsed
-  at score time rather than persisted.
+  at score time rather than persisted. The per-attempt weak-phoneme list (`weak_phonemes_json`) is the
+  one piece of the breakdown that *is* persisted verbatim - reused as-is from
+  `PronunciationScore.weakPhonemes()` (already thresholded by ai-service's GOP scorer, see
+  `speaking.learn`'s identical treatment), needed for a later "AI retry targeting past mistakes" feature.
 - `unlockIfLocked` is the same guarded upsert pattern as `listening.library`/`grammar.library`
   (`INSERT ... ON CONFLICT DO UPDATE ... WHERE status = 'LOCKED'`) so it never regresses a topic the
   learner has already reached past `LOCKED` - see `SpeakingTopicProgressMapper.xml`.

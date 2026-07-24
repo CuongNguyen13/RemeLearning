@@ -1,5 +1,7 @@
 package com.remelearning.english.speaking.library.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
 import com.remelearning.common.exception.BusinessException;
@@ -57,6 +59,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 	private final LlmSpeakingLibraryGenerator generator;
 	private final PronunciationScoringClient pronunciationScoringClient;
 	private final StorageClient storageClient;
+	private final ObjectMapper objectMapper;
 	private final String ttsLang;
 
 	public SpeakingLibraryServiceImpl(
@@ -68,6 +71,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 			LlmSpeakingLibraryGenerator generator,
 			PronunciationScoringClient pronunciationScoringClient,
 			StorageClient storageClient,
+			ObjectMapper objectMapper,
 			@Value("${speaking.tts.lang:en}") String ttsLang) {
 		this.topicMapper = topicMapper;
 		this.sectionMapper = sectionMapper;
@@ -77,6 +81,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 		this.generator = generator;
 		this.pronunciationScoringClient = pronunciationScoringClient;
 		this.storageClient = storageClient;
+		this.objectMapper = objectMapper;
 		this.ttsLang = ttsLang;
 	}
 
@@ -189,6 +194,11 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 				.phonemeScore(phonemeScore)
 				.wordScore(wordScore)
 				.recordedAudioStorageKey(attemptKey)
+				// score.weakPhonemes() is already the ai-service-computed weak-phoneme list (GOP
+				// scorer's WEAK_PHONEME_THRESHOLD = 0.4, see gop_scorer.py) - same field
+				// SpeakingLearnServiceImpl.submit persists verbatim for the "learn" flow, reused
+				// here rather than re-deriving a threshold in Java.
+				.weakPhonemesJson(writeJson(score.weakPhonemes()))
 				.build();
 		attemptMapper.insert(attempt);
 
@@ -260,5 +270,15 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 	@Override
 	public List<SpeakingLibraryAttempt> getHistory(String userId) {
 		return attemptMapper.findByUserId(userId);
+	}
+
+	// Serializes the weak-phoneme list to JSON for storage - same helper shape
+	// SpeakingLearnServiceImpl uses for its own weakPhonemesJson/wordScoresJson columns.
+	private String writeJson(Object value) {
+		try {
+			return objectMapper.writeValueAsString(value);
+		} catch (JsonProcessingException ex) {
+			throw new IllegalStateException("Failed to serialize speaking library attempt content", ex);
+		}
 	}
 }

@@ -1,6 +1,11 @@
 package com.remelearning.english.speaking.library.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.pronunciation.PhonemePronunciationScore;
+import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
+import com.remelearning.common.storage.StorageClient;
+import com.remelearning.common.ai.pronunciation.WordPronunciationScore;
 import com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt;
 import com.remelearning.english.speaking.library.domain.SpeakingLibrarySection;
 import com.remelearning.english.speaking.library.domain.SpeakingLibrarySentence;
@@ -15,10 +20,15 @@ import com.remelearning.english.speaking.library.mapper.SpeakingLibraryTopicMapp
 import com.remelearning.english.speaking.library.mapper.SpeakingTopicProgressMapper;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
+
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,8 +37,8 @@ import static org.mockito.Mockito.when;
 class SpeakingLibraryServiceImplTest {
 
 	// Builds a service instance wired with the given mocks, storageClient/pronunciationScoringClient
-	// left null since none of the five behaviors under test here reach either (the section/topic
-	// existence and gating checks all fail-fast before touching audio storage/scoring).
+	// left as fresh mocks (only exercised by submitSentenceAttempt tests) and a real ObjectMapper since
+	// weak-phoneme serialization exercises real JSON (de)serialization, not a mocked one.
 	private SpeakingLibraryServiceImpl newService(
 			SpeakingLibraryTopicMapper topicMapper,
 			SpeakingLibrarySectionMapper sectionMapper,
@@ -36,9 +46,22 @@ class SpeakingLibraryServiceImplTest {
 			SpeakingTopicProgressMapper progressMapper,
 			SpeakingLibraryAttemptMapper attemptMapper,
 			LlmSpeakingLibraryGenerator generator) {
+		return newService(topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator,
+				mock(PronunciationScoringClient.class), mock(StorageClient.class));
+	}
+
+	private SpeakingLibraryServiceImpl newService(
+			SpeakingLibraryTopicMapper topicMapper,
+			SpeakingLibrarySectionMapper sectionMapper,
+			SpeakingLibrarySentenceMapper sentenceMapper,
+			SpeakingTopicProgressMapper progressMapper,
+			SpeakingLibraryAttemptMapper attemptMapper,
+			LlmSpeakingLibraryGenerator generator,
+			PronunciationScoringClient pronunciationScoringClient,
+			StorageClient storageClient) {
 		return new SpeakingLibraryServiceImpl(
 				topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator,
-				mock(PronunciationScoringClient.class), null, "en");
+				pronunciationScoringClient, storageClient, new ObjectMapper(), "en");
 	}
 
 	@Test
@@ -130,6 +153,47 @@ class SpeakingLibraryServiceImplTest {
 				() -> service.submitSentenceAttempt("user-1", 404L, 1L, null));
 
 		verify(sentenceMapper, never()).findById(any());
+	}
+
+	@Test
+	void submitSentenceAttemptPersistsWeakPhonemesFromScoringResponse() throws Exception {
+		SpeakingLibraryTopicMapper topicMapper = mock(SpeakingLibraryTopicMapper.class);
+		SpeakingLibrarySectionMapper sectionMapper = mock(SpeakingLibrarySectionMapper.class);
+		SpeakingLibrarySentenceMapper sentenceMapper = mock(SpeakingLibrarySentenceMapper.class);
+		SpeakingTopicProgressMapper progressMapper = mock(SpeakingTopicProgressMapper.class);
+		SpeakingLibraryAttemptMapper attemptMapper = mock(SpeakingLibraryAttemptMapper.class);
+		LlmSpeakingLibraryGenerator generator = mock(LlmSpeakingLibraryGenerator.class);
+		PronunciationScoringClient scoringClient = mock(PronunciationScoringClient.class);
+		StorageClient storageClient = mock(StorageClient.class);
+
+		SpeakingLibrarySection section = new SpeakingLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+		SpeakingLibrarySentence sentence = new SpeakingLibrarySentence();
+		sentence.setId(5L); sentence.setSectionId(100L); sentence.setSentenceText("Think about the weather.");
+		when(sentenceMapper.findById(5L)).thenReturn(sentence);
+
+		when(storageClient.read(anyString())).thenReturn(new ByteArrayInputStream("wav".getBytes()));
+		// Mirrors SpeakingLearnServiceImpl.submit's mocked scoring response shape - weakPhonemes is
+		// already computed by ai-service's GOP scorer (WEAK_PHONEME_THRESHOLD = 0.4), not re-derived
+		// here, so the response simply carries the phonemes below that threshold straight through.
+		when(scoringClient.score(any(), anyString(), eq("Think about the weather."), eq("en"))).thenReturn(
+				new PronunciationScore(0.72, List.of(
+						new WordPronunciationScore("Think", 0.3, List.of(new PhonemePronunciationScore("θ", 0.2))),
+						new WordPronunciationScore("weather", 0.9, List.of(new PhonemePronunciationScore("ð", 0.9)))),
+						"Sink about the weather.", List.of("θ")));
+
+		org.springframework.mock.web.MockMultipartFile audio =
+				new org.springframework.mock.web.MockMultipartFile("audio", "attempt.wav", "audio/wav", "fake-audio".getBytes());
+
+		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper,
+				attemptMapper, generator, scoringClient, storageClient);
+
+		service.submitSentenceAttempt("user-1", 100L, 5L, audio);
+
+		ArgumentCaptor<SpeakingLibraryAttempt> captor = ArgumentCaptor.forClass(SpeakingLibraryAttempt.class);
+		verify(attemptMapper).insert(captor.capture());
+		assertThat(captor.getValue().getWeakPhonemesJson()).isEqualTo("[\"θ\"]");
 	}
 
 	@Test

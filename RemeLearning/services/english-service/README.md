@@ -239,15 +239,18 @@ under `SpeakingLibraryController` (`/api/v1/learn/speaking/library`):
   the topic `IN_PROGRESS` (`403` if the topic is `LOCKED`, `404` if the topic doesn't exist).
 - `POST /{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts` (multipart) — scores one
   recorded sentence attempt (`phonemeScore`/`wordScore`, each a plain average over the GOP response's
-  per-word/per-phoneme breakdown) and persists it; does **not** itself touch topic progress (`404` if
-  the section or sentence doesn't exist).
+  per-word/per-phoneme breakdown) and persists it, along with the raw `weak_phonemes_json` (the GOP
+  scorer's own `weak_phonemes` list, same field `speaking.learn`'s `SpeakingAttempt.weakPhonemesJson`
+  persists verbatim — no separate threshold is computed here); does **not** itself touch topic
+  progress (`404` if the section or sentence doesn't exist).
 - `POST /{userId}/sections/{sectionId}/finish` — checks whether every sentence in the section has at
   least one attempt scoring ≥ 0.7 on both `phonemeScore` and `wordScore`; if so, marks the topic
   `PASSED` and unlocks the next topic by `sequenceOrder` (`404` if the section doesn't exist).
 - `GET /{userId}/sections/history` — the learner's scored sentence attempts across all topics/sections.
 
 Migration: `V20__speaking_library.sql` (`speaking_library_topics`, `speaking_library_sections`,
-`speaking_library_sentences`, `speaking_topic_progress`, `speaking_library_attempts`). Like Listening
+`speaking_library_sentences`, `speaking_topic_progress`, `speaking_library_attempts`), plus
+`V22__speaking_library_weak_phonemes.sql` adding `speaking_library_attempts.weak_phonemes_json`. Like Listening
 Library, scoring here does **not** call `PracticeService.redo(...)` — it only writes
 `speaking_library_attempts`/`speaking_topic_progress`, not `pronunciation_weak_points` (unlike
 `speaking.learn`, which does feed that table via the same scoring client). `bff-service` now proxies

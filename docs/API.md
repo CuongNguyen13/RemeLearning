@@ -945,7 +945,10 @@ Nộp bản ghi âm của learner cho **một câu** trong section để chấm 
   `speaking-library/attempts/{userId}/{uuid}.wav`), gọi `PronunciationScoringClient.score(...)` (→
   ai-service `POST /api/v1/pronunciation/score`, mục 7) với `expected_text = sentenceText` của câu,
   rút gọn kết quả phoneme/word chi tiết (`PronunciationScore.words[].score`/`.phonemes[].score`)
-  thành `phonemeScore`/`wordScore` bằng trung bình cộng, lưu một row `speaking_library_attempts`.
+  thành `phonemeScore`/`wordScore` bằng trung bình cộng, đồng thời lưu nguyên `PronunciationScore.
+  weakPhonemes` (danh sách IPA đã dưới ngưỡng `WEAK_PHONEME_THRESHOLD=0.4` tính sẵn ở ai-service —
+  tái dùng y hệt cách `speaking.learn`'s `SpeakingAttempt.weakPhonemesJson` làm, không tự suy ra
+  ngưỡng riêng) dưới dạng JSON vào `weak_phonemes_json`, lưu một row `speaking_library_attempts`.
 - **Response `data`** — `SentenceAttemptResultDto`: `{sentenceId, phonemeScore, wordScore, passed
   (cả hai điểm ≥ 0.7), transcript}`.
 - **Lỗi**: `404` nếu `sectionId` hoặc `sentenceId` không tồn tại.
@@ -965,7 +968,8 @@ khóa (`UNLOCKED`) chủ điểm kế tiếp theo `sequenceOrder` (nếu đang `
 Toàn bộ attempt (từng câu) đã chấm của learner, trên mọi chủ điểm/Section.
 - **Path param**: `userId` (string)
 - **Response `data`** — `SpeakingLibraryAttempt[]`: `{id, userId, sectionId, sentenceId,
-  phonemeScore, wordScore, recordedAudioStorageKey?, createdAt}`.
+  phonemeScore, wordScore, recordedAudioStorageKey?, weakPhonemesJson? (JSON array các IPA yếu của
+  attempt đó), createdAt}`.
 
 ### Cơ chế chấm điểm (Java scoring engine, package `common.scoring`)
 

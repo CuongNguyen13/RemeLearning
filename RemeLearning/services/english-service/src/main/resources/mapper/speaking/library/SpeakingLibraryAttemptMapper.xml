@@ -5,18 +5,18 @@
     <insert id="insert" parameterType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO speaking_library_attempts
-            (user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key)
+            (user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, weak_phonemes_json)
         VALUES
-            (#{userId}, #{sectionId}, #{sentenceId}, #{phonemeScore}, #{wordScore}, #{recordedAudioStorageKey})
+            (#{userId}, #{sectionId}, #{sentenceId}, #{phonemeScore}, #{wordScore}, #{recordedAudioStorageKey}, #{weakPhonemesJson})
     </insert>
 
     <select id="findByUserId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt">
-        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, created_at
+        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, weak_phonemes_json, created_at
         FROM speaking_library_attempts WHERE user_id = #{userId} ORDER BY created_at DESC
     </select>
 
     <select id="findBySectionId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt">
-        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, created_at
+        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, weak_phonemes_json, created_at
         FROM speaking_library_attempts WHERE section_id = #{sectionId} ORDER BY created_at
     </select>
 

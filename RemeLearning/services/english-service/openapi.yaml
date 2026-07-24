@@ -3072,6 +3072,7 @@ components:
         phonemeScore: { type: number, format: double }
         wordScore: { type: number, format: double }
         recordedAudioStorageKey: { type: string, nullable: true }
+        weakPhonemesJson: { type: string, nullable: true, description: "JSON array of IPA symbols scored below the GOP weak-phoneme threshold for this attempt" }
         createdAt: { type: string, format: date-time }
 
     ApiResponseSpeakingLibraryAttemptList:

@@ -24,5 +24,10 @@ public class SpeakingLibraryAttempt {
 	private Double phonemeScore;
 	private Double wordScore;
 	private String recordedAudioStorageKey;
+	// JSON array of IPA symbols the learner mispronounced in this attempt (ai-service's GOP scoring
+	// already computes this list via WEAK_PHONEME_THRESHOLD - see PronunciationScore.weakPhonemes()),
+	// same shape speaking_attempts.weak_phonemes_json uses for the "learn" flow. Feeds Task 5's
+	// AI-retry-targeting-past-mistakes generator.
+	private String weakPhonemesJson;
 	private Instant createdAt;
 }
