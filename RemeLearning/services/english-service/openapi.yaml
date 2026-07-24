@@ -939,6 +939,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseGrammarAttemptDetail"
 
+  /api/v1/learn/grammar/history/{userId}/{attemptId}/ai-practice:
+    post:
+      tags: [Grammar Learn]
+      summary: >
+        Generate AI practice targeted at one specific past attempt's mistakes (the "Luyện tập
+        với AI" action from a history row) - diffs the attempt's questions against the learner's
+        submitted answers, generates a new set targeting only the missed rules, persists it into
+        the shared grammar_practice_items bank, and returns the learner's refreshed practice-set list
+      operationId: generateGrammarPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
   /api/v1/learn/grammar/library/{userId}/topics:
     get:
       tags: [Grammar Library]
@@ -1046,6 +1078,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseFinishGrammarLibrarySession"
+
+  /api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice:
+    post:
+      tags: [Grammar Library]
+      summary: >
+        Generate AI practice targeted at one past session's missed questions (the "Luyện tập với
+        AI" action) - persists into the same grammar_practice_items bank the learn flow uses
+        (there is only one AI-practice destination per domain) and returns the learner's refreshed
+        practice-set list
+      operationId: generateGrammarPracticeFromSession
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseGrammarPracticeItemList"
+        "404":
+          description: Session not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
 
   /api/v1/learn/grammar/library/{userId}/topics/{topicId}/history:
     get:

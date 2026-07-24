@@ -7,6 +7,7 @@ import com.remelearning.english.grammar.library.dto.GrammarLibraryHistoryEntryDt
 import com.remelearning.english.grammar.library.dto.GrammarLibraryTopicDto;
 import com.remelearning.english.grammar.library.dto.StartGrammarSessionResponse;
 import com.remelearning.english.grammar.library.dto.SubmitGrammarLibraryAnswerRequest;
+import com.remelearning.english.grammar.learn.dto.GrammarPracticeItemDto;
 
 import java.util.List;
 
@@ -29,4 +30,14 @@ public interface GrammarLibraryService {
 
 	/** A learner's completed sessions for one topic, newest first. */
 	List<GrammarLibraryHistoryEntryDto> getHistory(String userId, Long topicId);
+
+	/**
+	 * Generates one new AI practice set targeting a past session's missed questions (the "Luyện tập
+	 * với AI" action from a library session), persisting it into the same
+	 * {@code grammar_practice_items} bank the "học thường" learn flow uses - there is only one
+	 * AI-practice destination per domain, regardless of which flow the mistake came from. Returns the
+	 * learner's refreshed practice-set list (same DTO shape as the learn flow's own listing). Throws
+	 * not-found if the session doesn't exist or belongs to someone else.
+	 */
+	List<GrammarPracticeItemDto> generatePracticeFromSession(String userId, Long sessionId);
 }

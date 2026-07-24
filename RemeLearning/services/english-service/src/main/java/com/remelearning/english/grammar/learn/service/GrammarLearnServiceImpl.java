@@ -20,6 +20,7 @@ import com.remelearning.english.grammar.learn.dto.GrammarPracticeItemDto;
 import com.remelearning.english.grammar.learn.dto.GrammarQuestionDto;
 import com.remelearning.english.grammar.learn.dto.SubmitGrammarAttemptRequest;
 import com.remelearning.english.grammar.learn.generator.GeneratedGrammarPractice;
+import com.remelearning.english.grammar.learn.generator.GrammarMistakeAnalyzer;
 import com.remelearning.english.grammar.learn.generator.GrammarPracticeGenerator;
 import com.remelearning.english.grammar.learn.mapper.GrammarPracticeMapper;
 import com.remelearning.english.grammar.learn.scoring.GrammarAttemptScorer;
@@ -120,6 +121,44 @@ public class GrammarLearnServiceImpl implements GrammarLearnService {
 		return grammarPracticeMapper.findHistoryByUserId(userId).stream()
 				.map(this::toHistoryEntryDto)
 				.toList();
+	}
+
+	// Shared persistence step: builds one GrammarPracticeItem from whatever target rules/level/exam
+	// type the caller resolved (top weak points, explicit focus items, or a past attempt's misses),
+	// inserts it into the same grammar_practice_items bank `generate` uses, and returns the
+	// learner's refreshed practice-set list.
+	@Override
+	@Transactional
+	public List<GrammarPracticeItemDto> generatePracticeForRules(String userId, List<String> targetRules, String level, String examType) {
+		GeneratedGrammarPractice generated = generator.generate(targetRules, level, examType);
+
+		GrammarPracticeItem item = GrammarPracticeItem.builder()
+				.userId(userId)
+				.level(level)
+				.examType(examType)
+				.topic(generated.topic())
+				.targetRulesJson(writeJson(targetRules))
+				.itemsJson(writeJson(generated.items()))
+				.build();
+		grammarPracticeMapper.insertItem(item);
+
+		return listItems(userId);
+	}
+
+	// Generates AI practice targeted at one past attempt's mistakes: verifies the attempt belongs to
+	// this learner, diffs its stored questions against the stored answers via the pure
+	// GrammarMistakeAnalyzer to find every missed rule, then reuses the exact same
+	// generate-and-persist pipeline `generate` uses (generatePracticeForRules) so the regenerated
+	// content lands in the same bank as a normal "học thường" set.
+	@Override
+	@Transactional
+	public List<GrammarPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId) {
+		GrammarAttemptDetailRow attempt = grammarPracticeMapper.findAttemptDetailByIdAndUserId(attemptId, userId);
+		if (attempt == null) {
+			throw BusinessException.notFound("Grammar practice attempt not found: id=" + attemptId);
+		}
+		List<String> missedRules = GrammarMistakeAnalyzer.extractMissedRules(attempt.getItemsJson(), attempt.getAnswersJson());
+		return generatePracticeForRules(userId, missedRules, attempt.getLevel(), attempt.getExamType());
 	}
 
 	@Override

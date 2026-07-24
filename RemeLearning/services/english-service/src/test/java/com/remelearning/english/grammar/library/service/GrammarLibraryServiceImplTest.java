@@ -27,6 +27,8 @@ import com.remelearning.english.grammar.library.mapper.GrammarLibraryQuestionMap
 import com.remelearning.english.grammar.library.mapper.GrammarLibrarySessionMapper;
 import com.remelearning.english.grammar.library.mapper.GrammarLibraryTopicMapper;
 import com.remelearning.english.grammar.library.mapper.GrammarTopicProgressMapper;
+import com.remelearning.english.grammar.learn.dto.GrammarPracticeItemDto;
+import com.remelearning.english.grammar.learn.service.GrammarLearnService;
 import com.remelearning.english.practice.dto.PracticeRedoRequest;
 import com.remelearning.english.practice.service.PracticeService;
 import org.junit.jupiter.api.Test;
@@ -55,8 +57,10 @@ class GrammarLibraryServiceImplTest {
 	private final GrammarLibraryContentGenerator generator = mock(GrammarLibraryContentGenerator.class);
 	private final PracticeService practiceService = mock(PracticeService.class);
 	private final ObjectMapper objectMapper = new ObjectMapper();
+	private final GrammarLearnService grammarLearnService = mock(GrammarLearnService.class);
 	private final GrammarLibraryServiceImpl service = new GrammarLibraryServiceImpl(
-			topicMapper, contentMapper, questionMapper, progressMapper, sessionMapper, generator, practiceService, objectMapper);
+			topicMapper, contentMapper, questionMapper, progressMapper, sessionMapper, generator, practiceService, objectMapper,
+			grammarLearnService);
 
 	private GrammarLibraryTopic topic() {
 		return GrammarLibraryTopic.builder().id(1L).code("present_simple").name("Present Simple")
@@ -204,6 +208,44 @@ class GrammarLibraryServiceImplTest {
 		assertThat(response.getRetrySession().getQuestions()).hasSize(1);
 		assertThat(response.getRetrySession().getQuestions().get(0).getQuestionRef()).isEqualTo("r-0");
 		verify(progressMapper, never()).markPassed(any(), any());
+	}
+
+	@Test
+	void generatePracticeFromSessionThrowsNotFoundWhenSessionDoesNotBelongToUser() {
+		when(sessionMapper.findById(300L)).thenReturn(GrammarLibrarySession.builder()
+				.id(300L).userId("someone-else").topicId(1L).build());
+
+		assertThatThrownBy(() -> service.generatePracticeFromSession("user-1", 300L))
+				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void generatePracticeFromSessionThrowsNotFoundWhenSessionDoesNotExist() {
+		when(sessionMapper.findById(300L)).thenReturn(null);
+
+		assertThatThrownBy(() -> service.generatePracticeFromSession("user-1", 300L))
+				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void generatePracticeFromSessionDelegatesMissedPromptsToGrammarLearnService() {
+		GrammarLibrarySession session = GrammarLibrarySession.builder()
+				.id(300L).userId("user-1").topicId(1L).status(GrammarSessionStatus.COMPLETED)
+				.questionsJson(toJson(List.of(GrammarLibrarySessionQuestion.builder()
+						.questionRef("q-5").type(GrammarQuestionType.MCQ).prompt("She ___ every day.").answer("works").build())))
+				.build();
+		when(sessionMapper.findById(300L)).thenReturn(session);
+		when(sessionMapper.findAnswersBySessionId(300L)).thenReturn(List.of(
+				GrammarLibrarySessionAnswer.builder().sessionId(300L).questionRef("q-5").submittedAnswer("work").correct(false).build()));
+		when(topicMapper.findById(1L)).thenReturn(topic());
+		List<GrammarPracticeItemDto> refreshed = List.of(GrammarPracticeItemDto.builder().practiceItemId(40L).build());
+		when(grammarLearnService.generatePracticeForRules("user-1", List.of("She ___ every day."), "beginner", null))
+				.thenReturn(refreshed);
+
+		List<GrammarPracticeItemDto> result = service.generatePracticeFromSession("user-1", 300L);
+
+		assertThat(result).isEqualTo(refreshed);
+		verify(grammarLearnService).generatePracticeForRules("user-1", List.of("She ___ every day."), "beginner", null);
 	}
 
 	private void simulateGeneratedSessionId(Long id) {

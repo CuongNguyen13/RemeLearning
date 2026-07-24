@@ -120,7 +120,16 @@ Per-skill notes:
   types (`GrammarQuestionType`): `ERROR_CORRECTION` (rewrite a sentence with a grammar mistake),
   `FILL_TENSE` (put the bracketed verb in the correct tense/form), `TRANSFORM` (rewrite per an
   instruction, same meaning), `MCQ` (pick the correct structure). Reuses `grammar_weak_points` via
-  `PracticeService.redo` — no new weak-point table.
+  `PracticeService.redo` — no new weak-point table. `POST /history/{userId}/{attemptId}/ai-practice`
+  ("Luyện tập với AI" from a history row) diffs one past attempt's stored questions against its
+  submitted answers via the pure `GrammarMistakeAnalyzer.extractMissedRules` (re-scored with the same
+  `GrammarAttemptScorer` the original attempt used), generates a new set targeting only the missed
+  `targetRule`s via the same `GrammarPracticeGenerator`, persists it into the same
+  `grammar_practice_items` bank, and returns the learner's refreshed practice-set list; `404` if the
+  attempt doesn't exist or belongs to someone else. The persist-and-refresh step
+  (`generatePracticeForRules`) is also reused by Grammar Library's own "generate from session"
+  endpoint below — one shared AI-practice bank per domain, regardless of which flow the mistake
+  came from.
 - **Listening** — a new domain, no pre-existing table to fall back to. Generation
   (`POST /api/v1/learn/listening/{userId}/generate`) produces a Gemini transcript + questions, then
   synthesizes multi-speaker audio via `DialogueAudioSynthesizer`; the transcript/translation and audio
@@ -182,6 +191,16 @@ Six endpoints under `GrammarLibraryController` (`/api/v1/learn/grammar/library`)
   questions still wrong (each replaced by one newly AI-generated question of the same type, stored
   inline in the session — never added to the shared question pool).
 - `GET /{userId}/topics/{topicId}/history` — the learner's completed sessions for a topic.
+- `POST /{userId}/sessions/{sessionId}/ai-practice` — "Luyện tập với AI" from a past session: verifies
+  the session belongs to `userId`, diffs its stored `questionsJson` against its submitted answers via
+  `GrammarMistakeAnalyzer.extractMissedRulesFromSession` (library questions carry no explicit rule tag
+  of their own since a session is scoped to one topic, so each wrong question's own prompt is used as
+  the tag), then **delegates the actual generate-and-persist step to
+  `GrammarLearnService.generatePracticeForRules`** — the exact same pipeline `grammar.learn`'s own
+  "generate from attempt" endpoint uses — so the regenerated content lands in the shared
+  `grammar_practice_items` bank, not a Grammar-Library-only table. Returns the learner's refreshed
+  `GrammarPracticeItemDto[]` (same shape as `grammar.learn`'s own listing); `404` if the session
+  doesn't exist or belongs to someone else.
 
 Migration: `V17__grammar_library.sql` (`grammar_library_topics`, `grammar_library_contents`,
 `grammar_library_questions`, `grammar_topic_progress`, `grammar_library_sessions`,

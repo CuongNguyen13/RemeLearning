@@ -661,6 +661,22 @@ endpoint (`{userId}/generate`, `items/{itemId}`, `{userId}/items`, `attempts`, `
 `GrammarQuestionDto`/`GrammarAttemptQuestionResultDto` còn có `translationVi` — bản dịch nghĩa tiếng
 Việt thuần túy của câu `answer`/`correctAnswer`, khác với `translation` (giải thích quy tắc ngữ pháp).
 
+### POST `/api/v1/learn/grammar/history/{userId}/{attemptId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một dòng lịch sử cụ thể (mirror `Dictation`'s cùng tên endpoint, xem
+mục trên) — khác `generate` ở trên (dùng weak-point/focus items), endpoint này chỉ phân tích **đúng
+một attempt** (`attemptId`): đọc lại câu hỏi (`itemsJson`) + đáp án đã nộp (`answersJson`) của đúng
+attempt đó qua `GrammarPracticeMapper.findAttemptDetailByIdAndUserId`, chấm lại bằng chính
+`GrammarAttemptScorer` đã chấm attempt gốc (`GrammarMistakeAnalyzer.extractMissedRules`, package
+`grammar.learn.generator`) để lấy danh sách `targetRule` distinct của các câu sai, rồi gọi **cùng**
+`GrammarPracticeGenerator.generate(targetRules, level, examType)` mà `generate` dùng (level/examType
+lấy nguyên từ attempt gốc), lưu bộ đề mới vào cùng bảng `grammar_practice_items`, và trả về toàn bộ
+danh sách bộ đề đã làm mới. Bước generate-và-lưu này (`generatePracticeForRules`) cũng được Grammar
+Library tái sử dụng (xem endpoint tương ứng bên dưới) — chỉ có một "kho" AI-practice ngữ pháp duy
+nhất, bất kể mistake đến từ luồng nào.
+- **Response `data`** — `GrammarPracticeItemDto[]` (như `{userId}/items`).
+- **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
+
 ### Grammar Library — 60 chủ điểm ngữ pháp, lý thuyết + luyện tập + mở khóa tuần tự (package `grammar.library`)
 
 Khác với `grammar.learn` (sinh đề rời rạc mỗi lần theo weak-point), Grammar Library là một catalog
@@ -732,6 +748,23 @@ Lịch sử các session đã hoàn thành (`INITIAL`/`RETRY`) của learner cho
 - **Path param**: `userId` (string), `topicId` (int64)
 - **Response `data`** — `GrammarLibraryHistoryEntryDto[]`: `{sessionId, sessionType, correctCount,
   totalCount, accuracy, completedAt?}`.
+
+### POST `/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một session đã làm — xác thực session thuộc về `userId` (`session.userId`,
+không phải qua mapper riêng vì `GrammarLibrarySessionMapper.findById` không lọc theo user), đọc lại
+`questionsJson` của session + toàn bộ câu trả lời đã nộp (`findAnswersBySessionId`), rồi
+`GrammarMistakeAnalyzer.extractMissedRulesFromSession` lấy `prompt` distinct của mỗi câu bị trả lời
+sai (câu hỏi Grammar Library không mang tag `targetRule` riêng như `grammar.learn` — cả session chỉ
+thuộc một chủ điểm — nên `prompt` của câu là định danh khả dụng gần nhất cho từng câu bị sai). Việc
+sinh bộ đề mới + lưu + trả danh sách làm mới **được ủy quyền hoàn toàn** cho
+`GrammarLearnService.generatePracticeForRules(userId, missedPrompts, topic.level, null)` — cùng một
+bước generate-và-lưu mà `grammar.learn`'s `generatePracticeFromAttempt` dùng — nên bộ đề mới luôn
+nằm trong bảng `grammar_practice_items`, không có bảng/luồng AI-practice riêng cho Grammar Library.
+- **Path param**: `userId` (string), `sessionId` (int64)
+- **Response `data`** — `GrammarPracticeItemDto[]` (giống hệt shape của `grammar.learn`'s
+  `{userId}/items`, vì nội dung sinh ra nằm chung một bảng).
+- **Lỗi**: `404` nếu `sessionId` không tồn tại hoặc không thuộc về `userId`.
 
 ### Listening Library — catalog chủ điểm nghe-hiểu, Section AI (đoạn văn + audio) + mở khóa tuần tự (package `listening.library`)
 
@@ -1951,12 +1984,14 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (grammar.learn) | REST | POST | `/api/v1/learn/grammar/attempts` | chấm điểm, feed weak-point qua `PracticeService.redo` |
 | english-service (grammar.learn) | REST | GET | `/api/v1/learn/grammar/history/{userId}` | lịch sử làm bài |
 | english-service (grammar.learn) | REST | GET | `/api/v1/learn/grammar/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
+| english-service (grammar.learn) | REST | POST | `/api/v1/learn/grammar/history/{userId}/{attemptId}/ai-practice` | sinh bộ đề nhắm vào đúng câu sai của 1 attempt (dùng chung generator với `generate`, lưu vào cùng `grammar_practice_items`); `404` |
 | english-service (grammar.library) | REST | GET | `/api/v1/learn/grammar/library/{userId}/topics` | danh sách 60 chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
 | english-service (grammar.library) | REST | GET | `/api/v1/learn/grammar/library/topics/{topicId}` | trang lý thuyết + pool câu hỏi (sinh AI lần đầu, sau đó chỉ đọc DB); `404` |
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/{userId}/topics/{topicId}/sessions` | bắt đầu session INITIAL; `403` nếu chủ điểm LOCKED |
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/sessions/{sessionId}/answers` | chấm 1 câu trong session; `400`/`409` |
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/sessions/{sessionId}/finish` | hoàn thành session: PASSED + mở khóa chủ điểm kế tiếp, hoặc trả session RETRY cho câu sai; `409` |
 | english-service (grammar.library) | REST | GET | `/api/v1/learn/grammar/library/{userId}/topics/{topicId}/history` | lịch sử session đã hoàn thành của 1 chủ điểm |
+| english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` | sinh bộ đề nhắm vào câu sai của 1 session, ủy quyền lưu cho `GrammarLearnService.generatePracticeForRules` (cùng bảng `grammar_practice_items`); `404` |
 | english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: đoạn văn + audio); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers` | chấm toàn bộ câu trả lời 1 Section; `PASSED` (≥0.7) mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |

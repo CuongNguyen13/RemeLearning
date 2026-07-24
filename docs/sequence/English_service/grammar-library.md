@@ -123,6 +123,38 @@ sequenceDiagram
     Ctrl-->>Caller: 200 ApiResponse
 ```
 
+## 3. Generate from one past session's mistakes (`POST /api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as GrammarLibraryController
+    participant Svc as GrammarLibraryServiceImpl
+    participant SMapper as GrammarLibrarySessionMapper
+    participant Analyzer as GrammarMistakeAnalyzer (pure)
+    participant TMapper as GrammarLibraryTopicMapper
+    participant LearnSvc as GrammarLearnServiceImpl
+
+    Caller->>Ctrl: POST /{userId}/sessions/{sessionId}/ai-practice
+    Ctrl->>Svc: generatePracticeFromSession(userId, sessionId)
+    Svc->>SMapper: findById(sessionId)
+    alt not found / session.userId != userId
+        Svc-->>Ctrl: BusinessException.notFound -> 404
+    else owned by userId
+        Svc->>SMapper: findAnswersBySessionId(sessionId)
+        Svc->>Analyzer: extractMissedRulesFromSession(session.questionsJson, answers)
+        Note over Analyzer: library questions carry no explicit targetRule of their own<br/>(a session is scoped to one topic) - each wrong question's own<br/>prompt is used as the best available per-question tag
+        Analyzer-->>Svc: distinct prompt[] of every wrong answer
+        Svc->>TMapper: findById(session.topicId)
+        TMapper-->>Svc: GrammarLibraryTopic{level}
+        Svc->>LearnSvc: generatePracticeForRules(userId, missedPrompts, topic.level, examType=null)
+        Note over LearnSvc: same generate-and-persist step grammar.learn's own<br/>generatePracticeFromAttempt uses - see grammar-learn.md section 3<br/>(generator.generate -> insertItem into grammar_practice_items -> listItems)
+        LearnSvc-->>Svc: List<GrammarPracticeItemDto> (refreshed list)
+        Svc-->>Ctrl: List<GrammarPracticeItemDto>
+        Ctrl-->>Caller: 200 ApiResponse
+    end
+```
+
 ## External calls
 
 | # | Call | From -> To | Notes |
@@ -130,6 +162,7 @@ sequenceDiagram
 | 1 | HTTPS | english-service -> Gemini API | `LlmGrammarLibraryContentGenerator` via `AiContentClient`, both for first-read topic content and for per-question RETRY generation; falls back to a static template on failure so neither call ever hard-fails |
 | 2 | In-process | english-service -> `PracticeService#redo` | fired once per `finishSession` call, one attempt per question in the session (not deduped), same mechanism as `vocabulary-library.md` §2 |
 | 3 | Postgres | english-service -> `reme_english` | `grammar_library_topics`, `grammar_library_contents`, `grammar_library_questions`, `grammar_topic_progress`, `grammar_library_sessions`, `grammar_library_session_answers` |
+| 4 | In-process | english-service -> `GrammarLearnService#generatePracticeForRules` | fired only by flow 3 (generate-from-session); delegates the actual generate-and-persist step to `grammar.learn` so both flows feed the same `grammar_practice_items` bank |
 
 ## Notes
 
@@ -145,3 +178,8 @@ sequenceDiagram
 - Like the other "Học &amp; Luyện tập" skills, this package has no Kafka consumer/producer of its own
   — it only reaches Kafka indirectly through `PracticeService#redo`'s bundled
   `learning.gap.analysis.requested` publish (see `overview.md` §3).
+- Flow 3 (generate-from-session) is a new dependency of `GrammarLibraryServiceImpl` on
+  `GrammarLearnService` (interface, not the concrete `GrammarLearnServiceImpl`) - the only cross-package
+  collaborator this service has, added specifically so both the learn and library "Luyện tập với AI"
+  actions share exactly one persistence path (`grammar_practice_items`) instead of the library growing
+  its own parallel bank. See `grammar-learn.md` section 3 for the shared step's own diagram.

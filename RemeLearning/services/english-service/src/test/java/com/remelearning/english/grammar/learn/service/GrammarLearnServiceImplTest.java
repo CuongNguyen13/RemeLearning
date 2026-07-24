@@ -135,6 +135,48 @@ class GrammarLearnServiceImplTest {
 		assertThat(dto.getResults().get(0).isCorrect()).isTrue();
 	}
 
+	@Test
+	void generatePracticeFromAttemptThrowsNotFoundWhenAttemptDoesNotBelongToUser() {
+		when(mapper.findAttemptDetailByIdAndUserId(30L, "user-1")).thenReturn(null);
+
+		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 30L))
+				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void generatePracticeFromAttemptGeneratesTargetingMissedRulesAndReturnsRefreshedList() {
+		GrammarAttemptDetailRow attempt = GrammarAttemptDetailRow.builder()
+				.attemptId(30L).level("B1").examType("TOEIC").topic("Grammar")
+				.itemsJson(toJson(List.of(
+						GrammarQuestionItem.builder().targetRule("past perfect").type(GrammarQuestionType.FILL_TENSE)
+								.prompt("p1").answer("had left").build(),
+						GrammarQuestionItem.builder().targetRule("passive voice").type(GrammarQuestionType.MCQ)
+								.prompt("p2").answer("was cooked").build())))
+				.answersJson(toJson(List.of("wrong", "was cooked")))
+				.score(0.5)
+				.createdAt(Instant.now())
+				.build();
+		when(mapper.findAttemptDetailByIdAndUserId(30L, "user-1")).thenReturn(attempt);
+		when(generator.generate(eq(List.of("past perfect")), eq("B1"), eq("TOEIC"))).thenReturn(new GeneratedGrammarPractice(
+				"Past perfect practice", List.of(GrammarQuestionItem.builder()
+						.targetRule("past perfect").type(GrammarQuestionType.FILL_TENSE)
+						.prompt("She (already leave).").answer("had already left").build())));
+		simulateGeneratedItemId(40L);
+		when(mapper.findItemsByUserId("user-1")).thenReturn(List.of(
+				GrammarPracticeItem.builder().id(40L).userId("user-1").level("B1").examType("TOEIC")
+						.topic("Past perfect practice").targetRulesJson(toJson(List.of("past perfect")))
+						.itemsJson(toJson(List.of(GrammarQuestionItem.builder().targetRule("past perfect")
+								.type(GrammarQuestionType.FILL_TENSE).prompt("She (already leave).")
+								.answer("had already left").build())))
+						.build()));
+
+		List<GrammarPracticeItemDto> result = service.generatePracticeFromAttempt("user-1", 30L);
+
+		verify(generator).generate(List.of("past perfect"), "B1", "TOEIC");
+		assertThat(result).hasSize(1);
+		assertThat(result.get(0).getPracticeItemId()).isEqualTo(40L);
+	}
+
 	private void simulateGeneratedItemId(Long id) {
 		org.mockito.Mockito.doAnswer(invocation -> {
 			GrammarPracticeItem item = invocation.getArgument(0);

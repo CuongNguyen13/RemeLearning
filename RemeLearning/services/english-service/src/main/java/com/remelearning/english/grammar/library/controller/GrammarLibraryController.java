@@ -8,6 +8,7 @@ import com.remelearning.english.grammar.library.dto.GrammarLibraryHistoryEntryDt
 import com.remelearning.english.grammar.library.dto.GrammarLibraryTopicDto;
 import com.remelearning.english.grammar.library.dto.StartGrammarSessionResponse;
 import com.remelearning.english.grammar.library.dto.SubmitGrammarLibraryAnswerRequest;
+import com.remelearning.english.grammar.learn.dto.GrammarPracticeItemDto;
 import com.remelearning.english.grammar.library.service.GrammarLibraryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -65,5 +66,12 @@ public class GrammarLibraryController {
 	@GetMapping("/{userId}/topics/{topicId}/history")
 	public ApiResponse<List<GrammarLibraryHistoryEntryDto>> getHistory(@PathVariable String userId, @PathVariable Long topicId) {
 		return ApiResponse.ok(grammarLibraryService.getHistory(userId, topicId));
+	}
+
+	@Operation(summary = "Generate AI practice targeted at one past session's missed questions (the \"Luyện tập với AI\" action) - persists into the same grammar_practice_items bank the learn flow uses")
+	@PostMapping("/{userId}/sessions/{sessionId}/ai-practice")
+	public ApiResponse<List<GrammarPracticeItemDto>> generateFromSession(
+			@PathVariable String userId, @PathVariable Long sessionId) {
+		return ApiResponse.ok(grammarLibraryService.generatePracticeFromSession(userId, sessionId));
 	}
 }

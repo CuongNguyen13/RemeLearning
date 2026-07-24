@@ -36,6 +36,9 @@ import com.remelearning.english.grammar.library.mapper.GrammarLibraryQuestionMap
 import com.remelearning.english.grammar.library.mapper.GrammarLibrarySessionMapper;
 import com.remelearning.english.grammar.library.mapper.GrammarLibraryTopicMapper;
 import com.remelearning.english.grammar.library.mapper.GrammarTopicProgressMapper;
+import com.remelearning.english.grammar.learn.dto.GrammarPracticeItemDto;
+import com.remelearning.english.grammar.learn.generator.GrammarMistakeAnalyzer;
+import com.remelearning.english.grammar.learn.service.GrammarLearnService;
 import com.remelearning.english.practice.dto.PracticeAttemptRequest;
 import com.remelearning.english.practice.dto.PracticeRedoRequest;
 import com.remelearning.english.practice.service.PracticeService;
@@ -72,6 +75,7 @@ public class GrammarLibraryServiceImpl implements GrammarLibraryService {
 	private final GrammarLibraryContentGenerator generator;
 	private final PracticeService practiceService;
 	private final ObjectMapper objectMapper;
+	private final GrammarLearnService grammarLearnService;
 
 	// Bootstraps the very first topic to UNLOCKED for a new learner, then reports every catalog
 	// topic with whatever progress row exists (LOCKED for any topic without one yet).
@@ -205,6 +209,26 @@ public class GrammarLibraryServiceImpl implements GrammarLibraryService {
 						.completedAt(session.getCompletedAt())
 						.build())
 				.toList();
+	}
+
+	// Generates AI practice targeted at one past library session's missed questions: verifies the
+	// session belongs to this learner, diffs its stored session questions against the stored answers
+	// via the pure GrammarMistakeAnalyzer to find every missed "rule" (a library question's own
+	// prompt, since library questions carry no explicit rule tag of their own), then delegates the
+	// actual generate-and-persist step to GrammarLearnService.generatePracticeForRules so the
+	// regenerated content lands in the exact same grammar_practice_items bank the learn flow uses -
+	// there is only one AI-practice destination per domain.
+	@Override
+	@Transactional
+	public List<GrammarPracticeItemDto> generatePracticeFromSession(String userId, Long sessionId) {
+		GrammarLibrarySession session = sessionMapper.findById(sessionId);
+		if (session == null || !session.getUserId().equals(userId)) {
+			throw BusinessException.notFound("Grammar library session not found: id=" + sessionId);
+		}
+		List<String> missedRules = GrammarMistakeAnalyzer.extractMissedRulesFromSession(
+				session.getQuestionsJson(), sessionMapper.findAnswersBySessionId(sessionId));
+		GrammarLibraryTopic topic = requireTopic(session.getTopicId());
+		return grammarLearnService.generatePracticeForRules(userId, missedRules, topic.getLevel(), null);
 	}
 
 	// --- helpers ---
