@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.listening.library.mapper.ListeningLibraryAttemptAnswerMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO listening_library_attempt_answers
+            (attempt_id, question_id, selected_option, correct_option, is_correct)
+        VALUES
+            (#{attemptId}, #{questionId}, #{selectedOption}, #{correctOption}, #{isCorrect})
+    </insert>
+
+    <select id="findByAttemptId" resultType="com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer">
+        SELECT id, attempt_id, question_id, selected_option, correct_option, is_correct, created_at
+        FROM listening_library_attempt_answers WHERE attempt_id = #{attemptId}
+    </select>
+
+</mapper>

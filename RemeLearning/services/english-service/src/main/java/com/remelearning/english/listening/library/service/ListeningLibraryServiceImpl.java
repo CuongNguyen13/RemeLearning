@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
+import com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer;
 import com.remelearning.english.listening.library.domain.ListeningLibraryQuestion;
 import com.remelearning.english.listening.library.domain.ListeningLibrarySection;
 import com.remelearning.english.listening.library.domain.ListeningLibraryTopic;
@@ -16,6 +17,7 @@ import com.remelearning.english.listening.library.dto.ListeningLibraryTopicDto;
 import com.remelearning.english.listening.library.dto.SubmitListeningAnswersRequest;
 import com.remelearning.english.listening.library.dto.SubmitListeningAnswersResponse;
 import com.remelearning.english.listening.library.generator.LlmListeningLibraryGenerator;
+import com.remelearning.english.listening.library.mapper.ListeningLibraryAttemptAnswerMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryAttemptMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryQuestionMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibrarySectionMapper;
@@ -47,6 +49,7 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 	private final ListeningLibraryQuestionMapper questionMapper;
 	private final ListeningTopicProgressMapper progressMapper;
 	private final ListeningLibraryAttemptMapper attemptMapper;
+	private final ListeningLibraryAttemptAnswerMapper attemptAnswerMapper;
 	private final LlmListeningLibraryGenerator generator;
 	private final StorageClient storageClient;
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -57,6 +60,7 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 			ListeningLibraryQuestionMapper questionMapper,
 			ListeningTopicProgressMapper progressMapper,
 			ListeningLibraryAttemptMapper attemptMapper,
+			ListeningLibraryAttemptAnswerMapper attemptAnswerMapper,
 			LlmListeningLibraryGenerator generator,
 			StorageClient storageClient) {
 		this.topicMapper = topicMapper;
@@ -64,6 +68,7 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		this.questionMapper = questionMapper;
 		this.progressMapper = progressMapper;
 		this.attemptMapper = attemptMapper;
+		this.attemptAnswerMapper = attemptAnswerMapper;
 		this.generator = generator;
 		this.storageClient = storageClient;
 	}
@@ -175,6 +180,21 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		attempt.setStartedAt(OffsetDateTime.now().toInstant());
 		attempt.setCompletedAt(OffsetDateTime.now().toInstant());
 		attemptMapper.insert(attempt);
+
+		// Persists each submitted answer against the now-known attempt id (only populated by
+		// MyBatis' useGeneratedKeys after the insert above) so a later feature can regenerate AI
+		// practice targeting exactly which questions were missed - mirrors dictation's mistake
+		// history pattern. Runs as a second pass over req.getAnswers() rather than being folded
+		// into the scoring loop above, since that loop runs before the attempt (and its id) exists.
+		for (SubmitListeningAnswersRequest.AnswerItem answer : req.getAnswers()) {
+			ListeningLibraryAttemptAnswer answerRow = new ListeningLibraryAttemptAnswer();
+			answerRow.setAttemptId(attempt.getId());
+			answerRow.setQuestionId(answer.questionId());
+			answerRow.setSelectedOption(answer.selectedOption());
+			answerRow.setCorrectOption(correctByQuestionId.get(answer.questionId()));
+			answerRow.setIsCorrect(Objects.equals(correctByQuestionId.get(answer.questionId()), answer.selectedOption()));
+			attemptAnswerMapper.insert(answerRow);
+		}
 
 		Long nextTopicId = null;
 		boolean nextTopicUnlocked = false;

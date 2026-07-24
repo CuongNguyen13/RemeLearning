@@ -7,6 +7,8 @@ import com.remelearning.english.listening.library.domain.ListeningTopicProgress;
 import com.remelearning.english.listening.library.domain.ListeningTopicStatus;
 import com.remelearning.english.listening.library.dto.SubmitListeningAnswersRequest;
 import com.remelearning.english.listening.library.generator.LlmListeningLibraryGenerator;
+import com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer;
+import com.remelearning.english.listening.library.mapper.ListeningLibraryAttemptAnswerMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryAttemptMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryQuestionMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibrarySectionMapper;
@@ -17,10 +19,12 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import org.mockito.ArgumentCaptor;
 
 class ListeningLibraryServiceImplTest {
 
@@ -31,6 +35,7 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		ListeningLibraryTopic topic1 = new ListeningLibraryTopic();
@@ -43,7 +48,7 @@ class ListeningLibraryServiceImplTest {
 		when(progressMapper.findByUserId("user-1")).thenReturn(List.of());
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		var result = service.getTopics("user-1");
 
@@ -59,6 +64,7 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		ListeningLibraryTopic topic = new ListeningLibraryTopic();
@@ -70,7 +76,7 @@ class ListeningLibraryServiceImplTest {
 		when(progressMapper.findByUserIdAndTopicId("user-1", 1L)).thenReturn(progress);
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		org.junit.jupiter.api.Assertions.assertThrows(
 				com.remelearning.common.exception.BusinessException.class,
@@ -84,12 +90,13 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		when(topicMapper.findById(999L)).thenReturn(null);
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		org.junit.jupiter.api.Assertions.assertThrows(
 				com.remelearning.common.exception.BusinessException.class,
@@ -105,12 +112,13 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		when(sectionMapper.findById(404L)).thenReturn(null);
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
 		req.setAnswers(List.of());
@@ -129,6 +137,7 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		ListeningLibrarySection section = new ListeningLibrarySection();
@@ -136,7 +145,7 @@ class ListeningLibraryServiceImplTest {
 		when(sectionMapper.findById(100L)).thenReturn(section);
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
 		// answers left null on purpose - simulates a request body that omits the field
@@ -156,6 +165,7 @@ class ListeningLibraryServiceImplTest {
 		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
 		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
 		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
 
 		ListeningLibraryTopic topic = new ListeningLibraryTopic();
@@ -184,7 +194,7 @@ class ListeningLibraryServiceImplTest {
 				new SubmitListeningAnswersRequest.AnswerItem(2L, "B")));
 
 		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
-				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, generator, null);
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
 
 		var response = service.submitAnswers("user-1", 100L, req);
 
@@ -195,5 +205,66 @@ class ListeningLibraryServiceImplTest {
 		verify(attemptMapper).insert(any());
 		verify(progressMapper).markPassed("user-1", 1L);
 		verify(progressMapper).unlockIfLocked("user-1", 2L);
+	}
+
+	@Test
+	void submitAnswersPersistsOnePerQuestionAnswerRowWithCorrectIsCorrectFlagAndAttemptId() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+		// Below-threshold score on purpose, so this test doesn't need to stub the pass/unlock path.
+		when(topicMapper.findBySequenceOrder(2)).thenReturn(null);
+
+		ListeningLibraryQuestion q1 = new ListeningLibraryQuestion();
+		q1.setId(1L); q1.setSectionId(100L); q1.setCorrectOption("A");
+		ListeningLibraryQuestion q2 = new ListeningLibraryQuestion();
+		q2.setId(2L); q2.setSectionId(100L); q2.setCorrectOption("B");
+		when(questionMapper.findBySectionId(100L)).thenReturn(List.of(q1, q2));
+
+		// MyBatis' useGeneratedKeys populates attempt.id as a side effect of insert() - simulate
+		// that here so the per-answer loop (which runs after the insert) sees a real attemptId.
+		doAnswer(invocation -> {
+			com.remelearning.english.listening.library.domain.ListeningLibraryAttempt attempt = invocation.getArgument(0);
+			attempt.setId(500L);
+			return null;
+		}).when(attemptMapper).insert(any());
+
+		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
+		req.setAnswers(List.of(
+				new SubmitListeningAnswersRequest.AnswerItem(1L, "A"),
+				new SubmitListeningAnswersRequest.AnswerItem(2L, "WRONG")));
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null);
+
+		service.submitAnswers("user-1", 100L, req);
+
+		ArgumentCaptor<ListeningLibraryAttemptAnswer> captor = ArgumentCaptor.forClass(ListeningLibraryAttemptAnswer.class);
+		verify(attemptAnswerMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
+		List<ListeningLibraryAttemptAnswer> saved = captor.getAllValues();
+
+		assertThat(saved).hasSize(2);
+		ListeningLibraryAttemptAnswer correctAnswer = saved.stream().filter(a -> a.getQuestionId().equals(1L)).findFirst().orElseThrow();
+		assertThat(correctAnswer.getAttemptId()).isEqualTo(500L);
+		assertThat(correctAnswer.getSelectedOption()).isEqualTo("A");
+		assertThat(correctAnswer.getCorrectOption()).isEqualTo("A");
+		assertThat(correctAnswer.getIsCorrect()).isTrue();
+
+		ListeningLibraryAttemptAnswer wrongAnswer = saved.stream().filter(a -> a.getQuestionId().equals(2L)).findFirst().orElseThrow();
+		assertThat(wrongAnswer.getAttemptId()).isEqualTo(500L);
+		assertThat(wrongAnswer.getSelectedOption()).isEqualTo("WRONG");
+		assertThat(wrongAnswer.getCorrectOption()).isEqualTo("B");
+		assertThat(wrongAnswer.getIsCorrect()).isFalse();
 	}
 }
