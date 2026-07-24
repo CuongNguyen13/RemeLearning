@@ -244,7 +244,11 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 			throw BusinessException.notFound("Speaking library section not found: id=" + sectionId);
 		}
 		List<SpeakingLibrarySentence> sentences = sentenceMapper.findBySectionId(sectionId);
-		List<SpeakingLibraryAttempt> attempts = attemptMapper.findBySectionId(sectionId);
+		// Scoped to THIS learner's own attempts only - findBySectionId would return every learner's
+		// attempts on a shared section, which would let Learner B's topic get marked PASSED (and their
+		// next topic unlocked) off the back of Learner A's passing recordings, without Learner B ever
+		// having attempted (let alone passed) that sentence themselves.
+		List<SpeakingLibraryAttempt> attempts = attemptMapper.findBySectionIdAndUserId(sectionId, userId);
 
 		Set<Long> passedSentenceIds = attempts.stream()
 				.filter(a -> a.getPhonemeScore() != null && a.getPhonemeScore() >= PASS_THRESHOLD
@@ -296,8 +300,10 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 		if (section == null) {
 			throw BusinessException.notFound("Speaking library section not found: id=" + sectionId);
 		}
-		List<String> weakPhonemes = attemptMapper.findBySectionId(sectionId).stream()
-				.filter(a -> userId.equals(a.getUserId()))
+		// Scoped at the mapper level (findBySectionIdAndUserId) rather than a Java-side .filter over
+		// findBySectionId's full result, so another learner's attempt rows on a shared section never
+		// even cross the wire, let alone leak into this learner's generated practice targets.
+		List<String> weakPhonemes = attemptMapper.findBySectionIdAndUserId(sectionId, userId).stream()
 				.flatMap(a -> SpeakingMistakeAnalyzer.extractWeakPhonemes(a.getWeakPhonemesJson()).stream())
 				.distinct()
 				.toList();

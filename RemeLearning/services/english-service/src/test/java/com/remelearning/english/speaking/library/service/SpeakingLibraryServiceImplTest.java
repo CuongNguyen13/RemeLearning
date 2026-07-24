@@ -250,7 +250,7 @@ class SpeakingLibraryServiceImplTest {
 				.sentenceId(1L).phonemeScore(0.85).wordScore(0.9).build();
 		SpeakingLibraryAttempt passAttempt2 = SpeakingLibraryAttempt.builder()
 				.sentenceId(2L).phonemeScore(0.75).wordScore(0.8).build();
-		when(attemptMapper.findBySectionId(100L)).thenReturn(List.of(lowAttempt, passAttempt1, passAttempt2));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-1")).thenReturn(List.of(lowAttempt, passAttempt1, passAttempt2));
 
 		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator);
 
@@ -287,12 +287,60 @@ class SpeakingLibraryServiceImplTest {
 		// Only sentence 1 has a passing attempt; sentence 2 has none at all.
 		SpeakingLibraryAttempt passAttempt1 = SpeakingLibraryAttempt.builder()
 				.sentenceId(1L).phonemeScore(0.85).wordScore(0.9).build();
-		when(attemptMapper.findBySectionId(100L)).thenReturn(List.of(passAttempt1));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-1")).thenReturn(List.of(passAttempt1));
 
 		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator);
 
 		var response = service.finishSection("user-1", 100L);
 
+		assertThat(response.getPassedSentences()).isEqualTo(1);
+		assertThat(response.isPassed()).isFalse();
+		assertThat(response.getNextTopicId()).isNull();
+		verify(progressMapper, never()).markPassed(any(), any());
+	}
+
+	@Test
+	void finishSectionDoesNotCreditOtherLearnersPassingAttemptsToTheCallingUser() {
+		SpeakingLibraryTopicMapper topicMapper = mock(SpeakingLibraryTopicMapper.class);
+		SpeakingLibrarySectionMapper sectionMapper = mock(SpeakingLibrarySectionMapper.class);
+		SpeakingLibrarySentenceMapper sentenceMapper = mock(SpeakingLibrarySentenceMapper.class);
+		SpeakingTopicProgressMapper progressMapper = mock(SpeakingTopicProgressMapper.class);
+		SpeakingLibraryAttemptMapper attemptMapper = mock(SpeakingLibraryAttemptMapper.class);
+		LlmSpeakingLibraryGenerator generator = mock(LlmSpeakingLibraryGenerator.class);
+
+		SpeakingLibrarySection section = new SpeakingLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+
+		SpeakingLibrarySentence sentence1 = new SpeakingLibrarySentence();
+		sentence1.setId(1L); sentence1.setSectionId(100L);
+		SpeakingLibrarySentence sentence2 = new SpeakingLibrarySentence();
+		sentence2.setId(2L); sentence2.setSectionId(100L);
+		when(sentenceMapper.findBySectionId(100L)).thenReturn(List.of(sentence1, sentence2));
+
+		// Learner A ("user-a") has passing attempts on BOTH sentences of this shared section. Learner
+		// B ("user-b"), the caller here, has a passing attempt only on sentence 1 and none at all on
+		// sentence 2 - so Learner B must NOT be marked as having passed the section, even though the
+		// section (across all learners) has a passing attempt for every sentence.
+		SpeakingLibraryAttempt learnerAPassSentence1 = SpeakingLibraryAttempt.builder()
+				.userId("user-a").sectionId(100L).sentenceId(1L).phonemeScore(0.9).wordScore(0.9).build();
+		SpeakingLibraryAttempt learnerAPassSentence2 = SpeakingLibraryAttempt.builder()
+				.userId("user-a").sectionId(100L).sentenceId(2L).phonemeScore(0.9).wordScore(0.9).build();
+		SpeakingLibraryAttempt learnerBPassSentence1 = SpeakingLibraryAttempt.builder()
+				.userId("user-b").sectionId(100L).sentenceId(1L).phonemeScore(0.85).wordScore(0.85).build();
+
+		// findBySectionId (unscoped) would return every learner's rows - only stubbed here to prove
+		// the fix no longer calls it for this decision; the scoped query below is what finishSection
+		// must actually use for user-b.
+		when(attemptMapper.findBySectionId(100L)).thenReturn(
+				List.of(learnerAPassSentence1, learnerAPassSentence2, learnerBPassSentence1));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-b")).thenReturn(List.of(learnerBPassSentence1));
+
+		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator);
+
+		var response = service.finishSection("user-b", 100L);
+
+		assertThat(response.getTotalSentences()).isEqualTo(2);
 		assertThat(response.getPassedSentences()).isEqualTo(1);
 		assertThat(response.isPassed()).isFalse();
 		assertThat(response.getNextTopicId()).isNull();
@@ -330,7 +378,7 @@ class SpeakingLibraryServiceImplTest {
 		SpeakingLibrarySection section = new SpeakingLibrarySection();
 		section.setId(100L); section.setTopicId(1L);
 		when(sectionMapper.findById(100L)).thenReturn(section);
-		when(attemptMapper.findBySectionId(100L)).thenReturn(List.of());
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-1")).thenReturn(List.of());
 
 		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper,
 				attemptMapper, generator, mock(PronunciationScoringClient.class), mock(StorageClient.class), speakingLearnService);
@@ -356,7 +404,7 @@ class SpeakingLibraryServiceImplTest {
 		when(sectionMapper.findById(100L)).thenReturn(section);
 		SpeakingLibraryAttempt cleanAttempt = SpeakingLibraryAttempt.builder()
 				.userId("user-1").sectionId(100L).sentenceId(1L).weakPhonemesJson("[]").build();
-		when(attemptMapper.findBySectionId(100L)).thenReturn(List.of(cleanAttempt));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-1")).thenReturn(List.of(cleanAttempt));
 
 		SpeakingLibraryServiceImpl service = newService(topicMapper, sectionMapper, sentenceMapper, progressMapper,
 				attemptMapper, generator, mock(PronunciationScoringClient.class), mock(StorageClient.class), speakingLearnService);
@@ -384,15 +432,18 @@ class SpeakingLibraryServiceImplTest {
 		topic.setId(1L); topic.setName("Travel"); topic.setLevel("B1");
 		when(topicMapper.findById(1L)).thenReturn(topic);
 
-		// Two sentences in this section, each with their own attempt from this learner, plus a
-		// third attempt belonging to a different learner that must not leak into this union.
+		// Two sentences in this section, each with their own attempt from this learner. A different
+		// learner's attempt on this same section is deliberately NOT stubbed on
+		// findBySectionIdAndUserId("user-1", ...) - it lives under a different (sectionId, userId) key,
+		// proving the mapper-level scoping keeps it out of this union without needing a Java-side filter.
 		SpeakingLibraryAttempt sentence1Attempt = SpeakingLibraryAttempt.builder()
 				.userId("user-1").sectionId(100L).sentenceId(1L).weakPhonemesJson("[\"θ\"]").build();
 		SpeakingLibraryAttempt sentence2Attempt = SpeakingLibraryAttempt.builder()
 				.userId("user-1").sectionId(100L).sentenceId(2L).weakPhonemesJson("[\"ð\", \"θ\"]").build();
 		SpeakingLibraryAttempt otherLearnerAttempt = SpeakingLibraryAttempt.builder()
 				.userId("user-2").sectionId(100L).sentenceId(1L).weakPhonemesJson("[\"r\"]").build();
-		when(attemptMapper.findBySectionId(100L)).thenReturn(List.of(sentence1Attempt, sentence2Attempt, otherLearnerAttempt));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-1")).thenReturn(List.of(sentence1Attempt, sentence2Attempt));
+		when(attemptMapper.findBySectionIdAndUserId(100L, "user-2")).thenReturn(List.of(otherLearnerAttempt));
 
 		List<SpeakingPracticeItemDto> generated = List.of(SpeakingPracticeItemDto.builder().practiceItemId(9L).build());
 		when(speakingLearnService.generatePracticeForKeywords("user-1", List.of("θ", "ð"), "B1", null))

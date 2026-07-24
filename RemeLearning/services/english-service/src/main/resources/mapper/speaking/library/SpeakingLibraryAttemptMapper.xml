@@ -20,4 +20,9 @@
         FROM speaking_library_attempts WHERE section_id = #{sectionId} ORDER BY created_at
     </select>
 
+    <select id="findBySectionIdAndUserId" resultType="com.remelearning.english.speaking.library.domain.SpeakingLibraryAttempt">
+        SELECT id, user_id, section_id, sentence_id, phoneme_score, word_score, recorded_audio_storage_key, weak_phonemes_json, created_at
+        FROM speaking_library_attempts WHERE section_id = #{sectionId} AND user_id = #{userId} ORDER BY created_at
+    </select>
+
 </mapper>

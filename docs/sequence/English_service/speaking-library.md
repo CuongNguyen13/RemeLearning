@@ -171,8 +171,8 @@ sequenceDiagram
         Svc-->>Ctrl: BusinessException.notFound -> 404
     else section found
         Svc->>STMapper: findBySectionId(sectionId)
-        Svc->>AMapper: findBySectionId(sectionId)
-        Svc->>Svc: a sentence "passes" if any of its attempts scored<br/>phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD)
+        Svc->>AMapper: findBySectionIdAndUserId(sectionId, userId)<br/>(bugfix: scoped to the calling learner only - a section is a shared<br/>catalog object other learners may also have attempted; the unscoped<br/>findBySectionId used to let another learner's passing attempts count<br/>toward THIS learner's pass/unlock decision)
+        Svc->>Svc: a sentence "passes" if any of THIS learner's own attempts scored<br/>phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD)
         Svc->>Svc: passed = every sentence in the section has passed (and there is at least one sentence)
         alt passed
             Svc->>TMapper: findById(section.topicId)
@@ -228,9 +228,9 @@ sequenceDiagram
     alt section not found
         Svc-->>Ctrl: BusinessException.notFound -> 404
     else section found
-        Svc->>AMapper: findBySectionId(sectionId)
-        AMapper->>DB: SELECT speaking_library_attempts WHERE section_id = ?
-        Svc->>Svc: filter to this userId's own attempts only<br/>(a section can be attempted by any learner, unlike listening's per-user query)
+        Svc->>AMapper: findBySectionIdAndUserId(sectionId, userId)
+        AMapper->>DB: SELECT speaking_library_attempts WHERE section_id = ? AND user_id = ?
+        Note over Svc,AMapper: scoped at the mapper level (not a Java-side filter) so another<br/>learner's attempt rows on this shared section never cross the wire
         loop each of this learner's attempts on this section (any sentence, any retry)
             Svc->>Analyzer: extractWeakPhonemes(attempt.weakPhonemesJson)
             Note over Analyzer: unlike listening (one attempt scores a whole section, so only the<br/>latest matters), speaking scores per-SENTENCE - a section has several<br/>sentences, each retried any number of times - so every attempt's weak<br/>phonemes are unioned (distinct, first-seen order), not just the latest one
@@ -309,7 +309,12 @@ sequenceDiagram
   number of times, so different attempts can each surface different mispronunciations), and the
   phonemes themselves - already short IPA symbols computed by ai-service's GOP scorer - are always a
   good-enough generator target on their own, with no per-sentence taxonomy needed.
-- `attemptMapper.findBySectionId` (also used by `finishSection`, see flow 4) is not itself scoped to
-  one learner - a Section is a shared catalog object, so it can carry attempts from any learner who
-  has ever tried it. Flow 6 filters that list down to `userId`'s own rows before unioning phonemes, so
-  regenerated practice only ever targets the calling learner's own mistakes, never another learner's.
+- `attemptMapper.findBySectionId` returns every attempt on a Section from every learner who has ever
+  tried it (a Section is a shared catalog object) and is no longer used by either `finishSection` or
+  flow 6's `generatePracticeFromSection` - both call the user-scoped
+  `findBySectionIdAndUserId(sectionId, userId)` mapper query instead, added specifically to close a
+  cross-user data leak: `finishSection` used to determine THIS learner's pass/unlock status from
+  every learner's attempts combined, so Learner B could be marked as having passed a sentence (and
+  have their topic gated forward) purely because Learner A had a passing attempt on it, never having
+  attempted it themselves. `findBySectionId` is kept in the mapper as a general-purpose query but has
+  no remaining caller in this service.

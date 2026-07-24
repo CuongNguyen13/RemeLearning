@@ -268,12 +268,12 @@ flowchart TD
         SLibInsertAttempt["insert speaking_library_attempts row {sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey, weakPhonemesJson=score.weakPhonemes()}<br/>(does NOT touch speaking_topic_progress)"]
 
         SLibFinishReq["POST /.../{userId}/sections/{sectionId}/finish"]
-        SLibPassCheck{"every sentence in the section has >=1 attempt<br/>with phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD)?"}
+        SLibPassCheck{"every sentence in the section has >=1 attempt BY THIS USER<br/>with phonemeScore >= 0.7 AND wordScore >= 0.7 (PASS_THRESHOLD) -<br/>findBySectionIdAndUserId(sectionId, userId), not findBySectionId<br/>(bugfix: an unscoped query let another learner's passing attempt<br/>on a shared section count toward this learner's pass/unlock)"}
         SLibMarkPassed["speaking_topic_progress -> PASSED, passed_at=now()"]
         SLibUnlockNext["speaking_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
 
         SLibHistorySectionReq["POST /.../library/{userId}/sections/{sectionId}/ai-practice"]
-        SLibFindOwnAttempts["findBySectionId(sectionId), filter to this userId<br/>(a section is a shared catalog object attemptable by any learner -<br/>unlike listening's single-attempt-per-section, speaking scores per-sentence,<br/>so any sentence/any retry by this learner all count)"]
+        SLibFindOwnAttempts["findBySectionIdAndUserId(sectionId, userId)<br/>(a section is a shared catalog object attemptable by any learner -<br/>unlike listening's single-attempt-per-section, speaking scores per-sentence,<br/>so any sentence/any retry by this learner all count; scoped at the<br/>mapper level so another learner's rows never cross the wire)"]
         SLibAnalyzeMissed["union: every filtered attempt's<br/>SpeakingMistakeAnalyzer.extractWeakPhonemes(weakPhonemesJson)<br/>-> distinct IPA symbols[] (not just the latest attempt, unlike listening;<br/>no topic-name fallback needed - phonemes are already a crisp target)"]
         SLibHasMistakes{"any mispronounced phoneme across any attempt?"}
         SLibNoRegen["return empty list (nothing to regenerate)"]
