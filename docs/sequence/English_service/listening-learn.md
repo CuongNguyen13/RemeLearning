@@ -121,6 +121,48 @@ sequenceDiagram
     end
 ```
 
+## 3. Generate from one past attempt's mistakes (`POST /api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as ListeningLearnController
+    participant Svc as ListeningLearnServiceImpl
+    participant LMapper as ListeningMapper
+    participant DB as reme_english DB
+    participant Analyzer as ListeningMistakeAnalyzer (pure)
+    participant Gen as LlmListeningPracticeGenerator
+    participant Synth as DialogueAudioSynthesizer
+    participant Store as StorageClient (common)
+
+    Caller->>Ctrl: POST /history/{userId}/{attemptId}/ai-practice
+    Ctrl->>Svc: generatePracticeFromAttempt(userId, attemptId)
+    Svc->>LMapper: findAttemptDetailByIdAndUserId(attemptId, userId)
+    alt not found / not owned by userId
+        Svc-->>Ctrl: BusinessException.notFound -> 404
+    else found
+        LMapper-->>Svc: ListeningAttemptDetailRow{level, examType, resultsJson}
+        Svc->>Analyzer: extractMissedTopics(resultsJson)
+        Note over Analyzer: resultsJson (ListeningAttemptQuestionResultDto) carries no per-question<br/>topic/skill tag of its own (only prompt/correctAnswer/explanation) - each<br/>wrong question's own correctAnswer is used as the retry target text<br/>(the missed keyword itself for KEYWORD, the correct option/model<br/>answer for MCQ/OPEN)
+        Analyzer-->>Svc: distinct correctAnswer[] of every wrong question
+        Svc->>Svc: generatePracticeForKeywords(userId, missedTopics, attempt.level, attempt.examType)
+        Note over Svc: same generate-and-persist step "1. Generate" uses -<br/>generator.generate(...) -> synthesize audio -> insertItem -> listItems(userId)
+        Svc->>Gen: generate(missedTopics, level, examType, translationLang=null)
+        Gen-->>Svc: GeneratedListeningPractice{topic, lines[], questions[]}
+        Svc->>Synth: synthesize(lines, ttsLang)
+        Synth-->>Svc: SynthesizedDialogue{audioBytes, transcriptText, translationText?}
+        Svc->>LMapper: insertItem({userId, level, examType, topic, transcript, translation, questionsJson})
+        LMapper->>DB: INSERT INTO listening_practice_items
+        Svc->>Store: write("listening/{userId}/{itemId}.wav", audioBytes)
+        Svc->>LMapper: updateItemStorageKey(itemId, key)
+        LMapper->>DB: UPDATE listening_practice_items SET storage_key = ?
+        Svc->>LMapper: findItemsByUserId(userId)
+        LMapper-->>Svc: refreshed practice-item rows
+        Svc-->>Ctrl: ListeningPracticeItemDto[] (refreshed list)
+        Ctrl-->>Caller: 200 ApiResponse
+    end
+```
+
 ## External calls
 
 | # | Call | From -> To | Notes |
@@ -157,3 +199,9 @@ sequenceDiagram
   `grammar_weak_points`/`pronunciation_weak_points` do for their own categories - there is no such
   table today. The diagram above still shows the `redo`/dispatch call since it executes; it just
   doesn't result in a persisted weak-point row for this category.
+- `generatePracticeForKeywords` (section 3) is the shared generate-and-persist step both
+  `generatePracticeFromAttempt` and Listening Library's own `generatePracticeFromSection` delegate
+  to (see `listening-library.md` section 3) - there is only one AI-practice destination
+  (`listening_practice_items`) per domain, regardless of which flow (learn attempt vs. library
+  section) the mistake came from. Mirrors `grammar-learn.md` section 3's same pattern, plus the
+  audio-synthesis step grammar practice doesn't have.

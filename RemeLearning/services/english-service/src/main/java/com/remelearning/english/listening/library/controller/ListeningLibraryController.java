@@ -1,6 +1,7 @@
 package com.remelearning.english.listening.library.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
 import com.remelearning.english.listening.library.dto.ListeningLibrarySectionDto;
 import com.remelearning.english.listening.library.dto.ListeningLibraryTopicDto;
@@ -52,5 +53,12 @@ public class ListeningLibraryController {
 	@GetMapping("/{userId}/sections/history")
 	public ApiResponse<List<ListeningLibraryAttempt>> getHistory(@PathVariable String userId) {
 		return ApiResponse.ok(listeningLibraryService.getHistory(userId));
+	}
+
+	@Operation(summary = "Generate AI practice targeted at this learner's own most recent attempt's missed questions on one section (the \"Luyện tập với AI\" action) - persists into the same listening_practice_items bank the learn flow uses")
+	@PostMapping("/{userId}/sections/{sectionId}/ai-practice")
+	public ApiResponse<List<ListeningPracticeItemDto>> generateFromSection(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return ApiResponse.ok(listeningLibraryService.generatePracticeFromSection(userId, sectionId));
 	}
 }

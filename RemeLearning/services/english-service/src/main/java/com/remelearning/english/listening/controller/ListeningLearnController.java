@@ -81,4 +81,11 @@ public class ListeningLearnController {
 	public ApiResponse<ListeningAttemptDetailDto> getAttemptDetail(@PathVariable String userId, @PathVariable Long attemptId) {
 		return ApiResponse.ok(listeningLearnService.getAttemptDetail(userId, attemptId));
 	}
+
+	@Operation(summary = "Generate AI practice targeted at one specific past attempt's mistakes (the \"Luyện tập với AI\" action from a history row)")
+	@PostMapping("/history/{userId}/{attemptId}/ai-practice")
+	public ApiResponse<List<ListeningPracticeItemDto>> generateFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return ApiResponse.ok(listeningLearnService.generatePracticeFromAttempt(userId, attemptId));
+	}
 }

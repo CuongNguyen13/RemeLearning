@@ -24,6 +24,7 @@ import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
 import com.remelearning.english.listening.dto.ListeningQuestionDto;
 import com.remelearning.english.listening.dto.SubmitListeningAttemptRequest;
 import com.remelearning.english.listening.generator.GeneratedListeningPractice;
+import com.remelearning.english.listening.generator.ListeningMistakeAnalyzer;
 import com.remelearning.english.listening.generator.ListeningPracticeGenerator;
 import com.remelearning.english.listening.mapper.ListeningMapper;
 import com.remelearning.english.listening.scoring.ListeningQuestionScoring;
@@ -96,27 +97,7 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 	@Transactional
 	public ListeningPracticeItemDto generate(String userId, GenerateListeningPracticeRequest request) {
 		List<String> targetKeywords = resolveTargetKeywords(userId, request.getFocusItems());
-		GeneratedListeningPractice generated = generator.generate(
-				targetKeywords, request.getLevel(), request.getExamType(), request.getTranslationLang());
-		SynthesizedDialogue synthesized = audioSynthesizer.synthesize(generated.lines(), ttsLang);
-
-		ListeningPracticeItem item = ListeningPracticeItem.builder()
-				.userId(userId)
-				.level(request.getLevel())
-				.examType(request.getExamType())
-				.topic(generated.topic())
-				.transcript(synthesized.transcriptText())
-				.translation(synthesized.translationText())
-				.questionsJson(writeJson(generated.questions()))
-				.build();
-		listeningMapper.insertItem(item);
-
-		String key = GENERATED_KEY.formatted(userId, item.getId());
-		storageClient.write(key, new ByteArrayInputStream(synthesized.audioBytes()), synthesized.audioBytes().length);
-		listeningMapper.updateItemStorageKey(item.getId(), key);
-		item.setStorageKey(key);
-
-		return toItemDto(item, generated.questions());
+		return generateAndPersist(userId, targetKeywords, request.getLevel(), request.getExamType(), request.getTranslationLang());
 	}
 
 	@Override
@@ -235,7 +216,62 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 				.build();
 	}
 
+	// Shared generate-and-persist step: builds one ListeningPracticeItem from whatever target
+	// keywords/level/exam type the caller resolved (top weak keywords, explicit focus items, or a
+	// past attempt's/library section's misses), synthesizes its audio, inserts it into the same
+	// listening_practice_items bank generate() uses, and returns the learner's refreshed
+	// practice-set list - mirrors GrammarLearnServiceImpl.generatePracticeForRules.
+	@Override
+	@Transactional
+	public List<ListeningPracticeItemDto> generatePracticeForKeywords(String userId, List<String> targetKeywords, String level, String examType) {
+		generateAndPersist(userId, targetKeywords, level, examType, null);
+		return listItems(userId);
+	}
+
+	// Generates AI practice targeted at one past attempt's mistakes: verifies the attempt belongs
+	// to this learner, diffs its persisted resultsJson via the pure ListeningMistakeAnalyzer to
+	// find every missed question's topic text, then reuses the exact same generate-and-persist
+	// pipeline generate() uses (generatePracticeForKeywords) so the regenerated content lands in
+	// the same bank as a normal "học thường" set.
+	@Override
+	@Transactional
+	public List<ListeningPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId) {
+		ListeningAttemptDetailRow attempt = listeningMapper.findAttemptDetailByIdAndUserId(attemptId, userId);
+		if (attempt == null) {
+			throw BusinessException.notFound("Listening practice attempt not found: id=" + attemptId);
+		}
+		List<String> missedTopics = ListeningMistakeAnalyzer.extractMissedTopics(attempt.getResultsJson());
+		return generatePracticeForKeywords(userId, missedTopics, attempt.getLevel(), attempt.getExamType());
+	}
+
 	// --- helpers ---
+
+	// Actual generation+persistence work shared by generate() and generatePracticeForKeywords():
+	// calls the AI generator, synthesizes audio synchronously, inserts the item, then uploads and
+	// records its audio storage key.
+	private ListeningPracticeItemDto generateAndPersist(
+			String userId, List<String> targetKeywords, String level, String examType, String translationLang) {
+		GeneratedListeningPractice generated = generator.generate(targetKeywords, level, examType, translationLang);
+		SynthesizedDialogue synthesized = audioSynthesizer.synthesize(generated.lines(), ttsLang);
+
+		ListeningPracticeItem item = ListeningPracticeItem.builder()
+				.userId(userId)
+				.level(level)
+				.examType(examType)
+				.topic(generated.topic())
+				.transcript(synthesized.transcriptText())
+				.translation(synthesized.translationText())
+				.questionsJson(writeJson(generated.questions()))
+				.build();
+		listeningMapper.insertItem(item);
+
+		String key = GENERATED_KEY.formatted(userId, item.getId());
+		storageClient.write(key, new ByteArrayInputStream(synthesized.audioBytes()), synthesized.audioBytes().length);
+		listeningMapper.updateItemStorageKey(item.getId(), key);
+		item.setStorageKey(key);
+
+		return toItemDto(item, generated.questions());
+	}
 
 	// Explicit focusItems win; otherwise falls back to the learner's own recently-missed keywords
 	// across their past listening attempts' wrong KEYWORD questions (this domain has no dedicated

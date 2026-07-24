@@ -813,6 +813,27 @@ Toàn bộ attempt đã hoàn thành của learner, trên mọi chủ điểm/Se
 - **Response `data`** — `ListeningLibraryAttempt[]`: `{id, userId, sectionId, score, correctCount,
   totalQuestions, startedAt, completedAt}`.
 
+### POST `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một Section đã làm (mirror Grammar Library's cùng tên endpoint, xem mục
+trên) — tìm attempt **gần nhất** của `userId` trên đúng `sectionId` đó (`ListeningLibraryAttemptMapper`
+chỉ có `findByUserId`, nên việc lọc theo section + chọn attempt mới nhất theo `completedAt` diễn ra
+ở tầng service, không phải một query mapper riêng); nếu learner chưa có attempt nào trên section này,
+trả về danh sách rỗng. Có attempt rồi thì đọc `ListeningLibraryAttemptAnswerMapper.findByAttemptId` để
+kiểm tra (`ListeningMistakeAnalyzer.hasAnyMissedQuestion`) attempt đó có câu nào sai không — không sai
+câu nào cũng trả về rỗng. Một Section chỉ thuộc **đúng một** chủ điểm và câu hỏi của nó không mang tag
+chủ đề riêng (giống hệt quyết định đã áp dụng cho Grammar Library), nên mục tiêu sinh lại chỉ có thể là
+**tên chủ điểm** (`topic.getName()`), không phải nội dung câu hỏi thô. Việc sinh bộ đề mới + tổng hợp
+audio + lưu + trả danh sách làm mới được **ủy quyền hoàn toàn** cho
+`ListeningLearnService.generatePracticeForKeywords(userId, List.of(topic.getName()), topic.getLevel(),
+null)` — cùng bước generate-và-lưu mà `listening.learn`'s `generatePracticeFromAttempt` dùng — nên bộ
+đề mới luôn nằm trong bảng `listening_practice_items`, không có bảng/luồng AI-practice riêng cho
+Listening Library.
+- **Path param**: `userId` (string), `sectionId` (int64)
+- **Response `data`** — `ListeningPracticeItemDto[]` (giống hệt shape của `listening.learn`'s
+  `{userId}/items`, vì nội dung sinh ra nằm chung một bảng).
+- **Lỗi**: `404` nếu `sectionId` không tồn tại.
+
 ### Listening Learn — luyện nghe-hiểu với AI (package `listening`, đỉnh mới)
 
 Sinh một đoạn hội thoại/độc thoại nghe-hiểu (Gemini sinh transcript + câu hỏi, Supertonic tổng hợp
@@ -875,6 +896,26 @@ practiceItemId, level, examType, topic, score, attemptedAt}`.
 Chi tiết một lần làm bài — `ListeningAttemptDetailDto`: `{attemptId, level, examType, topic, accuracy,
 results: ListeningAttemptQuestionResultDto[], transcript, translation, attemptedAt}`. **Lỗi**: `404`
 nếu không tồn tại hoặc không thuộc về `userId`.
+
+### POST `/api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice`
+
+Nút "Luyện tập với AI" trên một dòng lịch sử cụ thể (mirror Grammar Learn's cùng tên endpoint, xem
+mục trên) — khác `generate` ở trên (dùng weak keyword/focus items), endpoint này chỉ phân tích **đúng
+một attempt** (`attemptId`): đọc lại `resultsJson` đã chấm sẵn của đúng attempt đó qua
+`ListeningMapper.findAttemptDetailByIdAndUserId` (không chấm lại — dùng nguyên cờ `correct` đã lưu từ
+lúc nộp bài). `resultsJson` (`ListeningAttemptQuestionResultDto`) không mang tag "topic"/"skill" riêng
+từng câu như `ListeningQuestionItem` gốc (chỉ có `prompt`/`correctAnswer`/`explanation`), nên
+`ListeningMistakeAnalyzer.extractMissedTopics` dùng `correctAnswer` của mỗi câu sai làm mục tiêu sinh
+lại (với câu `KEYWORD` đây chính là từ khóa bị bỏ lỡ; với `MCQ`/`OPEN` là đáp án đúng/mẫu — vẫn là nội
+dung có ý nghĩa để generator tái sử dụng tự nhiên trong đoạn văn mới). Sau đó gọi **cùng**
+`ListeningLearnService.generatePracticeForKeywords(userId, missedTopics, level, examType)` (level/
+examType lấy nguyên từ attempt gốc) mà `generate` dùng bên trong, lưu bộ đề mới (kèm audio tổng hợp
+mới) vào cùng bảng `listening_practice_items`, và trả về toàn bộ danh sách bộ đề đã làm mới. Bước
+generate-và-lưu này (`generatePracticeForKeywords`) cũng được Listening Library tái sử dụng (xem
+endpoint tương ứng ở mục trên) — chỉ có một "kho" AI-practice nghe-hiểu duy nhất, bất kể mistake đến
+từ luồng nào.
+- **Response `data`** — `ListeningPracticeItemDto[]` (như `{userId}/items`).
+- **Lỗi**: `404` nếu `attemptId` không tồn tại hoặc không thuộc về `userId`.
 
 ### Speaking Learn — luyện nói/phát âm với AI (package `speaking`, đỉnh mới)
 
@@ -1996,6 +2037,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: đoạn văn + audio); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers` | chấm toàn bộ câu trả lời 1 Section; `PASSED` (≥0.7) mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |
 | english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/sections/history` | lịch sử toàn bộ attempt đã hoàn thành của learner |
+| english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/ai-practice` | sinh bộ đề nhắm vào câu sai của attempt gần nhất trên 1 section, dùng tên chủ điểm làm mục tiêu, ủy quyền lưu cho `ListeningLearnService.generatePracticeForKeywords` (cùng bảng `listening_practice_items`); `404` |
 | english-service (listening) | REST | POST | `/api/v1/learn/listening/{userId}/generate` | Gemini sinh transcript+câu hỏi, Supertonic tổng hợp audio đồng bộ |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/items/{itemId}` | chi tiết bài (không transcript; nay kèm `answer` MCQ/KEYWORD + `explanation` cho FE chấm local, `answer` null với OPEN); `404` |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/{userId}/items` | danh sách bài đã sinh của learner |
@@ -2003,6 +2045,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (listening) | REST | POST | `/api/v1/learn/listening/attempts` | chấm MCQ/KEYWORD (WER) + OPEN (LLM), tiết lộ transcript/translation; category `listening` không có bảng weak-point riêng |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}` | lịch sử làm bài |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |
+| english-service (listening) | REST | POST | `/api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice` | sinh bộ đề nhắm vào đúng câu sai của 1 attempt (dùng chung generator với `generate`, lưu vào cùng `listening_practice_items`); `404` |
 | english-service (speaking) | REST | POST | `/api/v1/learn/speaking/{userId}/generate` | sinh câu luyện nói + audio mẫu Supertonic |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/items/{itemId}` | chi tiết bài (targetText hiển thị sẵn); `404` |
 | english-service (speaking) | REST | GET | `/api/v1/learn/speaking/{userId}/items` | danh sách bài đã sinh của learner |

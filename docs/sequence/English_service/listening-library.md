@@ -160,6 +160,50 @@ sequenceDiagram
     Ctrl-->>Caller: 200 ApiResponse
 ```
 
+## 5. Generate from one section's most recent attempt mistakes (`POST /{userId}/sections/{sectionId}/ai-practice`)
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Ctrl as ListeningLibraryController
+    participant Svc as ListeningLibraryServiceImpl
+    participant SMapper as ListeningLibrarySectionMapper
+    participant AMapper as ListeningLibraryAttemptMapper
+    participant AAMapper as ListeningLibraryAttemptAnswerMapper
+    participant Analyzer as ListeningMistakeAnalyzer (pure)
+    participant TMapper as ListeningLibraryTopicMapper
+    participant LearnSvc as ListeningLearnServiceImpl
+
+    Caller->>Ctrl: POST /{userId}/sections/{sectionId}/ai-practice
+    Ctrl->>Svc: generatePracticeFromSection(userId, sectionId)
+    Svc->>SMapper: findById(sectionId)
+    alt section not found
+        Svc-->>Ctrl: BusinessException.notFound -> 404
+    else section found
+        Svc->>AMapper: findByUserId(userId)
+        Note over Svc: no dedicated "attempt for this section" query exists -<br/>filters this learner's own attempts to sectionId, keeps the<br/>latest by completedAt
+        alt no completed attempt on this section
+            Svc-->>Ctrl: empty list (nothing to regenerate)
+        else has a most-recent attempt
+            Svc->>AAMapper: findByAttemptId(latestAttempt.id)
+            Svc->>Analyzer: hasAnyMissedQuestion(answers)
+            Note over Analyzer: a Section is scoped to one topic already and its questions<br/>carry no per-question topic tag of their own, so there is no<br/>per-question topic to diff out - this only answers yes/no
+            Analyzer-->>Svc: boolean hasMistakes
+            alt no mistakes
+                Svc-->>Ctrl: empty list (nothing to regenerate)
+            else at least one wrong answer
+                Svc->>TMapper: findById(section.topicId)
+                TMapper-->>Svc: ListeningLibraryTopic{name, level}
+                Svc->>LearnSvc: generatePracticeForKeywords(userId, [topic.name], topic.level, examType=null)
+                Note over LearnSvc: same generate-and-persist step listening.learn's own<br/>generatePracticeFromAttempt uses - see listening-learn.md section 3<br/>(generator.generate -> synthesize audio -> insertItem into<br/>listening_practice_items -> listItems)
+                LearnSvc-->>Svc: List<ListeningPracticeItemDto> (refreshed list)
+            end
+        end
+        Svc-->>Ctrl: List<ListeningPracticeItemDto>
+        Ctrl-->>Caller: 200 ApiResponse
+    end
+```
+
 ## External calls
 
 | # | Call | From -> To | Notes |
@@ -167,7 +211,8 @@ sequenceDiagram
 | 1 | HTTPS | english-service -> Gemini API | `LlmListeningLibraryGenerator` via `AiContentClient`, first-read Section generation only; unlike `grammar.library`'s generator, any LLM/parse failure propagates as `AiContentException` instead of falling back to a static template, since this is content-authoring, not a learner-facing generate call - a failed generation simply produces no Section rather than persisting placeholder content |
 | 2 | Supertonic TTS (in-process/local call, via `DialogueAudioSynthesizer`) | english-service -> Supertonic | synthesizes the passage as a single-speaker ("Narrator") monologue, same synthesizer `listening-learn` uses |
 | 3 | `StorageClient` (S3/local, per `common.storage`) | english-service -> storage backend | writes/reads the Section's audio object; key is `listening-library/{topicId}/{uuid}.wav`, addressed by topic id since no section id exists yet at synthesis time |
-| 4 | Postgres | english-service -> `reme_english` | `listening_library_topics`, `listening_library_sections`, `listening_library_questions`, `listening_topic_progress`, `listening_library_attempts` |
+| 4 | Postgres | english-service -> `reme_english` | `listening_library_topics`, `listening_library_sections`, `listening_library_questions`, `listening_topic_progress`, `listening_library_attempts`, `listening_library_attempt_answers` |
+| 5 | In-process | english-service -> `ListeningLearnService#generatePracticeForKeywords` | fired only by flow 5 (generate-from-section); delegates the actual generate-and-persist step (including audio synthesis) to `listening.learn` so both flows feed the same `listening_practice_items` bank |
 
 ## Notes
 
@@ -187,6 +232,16 @@ sequenceDiagram
   and does not call `PracticeService#redo` — scoring here only writes to `listening_library_attempts`
   and `listening_topic_progress`, not to any weak-point table (mirrors the gap already documented in
   `overview.md` §5: category `listening` has no dedicated weak-point table anywhere in the service).
-- `bff-service` proxies all four of these endpoints through its own `LearnerController` (backed by
-  `EnglishServiceClient`), the same pass-through pattern already used for Vocabulary Library and
+- `bff-service` proxies the first four of these endpoints through its own `LearnerController` (backed
+  by `EnglishServiceClient`), the same pass-through pattern already used for Vocabulary Library and
   Grammar Library, so the FE reaches Listening Library through `bff-service` like every other skill.
+  Flow 5 (`ai-practice`) is new in this service and is **not yet** proxied by `bff-service` - out of
+  scope for this change, same as Grammar Library's own `ai-practice` endpoint when it was first added.
+- Flow 5 is a new dependency of `ListeningLibraryServiceImpl` on `ListeningLearnService` (interface,
+  not the concrete `ListeningLearnServiceImpl`) - the only cross-package collaborator this service
+  has, added specifically so both the learn and library "Luyện tập với AI" actions share exactly one
+  persistence path (`listening_practice_items`) instead of the library growing its own parallel bank.
+  See `listening-learn.md` section 3 for the shared step's own diagram.
+- Like Grammar Library's `generatePracticeFromSession`, the library's mistake-analysis target is the
+  section's owning **topic name**, not raw question text - a Section carries no per-question topic tag
+  of its own (a section is already scoped to one topic), so there is nothing more specific to target.

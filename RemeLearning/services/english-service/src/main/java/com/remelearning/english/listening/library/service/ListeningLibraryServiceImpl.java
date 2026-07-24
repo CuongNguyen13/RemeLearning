@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
+import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
+import com.remelearning.english.listening.generator.ListeningMistakeAnalyzer;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttemptAnswer;
 import com.remelearning.english.listening.library.domain.ListeningLibraryQuestion;
@@ -23,11 +25,14 @@ import com.remelearning.english.listening.library.mapper.ListeningLibraryQuestio
 import com.remelearning.english.listening.library.mapper.ListeningLibrarySectionMapper;
 import com.remelearning.english.listening.library.mapper.ListeningLibraryTopicMapper;
 import com.remelearning.english.listening.library.mapper.ListeningTopicProgressMapper;
+import com.remelearning.english.listening.service.ListeningLearnService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -52,6 +57,7 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 	private final ListeningLibraryAttemptAnswerMapper attemptAnswerMapper;
 	private final LlmListeningLibraryGenerator generator;
 	private final StorageClient storageClient;
+	private final ListeningLearnService listeningLearnService;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	public ListeningLibraryServiceImpl(
@@ -62,7 +68,8 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 			ListeningLibraryAttemptMapper attemptMapper,
 			ListeningLibraryAttemptAnswerMapper attemptAnswerMapper,
 			LlmListeningLibraryGenerator generator,
-			StorageClient storageClient) {
+			StorageClient storageClient,
+			ListeningLearnService listeningLearnService) {
 		this.topicMapper = topicMapper;
 		this.sectionMapper = sectionMapper;
 		this.questionMapper = questionMapper;
@@ -71,6 +78,7 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		this.attemptAnswerMapper = attemptAnswerMapper;
 		this.generator = generator;
 		this.storageClient = storageClient;
+		this.listeningLearnService = listeningLearnService;
 	}
 
 	// Bootstraps the very first topic to UNLOCKED for a new learner, then reports every catalog
@@ -216,6 +224,46 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 	@Override
 	public java.util.List<ListeningLibraryAttempt> getHistory(String userId) {
 		return attemptMapper.findByUserId(userId);
+	}
+
+	// Generates AI practice targeted at this learner's own most recent completed attempt on one
+	// section's missed questions: finds that attempt (there is no dedicated "by section" query, so
+	// this filters the learner's own attempts and keeps the latest by completedAt), checks (via the
+	// pure ListeningMistakeAnalyzer) whether it had any wrong answer at all. A Listening Library
+	// section is scoped to exactly one topic and its questions carry no per-question topic tag of
+	// their own - there is nothing more specific to target than that topic itself, exactly like
+	// GrammarLibraryServiceImpl.generatePracticeFromSession - so every miss means the SAME topic,
+	// and the topic's name is the single target-keyword fed into
+	// ListeningLearnService.generatePracticeForKeywords (landing in the exact same
+	// listening_practice_items bank the learn flow uses). No completed attempt, or no mistakes in
+	// the latest one, both mean nothing to regenerate.
+	@Override
+	@Transactional
+	public java.util.List<ListeningPracticeItemDto> generatePracticeFromSection(String userId, Long sectionId) {
+		ListeningLibrarySection section = sectionMapper.findById(sectionId);
+		if (section == null) {
+			throw BusinessException.notFound("Listening library section not found: id=" + sectionId);
+		}
+		ListeningLibraryAttempt latestAttempt = findLatestAttemptForSection(userId, sectionId);
+		if (latestAttempt == null) {
+			return List.of();
+		}
+		List<ListeningLibraryAttemptAnswer> answers = attemptAnswerMapper.findByAttemptId(latestAttempt.getId());
+		if (!ListeningMistakeAnalyzer.hasAnyMissedQuestion(answers)) {
+			return List.of();
+		}
+		ListeningLibraryTopic topic = requireTopic(section.getTopicId());
+		return listeningLearnService.generatePracticeForKeywords(userId, List.of(topic.getName()), topic.getLevel(), null);
+	}
+
+	// This learner's most recently completed attempt on this specific section, or null if they
+	// have none yet - attemptMapper only exposes findByUserId, so the section filter and
+	// most-recent selection both happen here rather than via a dedicated mapper query.
+	private ListeningLibraryAttempt findLatestAttemptForSection(String userId, Long sectionId) {
+		return attemptMapper.findByUserId(userId).stream()
+				.filter(a -> sectionId.equals(a.getSectionId()))
+				.max(Comparator.comparing(ListeningLibraryAttempt::getCompletedAt))
+				.orElse(null);
 	}
 
 	// Deserializes a question's stored JSON options array back into a plain string list.

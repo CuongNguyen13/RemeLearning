@@ -140,7 +140,17 @@ Per-skill notes:
   per-domain "listening" weak-point row today (category `listening` still just flows through the
   existing `learning.gap.analyzed` pipeline with no dedicated table), regeneration target-keyword
   selection reads this skill's own attempt history instead — the same pattern dictation uses for its
-  own miss table.
+  own miss table. `POST /history/{userId}/{attemptId}/ai-practice` ("Luyện tập với AI" from a history
+  row) diffs one past attempt's persisted `resultsJson` via the pure
+  `ListeningMistakeAnalyzer.extractMissedTopics` (already-graded, not re-scored — `resultsJson` carries
+  no per-question topic/skill tag of its own, so each wrong question's own `correctAnswer` stands in as
+  the retry target text), generates a new passage+questions (with fresh audio) targeting only those
+  topics via the same `LlmListeningPracticeGenerator`, persists it into the same
+  `listening_practice_items` bank, and returns the learner's refreshed practice-set list; `404` if the
+  attempt doesn't exist or belongs to someone else. The persist-and-synthesize-and-refresh step
+  (`generatePracticeForKeywords`) is also reused by Listening Library's own "generate from section"
+  endpoint below — one shared AI-practice bank per domain, regardless of which flow the mistake came
+  from.
 - **Speaking** — also a new domain. Generation produces a target sentence/passage plus a Supertonic
   sample (model) recording (`GET /items/{itemId}/sample-audio`). Grading
   (`POST /api/v1/learn/speaking/{userId}/attempts`) is multipart (learner's recorded audio +
@@ -229,14 +239,31 @@ endpoints under `ListeningLibraryController` (`/api/v1/learn/listening/library`)
   doesn't exist); a score ≥ 0.7 marks the topic `PASSED` and unlocks the next topic by
   `sequenceOrder`.
 - `GET /{userId}/sections/history` — the learner's completed attempts across all topics/sections.
+- `POST /{userId}/sections/{sectionId}/ai-practice` — "Luyện tập với AI" from a Section: finds this
+  learner's own most recent completed attempt on that section (`ListeningLibraryAttemptMapper` only
+  exposes `findByUserId`, so filtering to the section and keeping the latest by `completedAt` happens
+  in the service, not a dedicated query), then checks whether it had any wrong answer via
+  `ListeningMistakeAnalyzer.hasAnyMissedQuestion` over `ListeningLibraryAttemptAnswerMapper.findByAttemptId`
+  (library questions carry no explicit topic tag of their own, and a Section is already scoped to one
+  topic, so there is nothing more specific to target than that topic). If the learner has no completed
+  attempt on this section, or their latest one had no mistakes, returns an empty list without
+  regenerating anything; otherwise **delegates the actual generate-and-persist step to
+  `ListeningLearnService.generatePracticeForKeywords`** with `[topic.name]` as the target-keywords list
+  — the exact same pipeline `listening.learn`'s own "generate from attempt" endpoint uses — so the
+  regenerated content (including fresh audio) lands in the shared `listening_practice_items` bank, not
+  a Listening-Library-only table. Returns the learner's refreshed `ListeningPracticeItemDto[]` (same
+  shape as `listening.learn`'s own listing); `404` if the section doesn't exist.
 
 Migration: `V19__listening_library.sql` (`listening_library_topics`, `listening_library_sections`,
-`listening_library_questions`, `listening_topic_progress`, `listening_library_attempts`). Unlike every
-other library/learn skill, scoring here does **not** call `PracticeService.redo(...)` — it only writes
-`listening_library_attempts`/`listening_topic_progress`, consistent with the pre-existing gap that
-category `listening` has no dedicated weak-point table anywhere in the service (see
-[Learn skills](#learn-skills-học--luyện-tập-với-ai) above). `bff-service` now proxies these four
-endpoints too (via `EnglishServiceClient`/`LearnerController`), same as Vocabulary/Grammar Library. See
+`listening_library_questions`, `listening_topic_progress`, `listening_library_attempts`), plus Task 1's
+`listening_library_attempt_answers` (one row per submitted answer within an attempt, feeding the
+mistake-analysis above). Unlike every other library/learn skill, scoring here does **not** call
+`PracticeService.redo(...)` — it only writes `listening_library_attempts`/`listening_topic_progress`,
+consistent with the pre-existing gap that category `listening` has no dedicated weak-point table
+anywhere in the service (see [Learn skills](#learn-skills-học--luyện-tập-với-ai) above). `bff-service`
+proxies the first four of these endpoints (via `EnglishServiceClient`/`LearnerController`), same as
+Vocabulary/Grammar Library — the new `ai-practice` endpoint is not yet proxied, same as Grammar
+Library's own `ai-practice` endpoint. See
 [`docs/sequence/English_service/listening-library.md`](../../../docs/sequence/English_service/listening-library.md)
 and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-service-data-flow.md).
 

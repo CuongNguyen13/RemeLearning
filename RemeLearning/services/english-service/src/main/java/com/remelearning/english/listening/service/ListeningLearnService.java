@@ -25,4 +25,16 @@ public interface ListeningLearnService {
 	List<ListeningAttemptHistoryEntryDto> getHistory(String userId);
 
 	ListeningAttemptDetailDto getAttemptDetail(String userId, Long attemptId);
+
+	/**
+	 * Shared generate-and-persist step: builds one {@link ListeningPracticeItemDto} targeting the
+	 * given keywords/level/exam type (same {@code listening_practice_items} bank {@link #generate}
+	 * uses) and returns the learner's refreshed practice-set list. Used both by
+	 * {@link #generatePracticeFromAttempt} and by the Listening Library flow
+	 * ({@code ListeningLibraryService#generatePracticeFromSection}).
+	 */
+	List<ListeningPracticeItemDto> generatePracticeForKeywords(String userId, List<String> targetKeywords, String level, String examType);
+
+	/** Generates AI practice targeted at one past learn-flow attempt's missed questions. */
+	List<ListeningPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId);
 }

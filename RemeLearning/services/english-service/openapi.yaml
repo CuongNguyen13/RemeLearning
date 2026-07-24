@@ -1225,6 +1225,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseListeningLibraryAttemptList"
 
+  /api/v1/learn/listening/library/{userId}/sections/{sectionId}/ai-practice:
+    post:
+      tags: [Listening Library]
+      summary: >
+        Generate AI practice targeted at this learner's own most recent completed attempt on one
+        section's missed questions (the "Luyện tập với AI" action) - a section has no per-question
+        topic tag of its own, so the target is the section's owning topic name; persists into the
+        same listening_practice_items bank the learn flow uses (there is only one AI-practice
+        destination per domain) and returns the learner's refreshed practice-set list. Returns an
+        empty list if the learner has no completed attempt on this section, or if their most
+        recent attempt had no mistakes.
+      operationId: generateListeningPracticeFromSection
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItemList"
+        "404":
+          description: Section not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
+
   /api/v1/learn/listening/{userId}/generate:
     post:
       tags: [Listening Learn]
@@ -1370,6 +1405,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseListeningAttemptDetail"
+
+  /api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice:
+    post:
+      tags: [Listening Learn]
+      summary: >
+        Generate AI practice targeted at one specific past attempt's mistakes (the "Luyện tập với
+        AI" action from a history row) - diffs the attempt's persisted resultsJson to find every
+        missed question's topic text, generates a new passage+questions targeting only those
+        topics, persists it into the shared listening_practice_items bank, and returns the
+        learner's refreshed practice-set list
+      operationId: generateListeningPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningPracticeItemList"
+        "404":
+          description: Attempt not found or doesn't belong to this learner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseError"
 
   /api/v1/learn/speaking/{userId}/generate:
     post:

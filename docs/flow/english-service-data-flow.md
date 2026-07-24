@@ -144,6 +144,11 @@ flowchart TD
         LLScoreOpen["OpenAnswerGrader.grade(transcript, prompt, modelAnswer, submitted)<br/>LLM (Gemini) -> {score 0..1, feedback}"]
         LLInsertAttempt["insertAttempt (answersJson + resultsJson + score)"]
         LLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct label<br/>(KEYWORD answer, or MCQ/OPEN's skill) - itemId=listening:&lt;label&gt;, category=listening"]
+
+        LLHistoryAttemptReq["POST /api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice"]
+        LLReadAttempt["findAttemptDetailByIdAndUserId(attemptId, userId)<br/>404 if not found / not owned by userId"]
+        LLAnalyzeMissed["ListeningMistakeAnalyzer.extractMissedTopics(resultsJson)<br/>-> distinct correctAnswer[] of every wrong question<br/>(resultsJson carries no per-question topic/skill tag of its own)"]
+        LLListRefreshed["findItemsByUserId(userId) -> refreshed practice-set list"]
     end
 
     subgraph SpeakingLearnFlow["Speaking learn (package speaking, brand-new domain)"]
@@ -231,6 +236,16 @@ flowchart TD
         LLibPassCheck{"score >= 0.7 (PASS_THRESHOLD)?"}
         LLibMarkPassed["listening_topic_progress -> PASSED, passed_at=now()"]
         LLibUnlockNext["listening_topic_progress (next sequence_order) -> UNLOCKED<br/>(insert-or-flip-if-LOCKED, never regresses UNLOCKED/IN_PROGRESS/PASSED)"]
+
+        LLibHistorySectionReq["POST /.../library/{userId}/sections/{sectionId}/ai-practice"]
+        LLibFindLatestAttempt["findByUserId(userId), filter to sectionId, keep latest by completedAt<br/>(no dedicated 'attempt for this section' query)"]
+        LLibHasAttempt{"learner has a completed attempt on this section?"}
+        LLibNoAttempt["return empty list (nothing to regenerate)"]
+        LLibAnalyzeMissed["ListeningMistakeAnalyzer.hasAnyMissedQuestion(answers)<br/>-> boolean (a Section is scoped to one topic already and its questions<br/>carry no per-question topic tag of their own)"]
+        LLibHasMistakes{"any question missed?"}
+        LLibNoRegen["return empty list (nothing to regenerate)"]
+        LLibTopicLookup["ListeningLibraryTopicMapper.findById(topicId) -> topic.name, topic.level"]
+        LLibDelegate["ListeningLearnService.generatePracticeForKeywords(userId, [topic.name], topic.level, examType=null)<br/>delegates to listening.learn's own generate-and-persist pipeline (LLGenerate/LLSynthesize/LLInsertItem/LLListRefreshed)<br/>so both flows feed the same listening_practice_items bank"]
     end
 
     subgraph SpeakingLibraryFlow["Speaking library (package speaking.library) - fixed topic catalog + AI Section (sample sentences + per-sentence audio), generated once"]
@@ -295,6 +310,7 @@ flowchart TD
         T39[("speaking_library_sentences")]
         T40[("speaking_topic_progress")]
         T41[("speaking_library_attempts")]
+        T42[("listening_library_attempt_answers")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -424,6 +440,12 @@ flowchart TD
     LLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
     LLFeed -.same.-> LockPrior
 
+    LLHistoryAttemptReq --> LLReadAttempt
+    T19 --> LLReadAttempt
+    LLReadAttempt --> LLAnalyzeMissed --> LLGenerate
+    LLInsertItem --> LLListRefreshed
+    T18 --> LLListRefreshed
+
     SLGenReq --> SLResolveWords --> SLGenerate --> SLSynthesizeSample --> T20
     SLSubmitReq --> SLStoreAudio --> SLScore --> SLInsertAttempt --> T21
     SLScore --> SLFeed
@@ -502,9 +524,22 @@ flowchart TD
     LLibAnswerReq --> LLibScore
     T34 --> LLibScore
     LLibScore --> LLibInsertAttempt --> T36
+    LLibInsertAttempt --> T42
     LLibScore --> LLibPassCheck
     LLibPassCheck -->|yes| LLibMarkPassed --> T35
     LLibMarkPassed --> LLibUnlockNext --> T35
+
+    LLibHistorySectionReq --> LLibFindLatestAttempt
+    T36 --> LLibFindLatestAttempt
+    LLibFindLatestAttempt --> LLibHasAttempt
+    LLibHasAttempt -->|no| LLibNoAttempt
+    LLibHasAttempt -->|yes| LLibAnalyzeMissed
+    T42 --> LLibAnalyzeMissed
+    LLibAnalyzeMissed --> LLibHasMistakes
+    LLibHasMistakes -->|no| LLibNoRegen
+    LLibHasMistakes -->|yes| LLibTopicLookup
+    T32 --> LLibTopicLookup
+    LLibTopicLookup --> LLibDelegate --> LLGenerate
 
     T37 --> SLibSectionReq
     SLibSectionReq --> SLibLockCheck
@@ -589,6 +624,10 @@ flowchart TD
 | `listening_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), results (JSON `ListeningAttemptQuestionResultDto[]`), score, created_at}` | `score` = mean of all `subScore`s (each question's own 0..1) |
 | `ListeningAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, subScore, explanation}], transcript, translation?, actionAdvice[]}` | REST grading response; `transcript`/`translation` returned **only** on this response, not on `getItem`/`listItems` (those would leak the passage; note the per-question `answer`/`explanation` themselves are now on `getItem`/`listItems` for client-side grading, `answer` null for `OPEN`) |
 | `PracticeAttemptRequest` fed from listening learn | `{itemId: "listening:<label>", category: "listening", label, correct}` | one per distinct label (KEYWORD's `answer`, or MCQ/OPEN's `skill`); **`category = "listening"` has no matching consumer in `WeakPointDispatcherImpl`** - `mistake_history`/`item_difficulty_stats`/the review queue and `learning.gap.analysis.requested`'s `history[]` still pick it up (all category-agnostic), but no `listening_weak_points` table exists and the Java-computed score for it is simply logged and dropped - see the note below |
+| `ListeningMistakeAnalyzer.extractMissedTopics` output (in-memory) | `List<String>` distinct `correctAnswer` values | pure function over an attempt's persisted `resultsJson` (`ListeningAttemptQuestionResultDto[]`, already graded - not re-scored); `resultsJson` carries no per-question topic/skill tag of its own (only `prompt`/`correctAnswer`/`explanation`), so each wrong question's own `correctAnswer` is used as the retry target text (the missed keyword itself for `KEYWORD`, the correct option/model answer for `MCQ`/`OPEN`); feeds straight into `ListeningPracticeGenerator.generate(missedTopics, level, examType, translationLang=null)` for `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` |
+| `listening_library_attempt_answers` row | `{id, attempt_id, question_id, selected_option, correct_option, is_correct, created_at}` | one row per submitted answer within a `listening_library_attempts` row (Task 1), so a later feature can regenerate AI practice targeting only the questions actually missed - mirrors dictation's mistake-history pattern |
+| `ListeningMistakeAnalyzer.hasAnyMissedQuestion` output (in-memory) | `boolean` | pure function over a Listening Library section's most recent attempt's `listening_library_attempt_answers` rows; library questions carry no explicit topic tag of their own and a Section is already scoped to one topic, so there is no per-question topic to diff out - this only answers whether the attempt had any mistake. When `true`, the call site (`ListeningLibraryServiceImpl.generatePracticeFromSection`) builds the target-keywords list itself as `List.of(topic.getName())` (the section's owning topic name) and feeds that into `ListeningPracticeGenerator.generate(...)` via `ListeningLearnService.generatePracticeForKeywords`; when `false` (or no completed attempt exists), generation is skipped entirely and an empty list is returned |
+| `listening_practice_items` row from a "generate from attempt/section" call | same shape as the `generate`-produced row above (including synthesized audio) | both `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` and `POST /learn/listening/library/{userId}/sections/{sectionId}/ai-practice` insert into this same table via `ListeningLearnServiceImpl.generatePracticeForKeywords` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library section) the mistake came from; the library flow's target keywords is always the single-element `[topic.name]`, not per-question text |
 | `GenerateSpeakingPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body |
 | `speaking_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_text, translation?, storage_key?, created_at}` | one row per generated sentence/passage; `storage_key` is the Supertonic **sample** (model) recording, synthesized with one fixed voice (unlike listening's multi-speaker dialogue) |
 | `SpeakingAttemptRequest` (multipart) | `{userId (path), practiceItemId, audio (multipart file)}` | REST request; audio persisted to `StorageClient` before scoring, so a scoring failure still leaves the recording retrievable |

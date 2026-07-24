@@ -132,6 +132,45 @@ class ListeningLearnServiceImplTest {
 		verify(openAnswerGrader, org.mockito.Mockito.never()).grade(any(), any(), any(), any());
 	}
 
+	@Test
+	void generatePracticeFromAttemptThrowsNotFoundForUnknownOrForeignAttempt() {
+		when(mapper.findAttemptDetailByIdAndUserId(99L, "user-1")).thenReturn(null);
+
+		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L))
+				.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	void generatePracticeFromAttemptRegeneratesTargetingTheDistinctMissedCorrectAnswersAndPersistsIntoTheSameBank() {
+		ListeningAttemptDetailRow attempt = ListeningAttemptDetailRow.builder()
+				.attemptId(30L).level("B1").examType("TOEIC").topic("Travel")
+				.transcript("We will be departing shortly.").translation(null)
+				.resultsJson(toJson(List.of(
+						ListeningAttemptQuestionResultDto.builder().index(0).prompt("p1")
+								.correctAnswer("A flight departure").correct(false).subScore(0.0).build(),
+						ListeningAttemptQuestionResultDto.builder().index(1).prompt("p2")
+								.correctAnswer("departing").correct(true).subScore(1.0).build())))
+				.score(0.5)
+				.createdAt(Instant.now())
+				.build();
+		when(mapper.findAttemptDetailByIdAndUserId(30L, "user-1")).thenReturn(attempt);
+		when(mapper.findItemsByUserId("user-1")).thenReturn(List.of());
+		when(generator.generate(eq(List.of("A flight departure")), eq("B1"), eq("TOEIC"), any())).thenReturn(
+				new GeneratedListeningPractice("Travel retry",
+						List.of(new DialogueLine("A", "Flight 204 is now boarding.", null)),
+						List.of(ListeningQuestionItem.builder().type(ListeningQuestionType.MCQ).skill("main-idea")
+								.prompt("What is this about?").options(List.of("A flight", "A train")).answer("A flight").explanation("x").build())));
+		when(audioSynthesizer.synthesize(any(), eq("en"))).thenReturn(
+				new SynthesizedDialogue("wav-bytes".getBytes(), "Flight 204 is now boarding.", null));
+		simulateGeneratedItemId(6L);
+
+		List<ListeningPracticeItemDto> result = service.generatePracticeFromAttempt("user-1", 30L);
+
+		verify(mapper).insertItem(any(ListeningPracticeItem.class));
+		verify(mapper).updateItemStorageKey(6L, "listening/user-1/6.wav");
+		assertThat(result).isNotNull();
+	}
+
 	private void simulateGeneratedItemId(Long id) {
 		org.mockito.Mockito.doAnswer(invocation -> {
 			ListeningPracticeItem item = invocation.getArgument(0);
