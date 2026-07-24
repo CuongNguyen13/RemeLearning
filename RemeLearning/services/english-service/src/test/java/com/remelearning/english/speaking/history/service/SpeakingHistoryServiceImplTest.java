@@ -30,7 +30,7 @@ class SpeakingHistoryServiceImplTest {
 				SpeakingAttemptHistoryEntryDto.builder().attemptId(10L).overallScore(0.5).attemptedAt(older).build(),
 				SpeakingAttemptHistoryEntryDto.builder().attemptId(11L).overallScore(0.9).attemptedAt(newest).build()));
 		when(speakingLibraryService.getHistory("user-1")).thenReturn(List.of(
-				SpeakingLibraryAttempt.builder().id(20L).sectionId(3L).phonemeScore(1.0).createdAt(newer).build()));
+				SpeakingLibraryAttempt.builder().id(20L).sectionId(3L).phonemeScore(1.0).wordScore(1.0).createdAt(newer).build()));
 
 		List<SpeakingHistoryEntryDto> merged = service.getMergedHistory("user-1");
 
@@ -41,7 +41,33 @@ class SpeakingHistoryServiceImplTest {
 		assertThat(merged.get(1).getAttemptOrSessionId()).isEqualTo(20L);
 		assertThat(merged.get(1).getSource()).isEqualTo("LIBRARY");
 		assertThat(merged.get(1).getSectionId()).isEqualTo(3L);
+		assertThat(merged.get(1).getScore()).isEqualTo(1.0);
 		assertThat(merged.get(2).getAttemptOrSessionId()).isEqualTo(10L);
+	}
+
+	@Test
+	void getMergedHistoryAveragesPhonemeAndWordScoreForLibraryEntries() {
+		Instant completedAt = Instant.parse("2026-07-24T00:00:00Z");
+		when(speakingLearnService.getHistory("user-1")).thenReturn(List.of());
+		when(speakingLibraryService.getHistory("user-1")).thenReturn(List.of(
+				SpeakingLibraryAttempt.builder().id(30L).sectionId(4L).phonemeScore(0.8).wordScore(0.6).createdAt(completedAt).build()));
+
+		List<SpeakingHistoryEntryDto> merged = service.getMergedHistory("user-1");
+
+		assertThat(merged).hasSize(1);
+		assertThat(merged.get(0).getScore()).isEqualTo(0.7);
+	}
+
+	@Test
+	void getMergedHistoryFallsBackToNonNullSideWhenOneLibraryScoreIsMissing() {
+		Instant completedAt = Instant.parse("2026-07-24T00:00:00Z");
+		when(speakingLearnService.getHistory("user-1")).thenReturn(List.of());
+		when(speakingLibraryService.getHistory("user-1")).thenReturn(List.of(
+				SpeakingLibraryAttempt.builder().id(31L).sectionId(4L).phonemeScore(0.8).wordScore(null).createdAt(completedAt).build()));
+
+		List<SpeakingHistoryEntryDto> merged = service.getMergedHistory("user-1");
+
+		assertThat(merged.get(0).getScore()).isEqualTo(0.8);
 	}
 
 	@Test

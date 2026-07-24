@@ -60,8 +60,22 @@ public class SpeakingHistoryServiceImpl implements SpeakingHistoryService {
 				.source("LIBRARY")
 				.attemptOrSessionId(row.getId())
 				.completedAt(row.getCreatedAt())
-				.score(row.getPhonemeScore())
+				.score(averageOf(row.getPhonemeScore(), row.getWordScore()))
 				.sectionId(row.getSectionId())
 				.build();
+	}
+
+	// Averages phoneme and word accuracy into one pronunciation score for the merged history row -
+	// both are meaningful accuracy signals, so neither alone should represent the attempt. Falls
+	// back to whichever side is non-null (or null) rather than throwing, matching the previous
+	// code's tolerance of a null phonemeScore.
+	private Double averageOf(Double phonemeScore, Double wordScore) {
+		if (phonemeScore == null) {
+			return wordScore;
+		}
+		if (wordScore == null) {
+			return phonemeScore;
+		}
+		return (phonemeScore + wordScore) / 2.0;
 	}
 }

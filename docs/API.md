@@ -1041,7 +1041,8 @@ vòng lặp bean.
 - **Path param**: `userId` (string)
 - **Response `data`** — `SpeakingHistoryEntryDto[]`: `{source ("LEARN"|"LIBRARY"),
   attemptOrSessionId, completedAt?, score?, sectionId?}`. `score` lấy từ `overallScore` (learn) hoặc
-  `phonemeScore` (library, đại diện chính cho mức độ phát âm đúng của attempt). `sectionId` chỉ có
+  trung bình cộng `(phonemeScore + wordScore) / 2` (library — cả hai điểm đều là tín hiệu có ý nghĩa
+  cho độ chính xác phát âm nên không dùng riêng `phonemeScore`). `sectionId` chỉ có
   giá trị khi `source = "LIBRARY"`; dòng `LEARN` luôn để `null`.
 
 ### Speaking Library — catalog chủ điểm luyện nói/phát âm, Section AI (câu mẫu + audio từng câu) + mở khóa tuần tự (package `speaking.library`)
