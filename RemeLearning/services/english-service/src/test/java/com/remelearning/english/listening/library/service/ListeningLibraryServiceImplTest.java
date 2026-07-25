@@ -1,5 +1,6 @@
 package com.remelearning.english.listening.library.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
 import com.remelearning.english.listening.library.domain.ListeningLibraryQuestion;
 import com.remelearning.english.listening.library.domain.ListeningLibrarySection;
@@ -288,6 +289,64 @@ class ListeningLibraryServiceImplTest {
 		assertThat(wrongAnswer.getSelectedOption()).isEqualTo("WRONG");
 		assertThat(wrongAnswer.getCorrectOption()).isEqualTo("B");
 		assertThat(wrongAnswer.getIsCorrect()).isFalse();
+	}
+
+	// Reproduces the real FE contract: SectionRunner.tsx submits the full option text it rendered
+	// (there are no A/B/C/D labels in the UI to send back), while correctOption/optionsJson are
+	// stored as the LLM-authored letter + ordered options array. Before the fix, comparing the letter
+	// directly against the full-text selectedOption always failed, marking every correct answer wrong
+	// and persisting the full text into a VARCHAR(8) column.
+	@Test
+	void submitAnswersMatchesFullOptionTextAgainstLetterKeyedCorrectOption() throws Exception {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+		when(topicMapper.findBySequenceOrder(2)).thenReturn(null);
+
+		ObjectMapper objectMapper = new ObjectMapper();
+		ListeningLibraryQuestion q1 = new ListeningLibraryQuestion();
+		q1.setId(1L); q1.setSectionId(100L); q1.setCorrectOption("A");
+		q1.setOptionsJson(objectMapper.writeValueAsString(
+				List.of("A cup of tea.", "In a small town near the sea.", "At seven o'clock.", "She walks.")));
+		when(questionMapper.findBySectionId(100L)).thenReturn(List.of(q1));
+
+		doAnswer(invocation -> {
+			com.remelearning.english.listening.library.domain.ListeningLibraryAttempt attempt = invocation.getArgument(0);
+			attempt.setId(500L);
+			return null;
+		}).when(attemptMapper).insert(any());
+
+		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
+		req.setAnswers(List.of(new SubmitListeningAnswersRequest.AnswerItem(1L, "A cup of tea.")));
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		var response = service.submitAnswers("user-1", 100L, req);
+
+		assertThat(response.getCorrectCount()).isEqualTo(1);
+		assertThat(response.getScore()).isEqualTo(1.0);
+
+		ArgumentCaptor<ListeningLibraryAttemptAnswer> captor = ArgumentCaptor.forClass(ListeningLibraryAttemptAnswer.class);
+		verify(attemptAnswerMapper).insert(captor.capture());
+		ListeningLibraryAttemptAnswer saved = captor.getValue();
+		assertThat(saved.getSelectedOption()).isEqualTo("A cup of tea.");
+		assertThat(saved.getCorrectOption()).isEqualTo("A cup of tea.");
+		assertThat(saved.getIsCorrect()).isTrue();
 	}
 
 	@Test

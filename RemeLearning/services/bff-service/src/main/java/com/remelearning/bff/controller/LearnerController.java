@@ -496,6 +496,13 @@ public class LearnerController {
 		return englishServiceClient.startListeningLibrarySection(userId, topicId).map(ApiResponse::ok);
 	}
 
+	@Operation(summary = "Stream one listening-library section's synthesized audio; relays english-service's audio response")
+	@GetMapping("/{userId}/learn/listening/library/sections/{sectionId}/audio")
+	public Mono<ResponseEntity<Flux<DataBuffer>>> getListeningLibraryAudio(
+			@PathVariable String userId, @PathVariable Long sectionId) {
+		return englishServiceClient.streamListeningLibraryAudio(sectionId);
+	}
+
 	@Operation(summary = "Score a submitted answer set for one listening-library section; passes the topic and unlocks the next one on pass; thin proxy to english-service")
 	@PostMapping("/{userId}/learn/listening/library/sections/{sectionId}/answers")
 	public Mono<ApiResponse<SubmitListeningAnswersResponse>> submitListeningLibraryAnswers(

@@ -1,6 +1,7 @@
 package com.remelearning.english.listening.library.controller;
 
 import com.remelearning.common.response.ApiResponse;
+import com.remelearning.english.listening.dto.ListeningAudioResource;
 import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
 import com.remelearning.english.listening.library.dto.ListeningLibrarySectionDto;
@@ -11,6 +12,10 @@ import com.remelearning.english.listening.library.service.ListeningLibraryServic
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +44,17 @@ public class ListeningLibraryController {
 	public ApiResponse<ListeningLibrarySectionDto> startOrResumeSection(
 			@PathVariable String userId, @PathVariable Long topicId) {
 		return ApiResponse.ok(listeningLibraryService.startOrResumeSection(userId, topicId));
+	}
+
+	@Operation(summary = "Stream one section's synthesized audio")
+	@GetMapping("/sections/{sectionId}/audio")
+	public ResponseEntity<InputStreamResource> getSectionAudio(@PathVariable Long sectionId) {
+		ListeningAudioResource audio = listeningLibraryService.loadSectionAudio(sectionId);
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType(audio.contentType()))
+				.contentLength(audio.contentLength())
+				.header("Content-Disposition", ContentDisposition.inline().filename(audio.filename()).build().toString())
+				.body(new InputStreamResource(audio.stream()));
 	}
 
 	@Operation(summary = "Score a submitted answer set for one section; passes the topic and unlocks the next one on pass")

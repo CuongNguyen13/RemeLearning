@@ -7,7 +7,7 @@ server:
 
 reme:
   jwt:
-    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+    secret: ${JWT_SECRET}
     expiration-minutes: 60
   services:
     user: ${USER_SERVICE_URL:http://localhost:8081}

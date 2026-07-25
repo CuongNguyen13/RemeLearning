@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.StorageClient;
+import com.remelearning.english.listening.dto.ListeningAudioResource;
 import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
 import com.remelearning.english.listening.generator.ListeningMistakeAnalyzer;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
@@ -48,6 +49,12 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 
 	private static final double PASS_THRESHOLD = 0.7;
 	private static final int FIRST_SEQUENCE_ORDER = 1;
+	// Must match bff-service's public route (LearnerController#getListeningLibraryAudio), not
+	// english-service's own internal controller route - this URL is returned straight to the FE
+	// client, which only ever talks to bff-service. Mirrors ListeningLearnServiceImpl.AUDIO_URL:
+	// storageClient.url() alone isn't fetchable by a browser for local storage (returns the raw key)
+	// nor for a private/non-presigned S3 bucket, so audio must be streamed through a backend proxy.
+	private static final String AUDIO_URL = "/api/v1/learners/%s/learn/listening/library/sections/%d/audio";
 
 	private final ListeningLibraryTopicMapper topicMapper;
 	private final ListeningLibrarySectionMapper sectionMapper;
@@ -121,10 +128,11 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 						q.getId(), q.getQuestionText(), parseOptions(q.getOptionsJson())))
 				.toList();
 
-		// StorageClient.url() returns a directly-fetchable locator for the stored audio object
-		// (a real URL for a remote store, the key itself for local) - null if no audio was generated.
+		// Proxy path through this service's own streaming endpoint (see AUDIO_URL) rather than
+		// storageClient.url() directly - that locator isn't reliably browser-fetchable (raw key for
+		// local storage, non-presigned/internal-endpoint URL for S3). Null if no audio was generated.
 		String audioUrl = section.getAudioStorageKey() != null
-				? storageClient.url(section.getAudioStorageKey())
+				? String.format(AUDIO_URL, userId, section.getId())
 				: null;
 
 		return new ListeningLibrarySectionDto(section.getId(), section.getPassageText(), audioUrl, questionViews);
@@ -166,8 +174,13 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 			throw BusinessException.badRequest("Submitted answers must not be null: sectionId=" + sectionId);
 		}
 		java.util.List<ListeningLibraryQuestion> questions = questionMapper.findBySectionId(sectionId);
+		// The FE submits the full option text it displayed (SectionRunner.tsx has no A/B/C/D labels
+		// to send back), while correctOption is stored as the LLM-authored letter ("A"-"D") - resolve
+		// it to the matching option text here so comparison/persistence use the same representation.
 		Map<Long, String> correctByQuestionId = questions.stream()
-				.collect(Collectors.toMap(ListeningLibraryQuestion::getId, ListeningLibraryQuestion::getCorrectOption));
+				.collect(Collectors.toMap(ListeningLibraryQuestion::getId, this::resolveCorrectOptionText));
+		Map<Long, ListeningLibraryQuestion> questionById = questions.stream()
+				.collect(Collectors.toMap(ListeningLibraryQuestion::getId, q -> q));
 
 		int correctCount = 0;
 		for (SubmitListeningAnswersRequest.AnswerItem answer : req.getAnswers()) {
@@ -194,14 +207,29 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		// practice targeting exactly which questions were missed - mirrors dictation's mistake
 		// history pattern. Runs as a second pass over req.getAnswers() rather than being folded
 		// into the scoring loop above, since that loop runs before the attempt (and its id) exists.
+		// Also builds the per-question breakdown returned to the FE so it can render a full
+		// đúng/sai review list, not just the aggregate score.
+		List<SubmitListeningAnswersResponse.QuestionResult> questionResults = new java.util.ArrayList<>();
 		for (SubmitListeningAnswersRequest.AnswerItem answer : req.getAnswers()) {
+			String correctOption = correctByQuestionId.get(answer.questionId());
+			boolean isCorrect = Objects.equals(correctOption, answer.selectedOption());
+
 			ListeningLibraryAttemptAnswer answerRow = new ListeningLibraryAttemptAnswer();
 			answerRow.setAttemptId(attempt.getId());
 			answerRow.setQuestionId(answer.questionId());
 			answerRow.setSelectedOption(answer.selectedOption());
-			answerRow.setCorrectOption(correctByQuestionId.get(answer.questionId()));
-			answerRow.setIsCorrect(Objects.equals(correctByQuestionId.get(answer.questionId()), answer.selectedOption()));
+			answerRow.setCorrectOption(correctOption);
+			answerRow.setIsCorrect(isCorrect);
 			attemptAnswerMapper.insert(answerRow);
+
+			ListeningLibraryQuestion question = questionById.get(answer.questionId());
+			questionResults.add(new SubmitListeningAnswersResponse.QuestionResult(
+					answer.questionId(),
+					question != null ? question.getQuestionText() : null,
+					question != null ? parseOptions(question.getOptionsJson()) : List.of(),
+					answer.selectedOption(),
+					correctOption,
+					isCorrect));
 		}
 
 		Long nextTopicId = null;
@@ -218,7 +246,8 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 			}
 		}
 
-		return new SubmitListeningAnswersResponse(score, correctCount, total, passed, nextTopicId, nextTopicUnlocked);
+		return new SubmitListeningAnswersResponse(
+				score, correctCount, total, passed, nextTopicId, nextTopicUnlocked, questionResults);
 	}
 
 	@Override
@@ -274,6 +303,41 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 				.filter(a -> sectionId.equals(a.getSectionId()))
 				.max(Comparator.comparing(ListeningLibraryAttempt::getCompletedAt))
 				.orElse(null);
+	}
+
+	// Streams a section's synthesized audio, mirroring ListeningLearnServiceImpl.loadAudio -
+	// the same StorageClient-backed WAV bytes, just keyed by section instead of practice item.
+	@Override
+	public ListeningAudioResource loadSectionAudio(Long sectionId) {
+		ListeningLibrarySection section = sectionMapper.findById(sectionId);
+		if (section == null) {
+			throw BusinessException.notFound("Listening library section not found: id=" + sectionId);
+		}
+		if (section.getAudioStorageKey() == null) {
+			throw BusinessException.notFound("Listening library section audio not ready: id=" + sectionId);
+		}
+		return new ListeningAudioResource(
+				storageClient.read(section.getAudioStorageKey()),
+				storageClient.size(section.getAudioStorageKey()),
+				"audio/wav",
+				"listening-library-" + sectionId + ".wav");
+	}
+
+	// Resolves a question's stored correctOption letter ("A"-"D") to the matching option text
+	// (A=1st entry, ...), matching LlmListeningLibraryGenerator's documented convention. Falls back
+	// to the raw stored value if the letter is missing/out of range so a malformed row degrades to
+	// the old (broken) comparison instead of throwing mid-request.
+	private String resolveCorrectOptionText(ListeningLibraryQuestion question) {
+		String letter = question.getCorrectOption();
+		if (letter == null || letter.isBlank()) {
+			return letter;
+		}
+		int index = Character.toUpperCase(letter.trim().charAt(0)) - 'A';
+		java.util.List<String> options = parseOptions(question.getOptionsJson());
+		if (index < 0 || index >= options.size()) {
+			return letter;
+		}
+		return options.get(index);
 	}
 
 	// Deserializes a question's stored JSON options array back into a plain string list.

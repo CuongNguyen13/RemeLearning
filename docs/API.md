@@ -819,7 +819,9 @@ chủ điểm chuyển `PASSED` và tự mở khóa chủ điểm kế tiếp.
 - **Path param**: `userId` (string), `sectionId` (int64)
 - **Request body** — `SubmitListeningAnswersRequest`: `{answers: {questionId, selectedOption}[]}`.
 - **Response `data`** — `SubmitListeningAnswersResponse`: `{score, correctCount, totalQuestions,
-  topicPassed, nextTopicId?, nextTopicUnlocked}`.
+  topicPassed, nextTopicId?, nextTopicUnlocked, questionResults: {questionId, questionText, options,
+  selectedOption, correctOption, isCorrect}[]}` — `questionResults` cho phép FE hiển thị danh sách
+  đầy đủ từng câu hỏi kèm đáp án đúng/sai (không chỉ điểm tổng hợp).
 - **Lỗi**: `404` nếu `sectionId` không tồn tại.
 
 ### GET `/api/v1/learn/listening/library/{userId}/sections/history`

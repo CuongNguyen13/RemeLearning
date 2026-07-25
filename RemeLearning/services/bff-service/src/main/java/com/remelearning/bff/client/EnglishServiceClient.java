@@ -613,6 +613,15 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to stream listening practice audio for itemId={}", itemId, ex));
 	}
 
+	/** Relays one listening-library section's synthesized audio stream from english-service to the caller. */
+	public Mono<ResponseEntity<Flux<DataBuffer>>> streamListeningLibraryAudio(Long sectionId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/listening/library/sections/{sectionId}/audio", sectionId)
+				.retrieve()
+				.toEntityFlux(DataBuffer.class)
+				.doOnError(ex -> log.error("Failed to stream listening library audio for sectionId={}", sectionId, ex));
+	}
+
 	/** Proxies a graded listening-practice attempt straight through to english-service. */
 	public Mono<ListeningAttemptResultDto> submitListeningAttempt(SubmitListeningAttemptRequestDto request) {
 		return englishServiceClient.post()

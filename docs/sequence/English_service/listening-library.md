@@ -114,6 +114,7 @@ sequenceDiagram
     participant TMapper as ListeningLibraryTopicMapper
     participant PMapper as ListeningTopicProgressMapper
     participant AMapper as ListeningLibraryAttemptMapper
+    participant AAMapper as ListeningLibraryAttemptAnswerMapper
     participant DB as reme_english DB
 
     Caller->>Ctrl: POST /{userId}/sections/{sectionId}/answers {answers[]}
@@ -126,6 +127,11 @@ sequenceDiagram
         Svc->>Svc: score each submitted answer against correctOption per questionId
         Svc->>AMapper: insert(attempt{userId, sectionId, score, correctCount, totalQuestions, startedAt, completedAt})
         AMapper->>DB: INSERT INTO listening_library_attempts
+        loop each submitted answer
+            Svc->>AAMapper: insert(attemptId, questionId, selectedOption, correctOption, isCorrect)
+            AAMapper->>DB: INSERT INTO listening_library_attempt_answers
+            Svc->>Svc: build questionResults[] entry (questionText, options, selectedOption, correctOption, isCorrect)
+        end
         alt score >= 0.7 (PASS_THRESHOLD)
             Svc->>TMapper: findById(section.topicId)
             Svc->>PMapper: markPassed(userId, topic.id)
@@ -137,7 +143,7 @@ sequenceDiagram
                 Svc->>PMapper: findByUserIdAndTopicId(userId, nextTopic.id) - re-read to report honestly
             end
         end
-        Svc-->>Ctrl: SubmitListeningAnswersResponse{score, correctCount, totalQuestions,<br/>topicPassed, nextTopicId?, nextTopicUnlocked}
+        Svc-->>Ctrl: SubmitListeningAnswersResponse{score, correctCount, totalQuestions,<br/>topicPassed, nextTopicId?, nextTopicUnlocked, questionResults[]}
         Ctrl-->>Caller: 200 ApiResponse
     end
 ```

@@ -4,9 +4,9 @@ spring:
   application:
     name: english-service
   datasource:
-    url: ${DB_URL:jdbc:postgresql://aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?currentSchema=reme_english}
-    username: ${DB_USERNAME:postgres.oaltfczuectbznkuywfm}
-    password: ${DB_PASSWORD:Remelearning123!}
+    url: ${DB_URL:localhost}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     schema: ${DB_SCHEMA:reme_english}
   data:
     redis:
@@ -24,6 +24,10 @@ spring:
     baseline-on-migrate: true
     schemas: ${DB_SCHEMA:reme_english}
     create-schemas: true
+  servlet:
+    multipart:
+      max-file-size: ${ENGLISH_MAX_FILE_SIZE:50MB}
+      max-request-size: ${ENGLISH_MAX_REQUEST_SIZE:60MB}
 
 server:
   port: 8085
@@ -35,7 +39,7 @@ mybatis:
 
 reme:
   jwt:
-    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+    secret: ${JWT_SECRET}
     expiration-minutes: 60
   storage:
     # local (default) reads the dictation audio library from disk and stores generated TTS there;

@@ -1,5 +1,6 @@
 package com.remelearning.english.listening.library.service;
 
+import com.remelearning.english.listening.dto.ListeningAudioResource;
 import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
 import com.remelearning.english.listening.library.domain.ListeningLibraryAttempt;
 import com.remelearning.english.listening.library.dto.ListeningLibrarySectionDto;
@@ -45,4 +46,7 @@ public interface ListeningLibraryService {
 	 * mistakes.
 	 */
 	List<ListeningPracticeItemDto> generatePracticeFromSection(String userId, Long sectionId);
+
+	/** Loads a section's synthesized audio for streaming; throws a 404-mapped exception if the section or its audio doesn't exist. */
+	ListeningAudioResource loadSectionAudio(Long sectionId);
 }

@@ -2979,6 +2979,20 @@ components:
         topicPassed: { type: boolean }
         nextTopicId: { type: integer, format: int64, nullable: true }
         nextTopicUnlocked: { type: boolean }
+        questionResults:
+          type: array
+          description: Per-question breakdown for a full đúng/sai review list.
+          items:
+            type: object
+            properties:
+              questionId: { type: integer, format: int64 }
+              questionText: { type: string }
+              options:
+                type: array
+                items: { type: string }
+              selectedOption: { type: string, nullable: true }
+              correctOption: { type: string, nullable: true }
+              isCorrect: { type: boolean }
 
     ApiResponseSubmitListeningAnswers:
       allOf:
