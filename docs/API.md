@@ -785,14 +785,17 @@ interface một tầng phía trên nên tránh được vòng lặp.
 ### Listening Library — catalog chủ điểm nghe-hiểu, Section AI (đoạn văn + audio) + mở khóa tuần tự (package `listening.library`)
 
 Song song `grammar.library` nhưng cho kỹ năng nghe: một catalog **cố định** các chủ điểm nghe-hiểu
-(cùng tên/thứ tự với `grammar_library_topics`, seed cứng trong `V19__listening_library.sql`), mỗi chủ
-điểm có một hoặc nhiều **Section** (đoạn văn + audio Supertonic, sinh bằng AI **một lần duy nhất** rồi
-tái sử dụng mãi mãi) kèm bộ 4 câu hỏi trắc nghiệm. Learner đi tuần tự giống Grammar Library: chủ điểm
-đầu tiên tự bootstrap `UNLOCKED`, các chủ điểm sau `LOCKED` cho tới khi chủ điểm liền trước được
-`PASSED` (điểm ≥ 0.7). Chấm xong luôn ghi một attempt (`listening_library_attempts`); khi `PASSED`, tự
-mở khóa (`UNLOCKED`) chủ điểm kế tiếp theo `sequenceOrder`. Khác `Listening Learn` (sinh đề rời rạc mỗi
-lần theo weak-point, không lưu lâu dài), đây là một thư viện nội dung cố định giống Vocabulary/Grammar
-Library.
+(cùng tên/thứ tự với `grammar_library_topics`, seed cứng trong `V19__listening_library.sql`). Mỗi chủ
+điểm là một **chuỗi nhiều Section nối tiếp** (đoạn văn dài + audio Supertonic, mỗi Section sinh bằng AI
+riêng biệt kèm **10-15 câu hỏi trắc nghiệm random**) — độ dài chuỗi cũng random **5-10 Section/chủ điểm**,
+suy ra tất định từ `topicId` (không lưu DB, luôn ra cùng một số cho cùng một chủ điểm). Learner phải
+pass (điểm ≥ 0.7) lần lượt **từng Section trong chuỗi**: `startOrResumeSection` luôn trả về Section kế
+tiếp mà learner chưa pass (sinh Section mới bằng AI nếu chuỗi hiện có chưa đủ độ dài mục tiêu), chỉ khi
+đã pass **hết cả chuỗi** thì chủ điểm mới chuyển `PASSED` và tự mở khóa (`UNLOCKED`) chủ điểm kế tiếp
+theo `sequenceOrder`. Chấm xong mỗi Section luôn ghi một attempt (`listening_library_attempts`) —
+tiến độ "đã pass Section nào" được suy ra từ chính bảng này (không có cột lưu tiến độ theo Section
+riêng). Khác `Listening Learn` (sinh đề rời rạc mỗi lần theo weak-point, không lưu lâu dài), đây là một
+thư viện nội dung cố định giống Vocabulary/Grammar Library.
 
 ### GET `/api/v1/learn/listening/library/{userId}/topics`
 
@@ -804,18 +807,24 @@ Danh sách toàn bộ chủ điểm kèm trạng thái tiến độ của learne
 
 ### POST `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections`
 
-Bắt đầu một Section mới cho chủ điểm (sinh đoạn văn + audio bằng AI ở lần đọc đầu tiên, các lần sau chỉ
-đọc lại Section gần nhất đã có), chuyển trạng thái chủ điểm sang `IN_PROGRESS`.
+Trả về Section **kế tiếp mà learner chưa pass** trong chuỗi của chủ điểm: nếu có Section đã tồn tại
+nhưng chưa pass thì đọc lại đúng Section đó (resume); nếu mọi Section hiện có đều đã pass nhưng chuỗi
+chưa đạt độ dài mục tiêu (random 5-10, tất định theo `topicId`) thì sinh một Section mới bằng AI (đoạn
+văn + audio + 10-15 câu hỏi random); nếu chuỗi đã pass hết thì trả lại Section cuối cùng (chỉ để xem
+lại). Luôn chuyển trạng thái chủ điểm sang `IN_PROGRESS`.
 - **Path param**: `userId` (string), `topicId` (int64)
 - **Response `data`** — `ListeningLibrarySectionDto`: `{sectionId, passageText, audioUrl?, questions:
-  {questionId, questionText, options[]}[]}`. Câu hỏi **không** kèm đáp án đúng/giải thích (đang làm
-  bài, không lộ đáp án).
+  {questionId, questionText, options[]}[]}` — `questions` có **10-15 phần tử** (random mỗi Section).
+  Câu hỏi **không** kèm đáp án đúng/giải thích (đang làm bài, không lộ đáp án).
 - **Lỗi**: `403` nếu chủ điểm đang `LOCKED` cho learner này; `404` nếu `topicId` không tồn tại.
 
 ### POST `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers`
 
-Chấm toàn bộ câu trả lời đã nộp cho một Section, lưu lại thành một attempt. Nếu điểm ≥ 0.7 (`PASSED`),
-chủ điểm chuyển `PASSED` và tự mở khóa chủ điểm kế tiếp.
+Chấm toàn bộ câu trả lời đã nộp cho một Section, lưu lại thành một attempt. `topicPassed` phản ánh kết
+quả của **Section này** (điểm ≥ 0.7); `nextTopicId`/`nextTopicUnlocked` chỉ được set khi learner đã pass
+**toàn bộ chuỗi Section** của chủ điểm (không phải chỉ Section vừa nộp) — lúc đó chủ điểm mới chuyển
+`PASSED` và tự mở khóa chủ điểm kế tiếp; nếu chuỗi còn Section chưa pass, learner gọi lại endpoint
+"start/resume Section" ở trên để nhận Section kế tiếp.
 - **Path param**: `userId` (string), `sectionId` (int64)
 - **Request body** — `SubmitListeningAnswersRequest`: `{answers: {questionId, selectedOption}[]}`.
 - **Response `data`** — `SubmitListeningAnswersResponse`: `{score, correctCount, totalQuestions,
@@ -1539,7 +1548,8 @@ như `vocabulary.library`/`grammar.library` ở trên. Các DTO là class riêng
 - **GET `/api/v1/learners/{userId}/learn/listening/library/topics`** → `ListeningLibraryTopicDto[]`
   (bootstrap chủ điểm đầu = `UNLOCKED`).
 - **POST `/api/v1/learners/{userId}/learn/listening/library/topics/{topicId}/sections`** → bắt
-  đầu/resume 1 Section → `ListeningLibrarySectionDto`; `403` nếu chủ điểm `LOCKED`.
+  đầu/resume Section kế tiếp chưa pass trong chuỗi 5-10 Section của chủ điểm (mỗi Section 10-15 câu
+  hỏi random) → `ListeningLibrarySectionDto`; `403` nếu chủ điểm `LOCKED`.
 - **POST `/api/v1/learners/{userId}/learn/listening/library/sections/{sectionId}/answers`** (body
   `SubmitListeningAnswersRequest`) → chấm toàn bộ câu trả lời → `SubmitListeningAnswersResponse`.
 - **GET `/api/v1/learners/{userId}/learn/listening/library/sections/history`** →

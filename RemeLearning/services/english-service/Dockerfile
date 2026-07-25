@@ -3,6 +3,7 @@ FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /workspace
 
 COPY mvnw .
+COPY .mvn .mvn
 COPY pom.xml .
 COPY common/pom.xml common/pom.xml
 COPY services/bff-service/pom.xml services/bff-service/pom.xml

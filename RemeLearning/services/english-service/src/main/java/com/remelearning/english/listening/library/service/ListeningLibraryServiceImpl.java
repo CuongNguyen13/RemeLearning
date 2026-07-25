@@ -36,6 +36,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -49,6 +51,11 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 
 	private static final double PASS_THRESHOLD = 0.7;
 	private static final int FIRST_SEQUENCE_ORDER = 1;
+	// A topic is now a chain of several Sections (bài nghe) the learner must pass in order, instead
+	// of a single reused-forever Section - the chain length is random per topic (not global), see
+	// targetSectionCount.
+	private static final int MIN_SECTIONS_PER_TOPIC = 5;
+	private static final int MAX_SECTIONS_PER_TOPIC = 10;
 	// Must match bff-service's public route (LearnerController#getListeningLibraryAudio), not
 	// english-service's own internal controller route - this URL is returned straight to the FE
 	// client, which only ever talks to bff-service. Mirrors ListeningLearnServiceImpl.AUDIO_URL:
@@ -109,17 +116,29 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 				.toList();
 	}
 
-	// Starts a brand-new Section (generated via AI) the first time a topic is reached, or resumes
-	// its most recent Section on any later call - then marks the topic IN_PROGRESS.
+	// Starts the next not-yet-passed Section in the topic's chain (generating one via AI if the
+	// chain hasn't reached its target length yet), or resumes a Section already started but not
+	// passed - then marks the topic IN_PROGRESS. Once every Section in the chain has been passed,
+	// falls back to returning the last one (review-only; submitAnswers no longer advances progress
+	// past that point since passedAll is already true).
 	@Override
 	@Transactional
 	public ListeningLibrarySectionDto startOrResumeSection(String userId, Long topicId) {
 		ListeningLibraryTopic topic = requireTopic(topicId);
 		requireUnlockedOrInProgress(userId, topicId);
 		java.util.List<ListeningLibrarySection> existing = sectionMapper.findByTopicId(topicId);
-		ListeningLibrarySection section = existing.isEmpty()
-				? generator.generateSection(topic)
-				: existing.get(existing.size() - 1);
+		Set<Long> passed = passedSectionIds(userId, existing.stream().map(ListeningLibrarySection::getId).toList());
+		Optional<ListeningLibrarySection> nextUnpassed = existing.stream()
+				.filter(s -> !passed.contains(s.getId()))
+				.findFirst();
+		ListeningLibrarySection section;
+		if (nextUnpassed.isPresent()) {
+			section = nextUnpassed.get();
+		} else if (existing.size() < targetSectionCount(topicId)) {
+			section = generator.generateSection(topic);
+		} else {
+			section = existing.get(existing.size() - 1);
+		}
 		progressMapper.markInProgress(userId, topicId);
 
 		java.util.List<ListeningLibraryQuestion> questions = questionMapper.findBySectionId(section.getId());
@@ -234,7 +253,10 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 
 		Long nextTopicId = null;
 		boolean nextTopicUnlocked = false;
-		if (passed) {
+		// A topic is now a chain of Sections - passing this one only unlocks the next topic once
+		// every Section in the chain (up to its per-topic target length) has been passed, not on the
+		// first individual Section pass.
+		if (passed && hasPassedAllSections(userId, section.getTopicId())) {
 			ListeningLibraryTopic topic = topicMapper.findById(section.getTopicId());
 			progressMapper.markPassed(userId, topic.getId());
 			ListeningLibraryTopic nextTopic = topicMapper.findBySequenceOrder(topic.getSequenceOrder() + 1);
@@ -303,6 +325,38 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 				.filter(a -> sectionId.equals(a.getSectionId()))
 				.max(Comparator.comparing(ListeningLibraryAttempt::getCompletedAt))
 				.orElse(null);
+	}
+
+	// How many Sections (bài nghe) this topic's chain must have before it can be fully passed.
+	// Deterministic from topicId (not stored, no migration needed) so the same topic always reports
+	// the same target across calls, chosen once and stable rather than drifting between requests.
+	private int targetSectionCount(Long topicId) {
+		int span = MAX_SECTIONS_PER_TOPIC - MIN_SECTIONS_PER_TOPIC + 1;
+		return MIN_SECTIONS_PER_TOPIC + (int) (Math.abs(topicId) % span);
+	}
+
+	// This learner's passed (score >= PASS_THRESHOLD) attempts, restricted to the given sectionIds -
+	// attemptMapper only exposes findByUserId, so the filter happens here, mirroring
+	// findLatestAttemptForSection's fetch-all-then-filter pattern.
+	private Set<Long> passedSectionIds(String userId, List<Long> sectionIds) {
+		Set<Long> scoped = Set.copyOf(sectionIds);
+		return attemptMapper.findByUserId(userId).stream()
+				.filter(a -> a.getScore() >= PASS_THRESHOLD)
+				.map(ListeningLibraryAttempt::getSectionId)
+				.filter(scoped::contains)
+				.collect(Collectors.toSet());
+	}
+
+	// True once the learner has passed every Section currently in the topic's chain AND the chain
+	// has reached its full target length - a topic can't be completed while it still has fewer
+	// Sections than its target, even if every existing one has been passed.
+	private boolean hasPassedAllSections(String userId, Long topicId) {
+		List<ListeningLibrarySection> allSections = sectionMapper.findByTopicId(topicId);
+		if (allSections.size() < targetSectionCount(topicId)) {
+			return false;
+		}
+		Set<Long> passed = passedSectionIds(userId, allSections.stream().map(ListeningLibrarySection::getId).toList());
+		return allSections.stream().allMatch(s -> passed.contains(s.getId()));
 	}
 
 	// Streams a section's synthesized audio, mirroring ListeningLearnServiceImpl.loadAudio -

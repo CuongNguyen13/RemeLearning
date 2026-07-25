@@ -194,6 +194,18 @@ class ListeningLibraryServiceImplTest {
 		when(sectionMapper.findById(100L)).thenReturn(section);
 		when(topicMapper.findById(1L)).thenReturn(topic);
 
+		// Topic 1's chain target is deterministic (targetSectionCount) - stub the full chain (6
+		// Sections for topicId=1) as already existing, all but the one being submitted here (100)
+		// already passed by this learner, so this submission's pass completes the whole chain.
+		List<ListeningLibrarySection> chain = List.of(
+				section,
+				sectionOf(101L, 1L), sectionOf(102L, 1L), sectionOf(103L, 1L),
+				sectionOf(104L, 1L), sectionOf(105L, 1L));
+		when(sectionMapper.findByTopicId(1L)).thenReturn(chain);
+		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of(
+				passingAttempt(100L), passingAttempt(101L), passingAttempt(102L),
+				passingAttempt(103L), passingAttempt(104L), passingAttempt(105L)));
+
 		ListeningLibraryTopic nextTopic = new ListeningLibraryTopic();
 		nextTopic.setId(2L); nextTopic.setSequenceOrder(2);
 		when(topicMapper.findBySequenceOrder(2)).thenReturn(nextTopic);
@@ -484,6 +496,162 @@ class ListeningLibraryServiceImplTest {
 	}
 
 	@Test
+	void startOrResumeSectionGeneratesNextSectionWhenCurrentOneIsPassedAndChainNotYetFull() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		// topicId=1L -> targetSectionCount is 6 (MIN 5 + (1 % 6)); only 1 Section exists so far and
+		// the learner has already passed it, so the chain isn't full yet -> a new Section is generated.
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+		when(progressMapper.findByUserIdAndTopicId("user-1", 1L)).thenReturn(
+				ListeningTopicProgress.builder().userId("user-1").topicId(1L)
+						.status(ListeningTopicStatus.IN_PROGRESS).build());
+
+		ListeningLibrarySection passedSection = sectionOf(100L, 1L);
+		when(sectionMapper.findByTopicId(1L)).thenReturn(List.of(passedSection));
+		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of(passingAttempt(100L)));
+
+		ListeningLibrarySection generatedSection = sectionOf(101L, 1L);
+		when(generator.generateSection(topic)).thenReturn(generatedSection);
+		when(questionMapper.findBySectionId(101L)).thenReturn(List.of());
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		var result = service.startOrResumeSection("user-1", 1L);
+
+		assertThat(result.getSectionId()).isEqualTo(101L);
+		verify(generator).generateSection(topic);
+	}
+
+	@Test
+	void startOrResumeSectionResumesUnpassedSectionWithoutGeneratingANewOne() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+		when(progressMapper.findByUserIdAndTopicId("user-1", 1L)).thenReturn(
+				ListeningTopicProgress.builder().userId("user-1").topicId(1L)
+						.status(ListeningTopicStatus.IN_PROGRESS).build());
+
+		ListeningLibrarySection passedSection = sectionOf(100L, 1L);
+		ListeningLibrarySection unpassedSection = sectionOf(101L, 1L);
+		when(sectionMapper.findByTopicId(1L)).thenReturn(List.of(passedSection, unpassedSection));
+		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of(passingAttempt(100L)));
+		when(questionMapper.findBySectionId(101L)).thenReturn(List.of());
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		var result = service.startOrResumeSection("user-1", 1L);
+
+		assertThat(result.getSectionId()).isEqualTo(101L);
+		verify(generator, org.mockito.Mockito.never()).generateSection(any());
+	}
+
+	@Test
+	void startOrResumeSectionReturnsLastSectionForReviewOnceFullChainIsPassed() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+		when(progressMapper.findByUserIdAndTopicId("user-1", 1L)).thenReturn(
+				ListeningTopicProgress.builder().userId("user-1").topicId(1L)
+						.status(ListeningTopicStatus.PASSED).build());
+
+		// targetSectionCount(1L) == 6 - stub the full, already-passed chain.
+		List<ListeningLibrarySection> chain = List.of(
+				sectionOf(100L, 1L), sectionOf(101L, 1L), sectionOf(102L, 1L),
+				sectionOf(103L, 1L), sectionOf(104L, 1L), sectionOf(105L, 1L));
+		when(sectionMapper.findByTopicId(1L)).thenReturn(chain);
+		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of(
+				passingAttempt(100L), passingAttempt(101L), passingAttempt(102L),
+				passingAttempt(103L), passingAttempt(104L), passingAttempt(105L)));
+		when(questionMapper.findBySectionId(105L)).thenReturn(List.of());
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		var result = service.startOrResumeSection("user-1", 1L);
+
+		assertThat(result.getSectionId()).isEqualTo(105L);
+		verify(generator, org.mockito.Mockito.never()).generateSection(any());
+	}
+
+	@Test
+	void submitAnswersDoesNotMarkTopicPassedWhenChainStillHasUnpassedSections() {
+		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
+		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
+		ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
+		ListeningTopicProgressMapper progressMapper = mock(ListeningTopicProgressMapper.class);
+		ListeningLibraryAttemptMapper attemptMapper = mock(ListeningLibraryAttemptMapper.class);
+		ListeningLibraryAttemptAnswerMapper attemptAnswerMapper = mock(ListeningLibraryAttemptAnswerMapper.class);
+		LlmListeningLibraryGenerator generator = mock(LlmListeningLibraryGenerator.class);
+		com.remelearning.english.listening.service.ListeningLearnService listeningLearnService =
+				mock(com.remelearning.english.listening.service.ListeningLearnService.class);
+
+		ListeningLibraryTopic topic = new ListeningLibraryTopic();
+		topic.setId(1L); topic.setSequenceOrder(1);
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(100L); section.setTopicId(1L);
+		when(sectionMapper.findById(100L)).thenReturn(section);
+		when(topicMapper.findById(1L)).thenReturn(topic);
+
+		// Only this one Section exists so far out of a 6-long chain (targetSectionCount(1L) == 6) -
+		// passing it should not complete the topic yet.
+		when(sectionMapper.findByTopicId(1L)).thenReturn(List.of(section));
+		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of(passingAttempt(100L)));
+
+		ListeningLibraryQuestion q1 = new ListeningLibraryQuestion();
+		q1.setId(1L); q1.setSectionId(100L); q1.setCorrectOption("A");
+		when(questionMapper.findBySectionId(100L)).thenReturn(List.of(q1));
+
+		SubmitListeningAnswersRequest req = new SubmitListeningAnswersRequest();
+		req.setAnswers(List.of(new SubmitListeningAnswersRequest.AnswerItem(1L, "A")));
+
+		ListeningLibraryServiceImpl service = new ListeningLibraryServiceImpl(
+				topicMapper, sectionMapper, questionMapper, progressMapper, attemptMapper, attemptAnswerMapper, generator, null,
+				listeningLearnService);
+
+		var response = service.submitAnswers("user-1", 100L, req);
+
+		assertThat(response.isTopicPassed()).isTrue();
+		assertThat(response.getNextTopicId()).isNull();
+		verify(progressMapper, org.mockito.Mockito.never()).markPassed(any(), any());
+		verify(topicMapper, org.mockito.Mockito.never()).findBySequenceOrder(org.mockito.ArgumentMatchers.anyInt());
+	}
+
+	@Test
 	void resolveTopicIdReturnsSectionsOwningTopicId() {
 		ListeningLibraryTopicMapper topicMapper = mock(ListeningLibraryTopicMapper.class);
 		ListeningLibrarySectionMapper sectionMapper = mock(ListeningLibrarySectionMapper.class);
@@ -506,5 +674,18 @@ class ListeningLibraryServiceImplTest {
 
 		assertThat(service.resolveTopicId(100L)).isEqualTo(7L);
 		assertThat(service.resolveTopicId(999L)).isNull();
+	}
+
+	private static ListeningLibrarySection sectionOf(long id, long topicId) {
+		ListeningLibrarySection section = new ListeningLibrarySection();
+		section.setId(id);
+		section.setTopicId(topicId);
+		return section;
+	}
+
+	private static ListeningLibraryAttempt passingAttempt(long sectionId) {
+		return ListeningLibraryAttempt.builder()
+				.userId("user-1").sectionId(sectionId).score(1.0)
+				.completedAt(java.time.Instant.now()).build();
 	}
 }

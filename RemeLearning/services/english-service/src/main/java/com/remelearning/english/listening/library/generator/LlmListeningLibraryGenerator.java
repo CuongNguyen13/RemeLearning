@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Generates one Listening-library Section (a short passage + its reusable MCQ question pool) for a
@@ -48,12 +49,14 @@ public class LlmListeningLibraryGenerator {
 
 	private static final String SYSTEM_PROMPT = """
 			You are an English-listening content writer building a reusable library passage for
-			learners. Given a topic name and a CEFR level, write ONE short listening passage (a
-			monologue, 3-6 sentences, natural spoken English) about the topic, then write exactly 4
-			multiple-choice comprehension questions, each with 4 options (A-D). Respond with STRICTLY a
-			raw JSON object (no markdown fences, no commentary) of the shape:
+			learners. Given a topic name, a CEFR level, and a target question count N, write ONE
+			listening passage (a monologue, 10-16 sentences, natural spoken English, with enough
+			distinct facts/details to support N non-redundant comprehension questions) about the topic,
+			then write exactly N multiple-choice comprehension questions, each with 4 options (A-D).
+			Respond with STRICTLY a raw JSON object (no markdown fences, no commentary) of the shape:
 			{"passage": "...",
 			 "questions": [{"question": "...", "options": ["...","...","...","..."], "correctOption": "A"|"B"|"C"|"D", "explanation": "..."}]}
+			- "questions" must have exactly N entries.
 			- "options" must have exactly 4 entries.
 			- "correctOption" is the letter of the correct option, matching its position (A=1st, ...).
 			- "explanation" in Vietnamese, one short sentence; passage/question text in English.""";
@@ -62,6 +65,11 @@ public class LlmListeningLibraryGenerator {
 	// single-voice behavior when only one distinct speaker is present.
 	private static final String NARRATOR = "Narrator";
 	private static final String GENERATED_KEY = "listening-library/%d/%s.wav";
+	private static final int MIN_QUESTIONS = 10;
+	private static final int MAX_QUESTIONS = 15;
+	// Wider than the old fixed-4-question budget (1200) to cover a longer passage plus up to 15
+	// questions, each with 4 options and a Vietnamese explanation.
+	private static final int MAX_OUTPUT_TOKENS = 3500;
 
 	private final AiContentClient aiContentClient;
 	private final DialogueAudioSynthesizer audioSynthesizer;
@@ -93,9 +101,14 @@ public class LlmListeningLibraryGenerator {
 	 * returns no passage - callers should not retry-loop this synchronously in a request path.
 	 */
 	public ListeningLibrarySection generateSection(ListeningLibraryTopic topic) {
-		String userPrompt = "Topic: %s\nLevel: %s".formatted(
-				topic.getName(), topic.getLevel() == null || topic.getLevel().isBlank() ? "(unspecified)" : topic.getLevel());
-		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1200, LlmPayload.class);
+		// Randomized per generation call (not per topic) so a topic's several Sections don't all
+		// converge on the same question count - see ListeningLibraryServiceImpl.targetSectionCount
+		// for the separate, per-topic-stable count of Sections themselves.
+		int questionCount = ThreadLocalRandom.current().nextInt(MIN_QUESTIONS, MAX_QUESTIONS + 1);
+		String userPrompt = "Topic: %s\nLevel: %s\nQuestion count: %d".formatted(
+				topic.getName(), topic.getLevel() == null || topic.getLevel().isBlank() ? "(unspecified)" : topic.getLevel(),
+				questionCount);
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, MAX_OUTPUT_TOKENS, LlmPayload.class);
 
 		String passage = payload.passage == null ? "" : payload.passage.trim();
 		if (passage.isBlank()) {

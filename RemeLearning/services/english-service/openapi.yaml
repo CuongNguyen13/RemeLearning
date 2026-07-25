@@ -1174,7 +1174,7 @@ paths:
   /api/v1/learn/listening/library/{userId}/topics/{topicId}/sections:
     post:
       tags: [Listening Library]
-      summary: Start a new Section for a topic (generating one via AI on first read), or resume its most recent one
+      summary: Start/resume the next not-yet-passed Section in the topic's chain (random 5-10 Sections/topic, each with 10-15 random questions, generating one via AI when the chain isn't full yet)
       operationId: startOrResumeListeningLibrarySection
       parameters:
         - name: userId
@@ -1202,7 +1202,7 @@ paths:
   /api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers:
     post:
       tags: [Listening Library]
-      summary: Score a submitted answer set for one section; marks the topic PASSED and unlocks the next topic on pass
+      summary: Score a submitted answer set for one section; marks the topic PASSED and unlocks the next topic only once every Section in the topic's chain has been passed
       operationId: submitListeningLibraryAnswers
       parameters:
         - name: userId
