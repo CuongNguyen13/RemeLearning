@@ -5,11 +5,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.align.SentenceAlignmentClient;
 import com.remelearning.common.ai.align.SentenceTiming;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.tts.TtsAudio;
 import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
 import com.remelearning.common.event.WeakPointPayload;
 import com.remelearning.common.exception.BusinessException;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.common.constants.LearningCategories;
 import java.util.Random;
@@ -86,7 +88,7 @@ public class DictationServiceImpl implements DictationService {
 
 	private static final String CLIP_AUDIO_URL = "/api/v1/dictation/clips/%d/audio";
 	private static final String PRACTICE_AUDIO_URL = "/api/v1/dictation/ai-practice/items/%d/audio";
-	private static final String GENERATED_KEY = "generated/%s/%d.wav";
+	private static final String GENERATED_KEY = "generated/%s/%d.opus";
 	private static final String WEAK_POINT_ITEM_PREFIX = "dictation:";
 	private static final String RANDOM_FACET = "RANDOM";
 	private static final int DEFAULT_LIST_LIMIT = 50;
@@ -107,6 +109,7 @@ public class DictationServiceImpl implements DictationService {
 	private final DictationGapEventPublisher gapEventPublisher;
 	private final TtsClient ttsClient;
 	private final StorageClient storageClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 	private final SentenceAlignmentClient sentenceAlignmentClient;
 	private final ObjectMapper objectMapper;
 	private final String ttsVoice;
@@ -122,6 +125,7 @@ public class DictationServiceImpl implements DictationService {
 			DictationGapEventPublisher gapEventPublisher,
 			TtsClient ttsClient,
 			StorageClient storageClient,
+			AudioTranscodeClient audioTranscodeClient,
 			SentenceAlignmentClient sentenceAlignmentClient,
 			ObjectMapper objectMapper,
 			@Value("${dictation.tts.voice:F1}") String ttsVoice,
@@ -135,6 +139,7 @@ public class DictationServiceImpl implements DictationService {
 		this.gapEventPublisher = gapEventPublisher;
 		this.ttsClient = ttsClient;
 		this.storageClient = storageClient;
+		this.audioTranscodeClient = audioTranscodeClient;
 		this.sentenceAlignmentClient = sentenceAlignmentClient;
 		this.objectMapper = objectMapper;
 		this.ttsVoice = ttsVoice;
@@ -650,8 +655,9 @@ public class DictationServiceImpl implements DictationService {
 		dictationMapper.insertPracticeItem(item);
 
 		byte[] mergedAudio = WavAudioMerger.merge(clips);
+		byte[] opusAudio = audioTranscodeClient.toOpus(new ByteArrayInputStream(mergedAudio), "dialogue.wav");
 		String key = GENERATED_KEY.formatted(userId, item.getId());
-		storageClient.write(key, new ByteArrayInputStream(mergedAudio), mergedAudio.length);
+		storageClient.write(key, new ByteArrayInputStream(opusAudio), opusAudio.length);
 		dictationMapper.updatePracticeItemStorageKey(item.getId(), key);
 	}
 
@@ -760,13 +766,12 @@ public class DictationServiceImpl implements DictationService {
 						.toList();
 	}
 
-	// Opens the stored object and infers a content type from the key's extension (mp3 vs wav).
+	// Opens the stored object and infers a content type from the key's extension (mp3/wav content
+	// library clips vs opus-transcoded generated audio).
 	private DictationAudioResource toAudioResource(String storageKey, String baseName) {
-		boolean isMp3 = storageKey.toLowerCase().endsWith(".mp3");
-		String contentType = isMp3 ? "audio/mpeg" : "audio/wav";
-		String extension = isMp3 ? ".mp3" : ".wav";
 		return new DictationAudioResource(
-				storageClient.read(storageKey), storageClient.size(storageKey), contentType, baseName + extension);
+				storageClient.read(storageKey), storageClient.size(storageKey),
+				AudioContentTypes.contentType(storageKey), baseName + AudioContentTypes.extension(storageKey));
 	}
 
 	// Serializes the full AI analysis (error table + root causes + advice + practice sentences) to

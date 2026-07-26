@@ -1,5 +1,6 @@
 package com.remelearning.recording.service.impl;
 
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.storage.S3StorageClient;
 import com.remelearning.recording.domain.Recording;
@@ -30,9 +31,10 @@ class RecordingServiceImplTest {
 
 	private final RecordingMapper recordingMapper = mock(RecordingMapper.class);
 	private final S3StorageClient s3StorageClient = mock(S3StorageClient.class);
+	private final AudioTranscodeClient audioTranscodeClient = mock(AudioTranscodeClient.class);
 	private final RecordingUploadedProducer recordingUploadedProducer = mock(RecordingUploadedProducer.class);
 	private final RecordingServiceImpl service = new RecordingServiceImpl(
-			recordingMapper, s3StorageClient, recordingUploadedProducer, RECORDING_BUCKET);
+			recordingMapper, s3StorageClient, audioTranscodeClient, recordingUploadedProducer, RECORDING_BUCKET);
 
 	@Test
 	void uploadStoresFileInsertsRecordingAndPublishesEvent() {
@@ -51,6 +53,22 @@ class RecordingServiceImplTest {
 				.upload(eq(RECORDING_BUCKET), any(), any(), eq((long) content.length));
 		verify(recordingMapper, times(1)).insert(any(Recording.class));
 		verify(recordingUploadedProducer, times(1)).publish(any(RecordingUploadedEvent.class));
+	}
+
+	@Test
+	void uploadTranscodesAudioOnlyFileToOpusBeforeStoring() {
+		byte[] opusBytes = "opus-bytes".getBytes();
+		MockMultipartFile file = new MockMultipartFile("file", "voice.wav", "audio/wav", "content".getBytes());
+		when(audioTranscodeClient.toOpus(any(), eq("voice.wav"))).thenReturn(opusBytes);
+
+		RecordingResponse response = service.upload(file, "user-1", "en");
+
+		assertThat(response.s3Key()).contains("user-1").endsWith("voice.opus");
+		verify(audioTranscodeClient, times(1)).toOpus(any(), eq("voice.wav"));
+		verify(s3StorageClient, times(1))
+				.upload(eq(RECORDING_BUCKET), argThat(key -> key.endsWith("voice.opus")), any(), eq((long) opusBytes.length));
+		verify(recordingMapper, times(1))
+				.insert(argThat(r -> "audio/ogg".equals(r.getContentType())));
 	}
 
 	@Test

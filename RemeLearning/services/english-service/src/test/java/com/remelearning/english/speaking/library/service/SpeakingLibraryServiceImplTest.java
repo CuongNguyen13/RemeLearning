@@ -1,6 +1,7 @@
 package com.remelearning.english.speaking.library.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.pronunciation.PhonemePronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
@@ -76,9 +77,14 @@ class SpeakingLibraryServiceImplTest {
 			PronunciationScoringClient pronunciationScoringClient,
 			StorageClient storageClient,
 			SpeakingLearnService speakingLearnService) {
+		AudioTranscodeClient audioTranscodeClient = mock(AudioTranscodeClient.class);
+		// Echoes the input bytes back unchanged so existing byte-length assertions keep working
+		// without needing a real Opus encode in these unit tests.
+		when(audioTranscodeClient.toOpus(any(), any()))
+				.thenAnswer(invocation -> ((java.io.InputStream) invocation.getArgument(0)).readAllBytes());
 		return new SpeakingLibraryServiceImpl(
 				topicMapper, sectionMapper, sentenceMapper, progressMapper, attemptMapper, generator,
-				pronunciationScoringClient, storageClient, new ObjectMapper(), "en", speakingLearnService);
+				pronunciationScoringClient, storageClient, audioTranscodeClient, new ObjectMapper(), "en", speakingLearnService);
 	}
 
 	@Test

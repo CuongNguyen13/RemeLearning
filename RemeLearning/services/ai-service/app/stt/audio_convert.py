@@ -1,3 +1,4 @@
+import io
 import tempfile
 import wave
 
@@ -5,6 +6,7 @@ import av
 
 TARGET_SAMPLE_RATE = 16000
 SAMPLE_WIDTH_BYTES = 2
+OPUS_SAMPLE_RATE = 48000
 
 
 def convert_to_wav(input_path: str) -> str:
@@ -31,6 +33,33 @@ def convert_to_wav(input_path: str) -> str:
                         wav_file.writeframes(resampled.to_ndarray().tobytes())
 
     return output_path
+
+
+def encode_to_opus(input_path: str) -> bytes:
+    """Transcodes any container/codec PyAV can decode (wav, mp3, webm, ...) into an in-memory
+    Ogg/Opus clip at 48kHz mono - the sample rate Opus encodes natively at, avoiding an extra
+    resample step inside libopus. Used to compress newly-generated audio (TTS output, user
+    recordings) before it is written to storage; pre-existing mp3/wav objects are left untouched.
+    """
+    output_buffer = io.BytesIO()
+
+    with av.open(input_path) as in_container:
+        in_stream = in_container.streams.audio[0]
+        resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=OPUS_SAMPLE_RATE)
+
+        with av.open(output_buffer, mode="w", format="ogg") as out_container:
+            out_stream = out_container.add_stream("libopus", rate=OPUS_SAMPLE_RATE)
+
+            for packet in in_container.demux(in_stream):
+                for frame in packet.decode():
+                    for resampled in resampler.resample(frame):
+                        for out_packet in out_stream.encode(resampled):
+                            out_container.mux(out_packet)
+
+            for out_packet in out_stream.encode(None):
+                out_container.mux(out_packet)
+
+    return output_buffer.getvalue()
 
 
 def wav_duration_seconds(wav_path: str) -> float:

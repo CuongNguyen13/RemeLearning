@@ -101,8 +101,8 @@ flowchart TD
         Analyze["DictationAnalyzer.analyzeAttempt(referenceText, userTranscript, diff)<br/>rule-based heuristic, or Gemini -> root-cause-classified errorTable (LEXICON/GRAMMAR/PHONOLOGY) + rootCauses + actionAdvice + practice sentences"]
         PublishGap["DictationGapEventPublisher -> learning.gap.analyzed<br/>toLearningCategory: LEXICON-&gt;vocabulary, GRAMMAR-&gt;grammar, PHONOLOGY-&gt;pronunciation<br/>(unclassified word, e.g. a sentence-mode retry miss -> vocabulary)"]
 
-        AiGen["POST /ai-practice/{userId}/generate<br/>{level?, examType?, translationLang?} -> resolveLevel/resolveExamType (concrete value, RANDOM from a fixed CEFR pool<br/>A1/A2/B1/B2/C1 or the library's own distinct exam types w/ TOEIC/IELTS/TOEFL/General fallback, or unset)<br/>-> pending items' text (or top missed words if none pending) + resolved level/examType/translationLang -> LlmDictationDialogueGenerator (Gemini)<br/>-> one monologue/multi-speaker dialogue with a topic label + parallel per-line translation (only if translationLang != en)<br/>-> random voice per speaker -> Supertonic (ai-service) per line, synthesized from the SAME text persisted as the graded sentence<br/>-> WavAudioMerger -> one merged file -> StorageClient.write -> replaces prior pending items"]
-        AiGenFromAttempt["POST /dictation/history/{userId}/{attemptId}/ai-practice<br/>{translationLang?} -> one attempt's own missed words -> same LlmDictationDialogueGenerator as AiGen (level/examType left unset)<br/>-> Supertonic (ai-service) -> StorageClient.write"]
+        AiGen["POST /ai-practice/{userId}/generate<br/>{level?, examType?, translationLang?} -> resolveLevel/resolveExamType (concrete value, RANDOM from a fixed CEFR pool<br/>A1/A2/B1/B2/C1 or the library's own distinct exam types w/ TOEIC/IELTS/TOEFL/General fallback, or unset)<br/>-> pending items' text (or top missed words if none pending) + resolved level/examType/translationLang -> LlmDictationDialogueGenerator (Gemini)<br/>-> one monologue/multi-speaker dialogue with a topic label + parallel per-line translation (only if translationLang != en)<br/>-> random voice per speaker -> Supertonic (ai-service) per line, synthesized from the SAME text persisted as the graded sentence<br/>-> WavAudioMerger -> one merged WAV -> AudioTranscodeClient.toOpus (ai-service) -> StorageClient.write (.opus) -> replaces prior pending items"]
+        AiGenFromAttempt["POST /dictation/history/{userId}/{attemptId}/ai-practice<br/>{translationLang?} -> one attempt's own missed words -> same LlmDictationDialogueGenerator as AiGen (level/examType left unset)<br/>-> Supertonic (ai-service) -> AudioTranscodeClient.toOpus -> StorageClient.write (.opus)"]
         GetAiPracticeDetail["GET /dictation/ai-practice/items/{practiceItemId}/detail<br/>findPracticeItemById + splitIntoSentences(sentenceText, translationText) (zips translation per sentence)<br/>-> DictationPracticeItemDetailDto{scriptText, level, examType, topic, sentences[]} (startMs/endMs always null, one merged audio file)"]
     end
 
@@ -137,8 +137,8 @@ flowchart TD
         LLGenReq["POST /api/v1/learn/listening/{userId}/generate<br/>{level?, examType?, translationLang?, focusItems?}"]
         LLResolveKw["resolveTargetKeywords: focusItems, else the learner's own past<br/>wrong KEYWORD answers (own attempt history - no weak-point table)"]
         LLGenerate["ListeningPracticeGenerator.generate(keywords, level, examType, translationLang)<br/>LLM (Gemini) -> transcript + MCQ/KEYWORD/OPEN questions + optional translation"]
-        LLSynthesize["DialogueAudioSynthesizer.synthesize(lines, ttsLang)<br/>Supertonic TTS per line, merged -> {transcriptText, translationText, audioBytes}"]
-        LLInsertItem["insertItem + StorageClient.write(audio) -> storageKey"]
+        LLSynthesize["DialogueAudioSynthesizer.synthesize(lines, ttsLang)<br/>Supertonic TTS per line, merged, transcoded to Opus (AudioTranscodeClient) -> {transcriptText, translationText, audioBytes}"]
+        LLInsertItem["insertItem + StorageClient.write(audio, .opus) -> storageKey"]
         LLSubmitReq["POST /api/v1/learn/listening/attempts<br/>{userId, practiceItemId, answers[]}"]
         LLScoreClosed["ListeningQuestionScoring.scoreClosed<br/>MCQ exact-match, or KEYWORD WER (like DictationScorer)"]
         LLScoreOpen["OpenAnswerGrader.grade(transcript, prompt, modelAnswer, submitted)<br/>LLM (Gemini) -> {score 0..1, feedback}"]
@@ -155,9 +155,9 @@ flowchart TD
         SLGenReq["POST /api/v1/learn/speaking/{userId}/generate<br/>{level?, examType?, focusItems?}"]
         SLResolveWords["resolveTargetWords: focusItems, else learner's own<br/>top pronunciationWeakPointService weak points (limit 8)"]
         SLGenerate["SpeakingPracticeGenerator.generate(words, level, examType)<br/>LLM (Gemini) -> {topic, targetText, translation}"]
-        SLSynthesizeSample["TtsClient.synthesize(targetText, 1 voice)<br/>Supertonic -> sample audio -> StorageClient.write -> storageKey"]
+        SLSynthesizeSample["TtsClient.synthesize(targetText, 1 voice)<br/>Supertonic -> sample audio -> AudioTranscodeClient.toOpus -> StorageClient.write (.opus) -> storageKey"]
         SLSubmitReq["POST /api/v1/learn/speaking/{userId}/attempts (multipart)<br/>{practiceItemId, audio}"]
-        SLStoreAudio["StorageClient.write(learner audio)<br/>speaking/attempts/&lt;userId&gt;/&lt;uuid&gt;.wav"]
+        SLStoreAudio["AudioTranscodeClient.toOpus(learner audio) -> StorageClient.write<br/>speaking/attempts/&lt;userId&gt;/&lt;uuid&gt;.opus"]
         SLScore["PronunciationScoringClient.score(audio, targetText, lang)<br/>-&gt; ai-service GOP endpoint (see note below)<br/>-&gt; {overall, words[{word, score, phonemes[{ipa, score}]}], transcript, weakPhonemes[]}"]
         SLInsertAttempt["insertAttempt (overallScore + wordScoresJson + transcript + weakPhonemesJson)"]
         SLFeed["feedWeakPoints: one PracticeAttemptRequest per distinct word<br/>(score &gt;= 0.6 = correct) - itemId=pronunciation:&lt;word&gt;, category=pronunciation"]
@@ -173,8 +173,8 @@ flowchart TD
         LibCountCheck{"library word count for topic &lt; sectionSize?"}
         LibGenerate["LlmLibraryWordGenerator.generate(topic, existingWords, 15)<br/>LLM (Gemini) -> GeneratedLibraryWord[]{word, wordType, meaningVi, exampleEn}<br/>(empty list, not a template, on call/parse failure)"]
         LibInsertWord["insert per generated word"]
-        LibTts["TtsClient.synthesize(word, lang=en) -> wav bytes<br/>(once per new word, never at Section-runtime)"]
-        LibStorageWrite["StorageClient.write(vocab-library/{topicId}/{wordId}.wav)<br/>-> updateAudioStorageKey(storageKey)"]
+        LibTts["TtsClient.synthesize(word, lang=en) -> wav bytes -> AudioTranscodeClient.toOpus<br/>(once per new word, never at Section-runtime)"]
+        LibStorageWrite["StorageClient.write(vocab-library/{topicId}/{wordId}.opus)<br/>-> updateAudioStorageKey(storageKey)"]
         LibPickWords["findNotYetMasteredByTopicId (+ findRandomByTopicIdExcluding fallback)"]
         LibQueueInit["SectionQueue.initial(wordIds)<br/>-> SectionQueueEntry[]{wordId, streak=0, introShown=false} (shuffled)"]
         LibInsertSection["insertAttempt -> {status=IN_PROGRESS, libraryWordIdsJson, queueStateJson}"]
@@ -232,8 +232,8 @@ flowchart TD
         LLibChainFullCheck{"existing.size() >= targetSectionCount(topicId)?<br/>(deterministic 5-10, from topicId mod, no DB column)"}
         LLibReviewFallback["fall back to the last existing Section (chain fully passed - review only)"]
         LLibGenerate["LlmListeningLibraryGenerator.generateSection(topic)<br/>questionCount = random int in [10,15]<br/>LLM (Gemini) -> {passage, questions[questionCount]}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
-        LLibSynthesize["DialogueAudioSynthesizer.synthesize([Narrator: passage], ttsLang)<br/>Supertonic -> audio bytes"]
-        LLibStorageWrite["StorageClient.write(listening-library/{topicId}/{uuid}.wav, audioBytes)"]
+        LLibSynthesize["DialogueAudioSynthesizer.synthesize([Narrator: passage], ttsLang)<br/>Supertonic -> merged WAV -> AudioTranscodeClient.toOpus -> audio bytes"]
+        LLibStorageWrite["StorageClient.write(listening-library/{topicId}/{uuid}.opus, audioBytes)"]
         LLibInsertSection["insert listening_library_sections row {topicId, passageText, audioStorageKey}"]
         LLibInsertQuestions["insert listening_library_questions row per generated question (10-15 rows)"]
         LLibMarkInProgress["listening_topic_progress -> IN_PROGRESS"]
@@ -264,11 +264,11 @@ flowchart TD
         SLibSectionCheck{"speaking_library_sections row exists for topic?"}
         SLibGenerate["LlmSpeakingLibraryGenerator.generateSection(topic)<br/>LLM (Gemini) -> {sentences: [{text, ipa}] (5 items)}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
         SLibInsertSection["insert speaking_library_sections row {topicId} (no content columns)"]
-        SLibSynthesizeLoop["per generated sentence:<br/>DialogueAudioSynthesizer.synthesize([Narrator: sentenceText], ttsLang) -> audio bytes<br/>StorageClient.write(speaking-library/{topicId}/{uuid}.wav, audioBytes)<br/>insert speaking_library_sentences row {sectionId, sentenceText, ipa, sampleAudioStorageKey}"]
+        SLibSynthesizeLoop["per generated sentence:<br/>DialogueAudioSynthesizer.synthesize([Narrator: sentenceText], ttsLang) -> Opus audio bytes (AudioTranscodeClient)<br/>StorageClient.write(speaking-library/{topicId}/{uuid}.opus, audioBytes)<br/>insert speaking_library_sentences row {sectionId, sentenceText, ipa, sampleAudioStorageKey}"]
         SLibMarkInProgress["speaking_topic_progress -> IN_PROGRESS"]
 
         SLibAttemptReq["POST /.../{userId}/sections/{sectionId}/sentences/{sentenceId}/attempts (multipart audio)"]
-        SLibStorageWrite["StorageClient.write(speaking-library/attempts/{userId}/{uuid}.wav, audioBytes)"]
+        SLibStorageWrite["AudioTranscodeClient.toOpus(audio) -> StorageClient.write(speaking-library/attempts/{userId}/{uuid}.opus, audioBytes)"]
         SLibScore["PronunciationScoringClient.score(audio, sentenceText, ttsLang)<br/>(same GOP call speaking.learn already makes)<br/>-> wordScore = avg(words[].score), phonemeScore = avg(words[].phonemes[].score)"]
         SLibInsertAttempt["insert speaking_library_attempts row {sectionId, sentenceId, phonemeScore, wordScore, recordedAudioStorageKey, weakPhonemesJson=score.weakPhonemes()}<br/>(does NOT touch speaking_topic_progress)"]
 
@@ -822,7 +822,9 @@ flowchart TD
   top-missed words if none are pending) at once. `DictationServiceImpl.assignVoicesToSpeakers` then
   picks one random Supertonic voice per distinct speaker from the fixed 10-voice pool (`F1-F5`/`M1-M5`),
   each line is synthesized individually, and `WavAudioMerger` (new, `dictation.audio` package)
-  concatenates the resulting WAV clips into one continuous file. The result replaces whatever
+  concatenates the resulting WAV clips into one continuous file, which is then transcoded to Opus
+  (`AudioTranscodeClient`, ai-service's `POST /api/v1/audio/transcode/opus`) before being written to
+  storage under a `.opus` key. The result replaces whatever
   practice items were previously pending (`deletePracticeItemsWithoutAudio`) with this single new
   one; any failure along the way is logged and swallowed, leaving prior pending items untouched so
   the next call can retry. No schema change: the passage is still stored in the existing
@@ -902,7 +904,8 @@ flowchart TD
   flowchart LR
       LLMJson["GeneratedLibraryWord<br/>(LLM JSON)"] --> LibRow["vocabulary_library_words row"]
       LibRow --> TtsBytes["synthesized .wav bytes<br/>(TtsClient)"]
-      TtsBytes --> StorageKey["storage key<br/>(vocab-library/{topicId}/{wordId}.wav)"]
+      TtsBytes --> OpusBytes["transcoded to Opus<br/>(AudioTranscodeClient)"]
+      OpusBytes --> StorageKey["storage key<br/>(vocab-library/{topicId}/{wordId}.opus)"]
   ```
 
   ```mermaid

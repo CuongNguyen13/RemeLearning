@@ -66,8 +66,8 @@ class ListeningLearnServiceImplTest {
 		assertThat(dto.getPracticeItemId()).isEqualTo(5L);
 		assertThat(dto.getAudioUrl()).isEqualTo("/api/v1/learners/user-1/learn/listening/items/5/audio");
 		assertThat(dto.getQuestions()).hasSize(1);
-		verify(storageClient).write(eq("listening/user-1/5.wav"), any(), eq(9L));
-		verify(mapper).updateItemStorageKey(5L, "listening/user-1/5.wav");
+		verify(storageClient).write(eq("listening/user-1/5.opus"), any(), eq(9L));
+		verify(mapper).updateItemStorageKey(5L, "listening/user-1/5.opus");
 	}
 
 	@Test
@@ -167,7 +167,7 @@ class ListeningLearnServiceImplTest {
 		List<ListeningPracticeItemDto> result = service.generatePracticeFromAttempt("user-1", 30L);
 
 		verify(mapper).insertItem(any(ListeningPracticeItem.class));
-		verify(mapper).updateItemStorageKey(6L, "listening/user-1/6.wav");
+		verify(mapper).updateItemStorageKey(6L, "listening/user-1/6.opus");
 		assertThat(result).isNotNull();
 	}
 

@@ -3,6 +3,7 @@ package com.remelearning.english.speaking.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.pronunciation.PhonemePronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
@@ -12,6 +13,7 @@ import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
 import com.remelearning.common.constants.LearningCategories;
 import com.remelearning.common.exception.BusinessException;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.practice.dto.PracticeAttemptRequest;
 import com.remelearning.english.practice.dto.PracticeRedoRequest;
@@ -68,8 +70,8 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 	// english-service's own internal controller route - this URL is returned straight to the FE
 	// client, which only ever talks to bff-service.
 	private static final String SAMPLE_AUDIO_URL = "/api/v1/learners/%s/learn/speaking/items/%d/sample-audio";
-	private static final String SAMPLE_KEY = "speaking/sample/%s/%d.wav";
-	private static final String ATTEMPT_KEY = "speaking/attempts/%s/%s.wav";
+	private static final String SAMPLE_KEY = "speaking/sample/%s/%d.opus";
+	private static final String ATTEMPT_KEY = "speaking/attempts/%s/%s.opus";
 	/** A word's GOP score at/above this is treated as "correct" for the weak-point feed. */
 	private static final double CORRECT_THRESHOLD = 0.6;
 
@@ -79,6 +81,7 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 	private final PronunciationScoringClient pronunciationScoringClient;
 	private final TtsClient ttsClient;
 	private final StorageClient storageClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 	private final PracticeService practiceService;
 	private final ObjectMapper objectMapper;
 	private final String ttsVoice;
@@ -91,6 +94,7 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 			PronunciationScoringClient pronunciationScoringClient,
 			TtsClient ttsClient,
 			StorageClient storageClient,
+			AudioTranscodeClient audioTranscodeClient,
 			PracticeService practiceService,
 			ObjectMapper objectMapper,
 			@Value("${speaking.tts.voice:F1}") String ttsVoice,
@@ -101,6 +105,7 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 		this.pronunciationScoringClient = pronunciationScoringClient;
 		this.ttsClient = ttsClient;
 		this.storageClient = storageClient;
+		this.audioTranscodeClient = audioTranscodeClient;
 		this.practiceService = practiceService;
 		this.objectMapper = objectMapper;
 		this.ttsVoice = ttsVoice;
@@ -161,8 +166,9 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 
 		TtsAudio sample = ttsClient.synthesize(TtsRequest.builder()
 				.text(generated.targetText()).languageCode(ttsLang).voice(ttsVoice).build());
+		byte[] opusSample = audioTranscodeClient.toOpus(new ByteArrayInputStream(sample.getAudioBytes()), "sample.wav");
 		String key = SAMPLE_KEY.formatted(userId, item.getId());
-		storageClient.write(key, new ByteArrayInputStream(sample.getAudioBytes()), sample.getAudioBytes().length);
+		storageClient.write(key, new ByteArrayInputStream(opusSample), opusSample.length);
 		speakingMapper.updateItemStorageKey(item.getId(), key);
 		item.setStorageKey(key);
 
@@ -186,7 +192,8 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 			throw BusinessException.notFound("Speaking practice sample audio not ready: id=" + itemId);
 		}
 		return new SpeakingAudioResource(
-				storageClient.read(item.getStorageKey()), storageClient.size(item.getStorageKey()), "audio/wav", "speaking-sample-" + itemId + ".wav");
+				storageClient.read(item.getStorageKey()), storageClient.size(item.getStorageKey()),
+				AudioContentTypes.contentType(item.getStorageKey()), "speaking-sample-" + itemId + AudioContentTypes.extension(item.getStorageKey()));
 	}
 
 	@Override
@@ -196,16 +203,15 @@ public class SpeakingLearnServiceImpl implements SpeakingLearnService {
 
 		String attemptKey = ATTEMPT_KEY.formatted(userId, UUID.randomUUID());
 		try (InputStream learnerAudio = audio.getInputStream()) {
-			storageClient.write(attemptKey, learnerAudio, audio.getSize());
+			byte[] opusBytes = audioTranscodeClient.toOpus(learnerAudio, audio.getOriginalFilename());
+			storageClient.write(attemptKey, new ByteArrayInputStream(opusBytes), opusBytes.length);
 		} catch (IOException ex) {
 			throw new IllegalStateException("Failed to read uploaded speaking attempt audio", ex);
 		}
 
 		PronunciationScore score;
 		try (InputStream scoringAudio = storageClient.read(attemptKey)) {
-			score = pronunciationScoringClient.score(
-					scoringAudio, audio.getOriginalFilename() == null ? "attempt.wav" : audio.getOriginalFilename(),
-					item.getTargetText(), ttsLang);
+			score = pronunciationScoringClient.score(scoringAudio, "attempt.opus", item.getTargetText(), ttsLang);
 		} catch (IOException ex) {
 			throw new IllegalStateException("Failed to read stored speaking attempt audio for scoring", ex);
 		}

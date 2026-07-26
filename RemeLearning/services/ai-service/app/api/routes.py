@@ -4,6 +4,7 @@ import tempfile
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from app.align.sentence_aligner import align_sentences
 from app.analysis.factory import create_analyzer
@@ -29,7 +30,7 @@ from app.schemas.events import (
 )
 from app.schemas.tts import TtsSynthesizeRequest, TtsSynthesizeResponse
 from app.storage.s3_client import download_to_tempfile
-from app.stt.audio_convert import convert_to_wav
+from app.stt.audio_convert import convert_to_wav, encode_to_opus
 from app.tts.base import TtsSynthesisRequest
 from app.tts.supertonic_engine import SupertonicEngine
 from app.stt.base import SpeakerTurn
@@ -254,6 +255,27 @@ async def upload(file: UploadFile = File(...), language_code: str | None = Form(
     finally:
         os.remove(audio_path)
         os.remove(wav_path)
+
+
+@router.post("/api/v1/audio/transcode/opus")
+async def transcode_to_opus(audio: UploadFile = File(...)) -> Response:
+    """Transcodes any audio file PyAV can decode (wav, mp3, webm, ...) into an Ogg/Opus clip.
+    Used by the Java services to compress newly-generated/newly-uploaded audio (TTS output,
+    recordings, practice attempts) before writing it to storage - existing mp3/wav objects are
+    never re-processed through this endpoint.
+    """
+    suffix = os.path.splitext(audio.filename or "")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        while chunk := await audio.read(UPLOAD_CHUNK_SIZE_BYTES):
+            tmp.write(chunk)
+        audio_path = tmp.name
+
+    try:
+        opus_bytes = encode_to_opus(audio_path)
+    finally:
+        os.remove(audio_path)
+
+    return Response(content=opus_bytes, media_type="audio/ogg")
 
 
 @router.post("/api/v1/dictation/align-sentences", response_model=list[SentenceTimingResponse])

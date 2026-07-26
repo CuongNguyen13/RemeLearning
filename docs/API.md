@@ -1794,6 +1794,20 @@ Chấm điểm phát âm của một bản ghi âm learner theo Goodness-of-Pron
 | `transcript` | string | ASR thuần (Whisper) của chính audio learner gửi lên, không phải điểm chấm |
 | `weak_phonemes` | string[] | Các phoneme (IPA) có điểm GOP dưới ngưỡng `WEAK_PHONEME_THRESHOLD=0.4`, khử trùng lặp, giữ thứ tự xuất hiện đầu tiên |
 
+### POST `/api/v1/audio/transcode/opus`
+
+Chuyển đổi (transcode) một file audio bất kỳ định dạng/codec PyAV đọc được (wav, mp3, webm, ...) sang
+Ogg/Opus — dùng bởi các service Java (qua `common.ai.audio.AudioTranscodeClient` →
+`AiServiceAudioTranscodeClient`) để nén audio **mới ghi/sinh ra** trước khi lưu storage
+(recording-service's audio-only upload; english-service's TTS-sinh audio cho dictation/listening/
+speaking/vocabulary; audio ghi âm luyện nói của learner). File mp3/wav đã lưu từ trước không bị
+convert lại qua endpoint này.
+
+- **Request** (multipart form): `audio` (`UploadFile`, bắt buộc)
+- **Xử lý**: `app/stt/audio_convert.py`'s `encode_to_opus` — decode bằng PyAV (giống `convert_to_wav`),
+  resample về `s16` mono 48kHz (sample rate gốc của Opus), encode bằng `libopus` vào container Ogg.
+- **Response**: bytes thô, `Content-Type: audio/ogg`.
+
 ### POST `/api/v1/faces/enroll`
 
 Enroll một `user_id` làm khuôn mặt đã biết, dùng để nhận diện người nói ở `/api/v1/upload`/
@@ -2240,6 +2254,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | ai-service | REST | POST | `/api/v1/tts/synthesize` | tổng hợp giọng nói bằng Supertonic (ONNX/CPU, 44.1kHz), trả base64 WAV — dùng cho AI-practice của dictation |
 | ai-service | REST | POST | `/api/v1/dictation/align-sentences` | Whisper word-timestamps + khớp câu tuần tự — trả startMs/endMs cho từng câu dictation |
 | ai-service | REST | POST | `/api/v1/pronunciation/score` | GOP (wav2vec2 + g2p_en) chấm phát âm audio learner so với `expected_text`; `503` nếu `PRONUNCIATION_ENABLED=false` — dùng bởi speaking learn skill |
+| ai-service | REST | POST | `/api/v1/audio/transcode/opus` | transcode audio bất kỳ sang Ogg/Opus (PyAV/libopus) — dùng để nén audio mới sinh/upload trước khi lưu storage |
 | ai-service | REST | POST | `/api/v1/faces/enroll` | enroll khuôn mặt (ảnh từ user-service hoặc upload trực tiếp) |
 | ai-service | REST | GET | `/api/v1/faces` | danh sách khuôn mặt đã enroll |
 | english-service (vocabulary) | Kafka in | `transcript.ready` | `TranscriptReadyConsumer` | lưu Transcript + Segments |

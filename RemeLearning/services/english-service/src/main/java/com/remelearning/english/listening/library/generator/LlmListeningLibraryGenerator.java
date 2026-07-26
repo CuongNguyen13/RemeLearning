@@ -64,7 +64,7 @@ public class LlmListeningLibraryGenerator {
 	// Single stable speaker label for the monologue passage, matching DialogueAudioSynthesizer's
 	// single-voice behavior when only one distinct speaker is present.
 	private static final String NARRATOR = "Narrator";
-	private static final String GENERATED_KEY = "listening-library/%d/%s.wav";
+	private static final String GENERATED_KEY = "listening-library/%d/%s.opus";
 	private static final int MIN_QUESTIONS = 10;
 	private static final int MAX_QUESTIONS = 15;
 	// Wider than the old fixed-4-question budget (1200) to cover a longer passage plus up to 15

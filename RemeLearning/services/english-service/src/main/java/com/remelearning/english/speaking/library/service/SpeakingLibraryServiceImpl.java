@@ -2,6 +2,7 @@ package com.remelearning.english.speaking.library.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
 import com.remelearning.common.exception.BusinessException;
@@ -30,6 +31,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
@@ -52,7 +54,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 
 	private static final double PASS_THRESHOLD = 0.7;
 	private static final int FIRST_SEQUENCE_ORDER = 1;
-	private static final String ATTEMPT_KEY = "speaking-library/attempts/%s/%s.wav";
+	private static final String ATTEMPT_KEY = "speaking-library/attempts/%s/%s.opus";
 
 	private final SpeakingLibraryTopicMapper topicMapper;
 	private final SpeakingLibrarySectionMapper sectionMapper;
@@ -62,6 +64,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 	private final LlmSpeakingLibraryGenerator generator;
 	private final PronunciationScoringClient pronunciationScoringClient;
 	private final StorageClient storageClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 	private final ObjectMapper objectMapper;
 	private final String ttsLang;
 	private final SpeakingLearnService speakingLearnService;
@@ -75,6 +78,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 			LlmSpeakingLibraryGenerator generator,
 			PronunciationScoringClient pronunciationScoringClient,
 			StorageClient storageClient,
+			AudioTranscodeClient audioTranscodeClient,
 			ObjectMapper objectMapper,
 			@Value("${speaking.tts.lang:en}") String ttsLang,
 			SpeakingLearnService speakingLearnService) {
@@ -86,6 +90,7 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 		this.generator = generator;
 		this.pronunciationScoringClient = pronunciationScoringClient;
 		this.storageClient = storageClient;
+		this.audioTranscodeClient = audioTranscodeClient;
 		this.objectMapper = objectMapper;
 		this.ttsLang = ttsLang;
 		this.speakingLearnService = speakingLearnService;
@@ -175,16 +180,15 @@ public class SpeakingLibraryServiceImpl implements SpeakingLibraryService {
 
 		String attemptKey = ATTEMPT_KEY.formatted(userId, UUID.randomUUID());
 		try (InputStream learnerAudio = recordedAudio.getInputStream()) {
-			storageClient.write(attemptKey, learnerAudio, recordedAudio.getSize());
+			byte[] opusBytes = audioTranscodeClient.toOpus(learnerAudio, recordedAudio.getOriginalFilename());
+			storageClient.write(attemptKey, new ByteArrayInputStream(opusBytes), opusBytes.length);
 		} catch (IOException ex) {
 			throw new IllegalStateException("Failed to read uploaded speaking library attempt audio", ex);
 		}
 
 		PronunciationScore score;
 		try (InputStream scoringAudio = storageClient.read(attemptKey)) {
-			score = pronunciationScoringClient.score(
-					scoringAudio, recordedAudio.getOriginalFilename() == null ? "attempt.wav" : recordedAudio.getOriginalFilename(),
-					sentence.getSentenceText(), ttsLang);
+			score = pronunciationScoringClient.score(scoringAudio, "attempt.opus", sentence.getSentenceText(), ttsLang);
 		} catch (IOException ex) {
 			throw new IllegalStateException("Failed to read stored speaking library attempt audio for scoring", ex);
 		}

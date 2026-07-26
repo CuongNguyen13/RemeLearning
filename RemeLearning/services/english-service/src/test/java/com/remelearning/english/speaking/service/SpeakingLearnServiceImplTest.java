@@ -1,6 +1,7 @@
 package com.remelearning.english.speaking.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.pronunciation.PhonemePronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScore;
 import com.remelearning.common.ai.pronunciation.PronunciationScoringClient;
@@ -47,10 +48,18 @@ class SpeakingLearnServiceImplTest {
 	private final PronunciationScoringClient scoringClient = mock(PronunciationScoringClient.class);
 	private final TtsClient ttsClient = mock(TtsClient.class);
 	private final StorageClient storageClient = mock(StorageClient.class);
+	private final AudioTranscodeClient audioTranscodeClient = mock(AudioTranscodeClient.class);
+	{
+		// Echoes the input bytes back unchanged so existing byte-length assertions keep working
+		// without needing a real Opus encode in these unit tests.
+		when(audioTranscodeClient.toOpus(any(), any()))
+				.thenAnswer(invocation -> ((java.io.InputStream) invocation.getArgument(0)).readAllBytes());
+	}
 	private final PracticeService practiceService = mock(PracticeService.class);
 	private final ObjectMapper objectMapper = new ObjectMapper();
 	private final SpeakingLearnServiceImpl service = new SpeakingLearnServiceImpl(
-			mapper, generator, weakPointService, scoringClient, ttsClient, storageClient, practiceService, objectMapper, "F1", "en");
+			mapper, generator, weakPointService, scoringClient, ttsClient, storageClient, audioTranscodeClient,
+			practiceService, objectMapper, "F1", "en");
 
 	@Test
 	void generateSynthesizesSampleAudioAndFallsBackToTopWeakPoints() {
@@ -66,7 +75,7 @@ class SpeakingLearnServiceImplTest {
 		assertThat(dto.getPracticeItemId()).isEqualTo(7L);
 		assertThat(dto.getTargetText()).isEqualTo("Think about the weather.");
 		assertThat(dto.getSampleAudioUrl()).isEqualTo("/api/v1/learners/user-1/learn/speaking/items/7/sample-audio");
-		verify(storageClient).write(eq("speaking/sample/user-1/7.wav"), any(), eq(9L));
+		verify(storageClient).write(eq("speaking/sample/user-1/7.opus"), any(), eq(9L));
 	}
 
 	@Test

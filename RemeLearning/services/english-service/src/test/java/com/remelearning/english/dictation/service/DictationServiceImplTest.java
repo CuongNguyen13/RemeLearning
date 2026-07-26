@@ -2,6 +2,7 @@ package com.remelearning.english.dictation.service;
 
 import com.remelearning.common.ai.align.SentenceAlignmentClient;
 import com.remelearning.common.ai.align.SentenceTiming;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.tts.TtsAudio;
 import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
@@ -74,14 +75,20 @@ class DictationServiceImplTest {
 	private final DictationGapEventPublisher gapEventPublisher = mock(DictationGapEventPublisher.class);
 	private final TtsClient ttsClient = mock(TtsClient.class);
 	private final StorageClient storageClient = mock(StorageClient.class);
+	private final AudioTranscodeClient audioTranscodeClient = mock(AudioTranscodeClient.class);
 	private final SentenceAlignmentClient sentenceAlignmentClient = mock(SentenceAlignmentClient.class);
 	private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 	private DictationServiceImpl service;
 
 	@BeforeEach
-	void setUp() {
+	void setUp() throws java.io.IOException {
+		// Echoes the input bytes back unchanged so existing byte-length assertions keep working
+		// without needing a real Opus encode in these unit tests.
+		when(audioTranscodeClient.toOpus(any(InputStream.class), anyString()))
+				.thenAnswer(invocation -> ((InputStream) invocation.getArgument(0)).readAllBytes());
 		service = new DictationServiceImpl(dictationMapper, dictationAnalyzer, dialogueGenerator, sentenceTranslator,
-				gapEventPublisher, ttsClient, storageClient, sentenceAlignmentClient, objectMapper, "F1", "en", 8, 3);
+				gapEventPublisher, ttsClient, storageClient, audioTranscodeClient, sentenceAlignmentClient, objectMapper,
+				"F1", "en", 8, 3);
 	}
 
 	@Test
@@ -491,8 +498,8 @@ class DictationServiceImplTest {
 		ArgumentCaptor<DictationPracticeItem> itemCaptor = ArgumentCaptor.forClass(DictationPracticeItem.class);
 		verify(dictationMapper).insertPracticeItem(itemCaptor.capture());
 		assertThat(itemCaptor.getValue().getTopic()).isEqualTo("Study habits");
-		verify(storageClient).write(eq("generated/user-1/21.wav"), any(), eq(3L));
-		verify(dictationMapper).updatePracticeItemStorageKey(21L, "generated/user-1/21.wav");
+		verify(storageClient).write(eq("generated/user-1/21.opus"), any(), eq(3L));
+		verify(dictationMapper).updatePracticeItemStorageKey(21L, "generated/user-1/21.opus");
 		verify(dictationMapper).deletePracticeItemsWithoutAudio("user-1");
 		assertThat(items).hasSize(1);
 		assertThat(items.get(0).getAudioUrl()).isEqualTo("/api/v1/dictation/ai-practice/items/21/audio");
@@ -515,7 +522,7 @@ class DictationServiceImplTest {
 		service.generateAiPractice("user-1", new GenerateAiPracticeRequest());
 
 		verify(dictationMapper).insertPracticeItem(any(DictationPracticeItem.class));
-		verify(storageClient).write(eq("generated/user-1/21.wav"), any(), eq(1L));
+		verify(storageClient).write(eq("generated/user-1/21.opus"), any(), eq(1L));
 		verify(dictationMapper, org.mockito.Mockito.never()).deletePracticeItemsWithoutAudio(anyString());
 	}
 
@@ -546,7 +553,7 @@ class DictationServiceImplTest {
 		assertThat(spokenTexts).containsExactly("Alex: Did you see that?", "Sam: Yes, I did.");
 
 		ArgumentCaptor<InputStream> audioCaptor = ArgumentCaptor.forClass(InputStream.class);
-		verify(storageClient).write(eq("generated/user-1/40.wav"), audioCaptor.capture(), eq(49L));
+		verify(storageClient).write(eq("generated/user-1/40.opus"), audioCaptor.capture(), eq(49L));
 		assertThat(audioCaptor.getValue().readAllBytes()).hasSize(49);
 
 		ArgumentCaptor<DictationPracticeItem> itemCaptor = ArgumentCaptor.forClass(DictationPracticeItem.class);
@@ -632,7 +639,7 @@ class DictationServiceImplTest {
 		verify(dialogueGenerator).generateDialogue(List.of("reluctant"), null, null, null);
 		verify(dictationAnalyzer, org.mockito.Mockito.never()).generatePracticeSentences(anyList());
 		verify(dictationMapper).insertPracticeItem(any(DictationPracticeItem.class));
-		verify(storageClient).write(eq("generated/user-1/31.wav"), any(), eq(2L));
+		verify(storageClient).write(eq("generated/user-1/31.opus"), any(), eq(2L));
 	}
 
 	@Test

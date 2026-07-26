@@ -1,5 +1,6 @@
 package com.remelearning.english.learn.common;
 
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.tts.TtsAudio;
 import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
@@ -7,6 +8,7 @@ import com.remelearning.english.dictation.audio.WavAudioMerger;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -19,8 +21,9 @@ import java.util.Map;
  * keeps its own equivalent, already-tested {@code synthesizeDialoguePracticeItem} rather than being
  * migrated onto this shared version - see {@code common.event.LearningGapPublisher}'s Javadoc for
  * the same "don't touch a working path" rationale). One random voice per distinct speaker
- * (deterministic within a call, varied across calls), each line synthesized individually and
- * merged via {@link WavAudioMerger}.
+ * (deterministic within a call, varied across calls), each line synthesized individually, merged
+ * via {@link WavAudioMerger}, then transcoded to Opus - callers store {@link SynthesizedDialogue}'s
+ * {@code audioBytes} verbatim under a {@code .opus} key.
  */
 @Component
 @RequiredArgsConstructor
@@ -30,6 +33,7 @@ public class DialogueAudioSynthesizer {
 	private static final List<String> VOICE_POOL = List.of("F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5");
 
 	private final TtsClient ttsClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 
 	/**
 	 * @param lines  the passage's lines in order; must not be empty
@@ -61,7 +65,8 @@ public class DialogueAudioSynthesizer {
 		}
 
 		byte[] mergedAudio = WavAudioMerger.merge(clips);
-		return new SynthesizedDialogue(mergedAudio, transcriptText.toString(), anyTranslation ? translationText.toString() : null);
+		byte[] opusAudio = audioTranscodeClient.toOpus(new ByteArrayInputStream(mergedAudio), "dialogue.wav");
+		return new SynthesizedDialogue(opusAudio, transcriptText.toString(), anyTranslation ? translationText.toString() : null);
 	}
 
 	// Picks one random Supertonic voice preset per distinct speaker, without repeats until the

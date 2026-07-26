@@ -18,6 +18,12 @@ Python AI service for RemeLearning. Responsibilities:
 6. Expose `POST /api/v1/pronunciation/score` — Goodness-of-Pronunciation (GOP) scoring for the
    Nói/Phát âm (speaking/pronunciation) practice feature, given a learner's recorded attempt at a
    known target sentence. See `app/pronunciation/` below.
+7. Expose `POST /api/v1/audio/transcode/opus` (multipart: `audio` file) — transcodes any audio
+   PyAV can decode into an in-memory Ogg/Opus clip (`app/stt/audio_convert.py`'s `encode_to_opus`,
+   reusing the same PyAV decode path as `convert_to_wav`). Called by the Java services'
+   `common.ai.audio.AudioTranscodeClient` to compress newly-generated/newly-uploaded audio (TTS
+   output, recordings, practice attempts) before it's written to storage — pre-existing mp3/wav
+   objects are never re-processed through this endpoint.
 
 See `RemeLearning/common/src/main/java/com/remelearning/common/constants/KafkaTopics.java` for the shared
 topic-name contract with the Java services.

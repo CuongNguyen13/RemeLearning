@@ -54,7 +54,7 @@ public class LlmSpeakingLibraryGenerator {
 	// Single stable speaker label for each sentence's monologue, matching DialogueAudioSynthesizer's
 	// single-voice behavior when only one distinct speaker is present.
 	private static final String NARRATOR = "Narrator";
-	private static final String GENERATED_KEY = "speaking-library/%d/%s.wav";
+	private static final String GENERATED_KEY = "speaking-library/%d/%s.opus";
 
 	private final AiContentClient aiContentClient;
 	private final DialogueAudioSynthesizer audioSynthesizer;

@@ -1,6 +1,7 @@
 package com.remelearning.english.vocabulary.library.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.tts.TtsAudio;
 import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.exception.BusinessException;
@@ -46,13 +47,20 @@ class VocabularyLibraryServiceImplTest {
 	private final LibraryWordGenerator libraryWordGenerator = mock(LibraryWordGenerator.class);
 	private final TtsClient ttsClient = mock(TtsClient.class);
 	private final StorageClient storageClient = mock(StorageClient.class);
+	private final AudioTranscodeClient audioTranscodeClient = mock(AudioTranscodeClient.class);
+	{
+		// Echoes the input bytes back unchanged so existing byte-length assertions keep working
+		// without needing a real Opus encode in these unit tests.
+		when(audioTranscodeClient.toOpus(any(), any()))
+				.thenAnswer(invocation -> ((java.io.InputStream) invocation.getArgument(0)).readAllBytes());
+	}
 	private final PracticeService practiceService = mock(PracticeService.class);
 	private final com.remelearning.english.listening.scoring.OpenAnswerGrader openAnswerGrader =
 			mock(com.remelearning.english.listening.scoring.OpenAnswerGrader.class);
 	private final ObjectMapper objectMapper = new ObjectMapper();
 	private final VocabularyLibraryServiceImpl service = new VocabularyLibraryServiceImpl(
 			topicMapper, libraryWordMapper, sectionMapper, libraryWordGenerator, ttsClient, storageClient,
-			practiceService, openAnswerGrader, objectMapper);
+			audioTranscodeClient, practiceService, openAnswerGrader, objectMapper);
 
 	@Test
 	void listTopicsMergesTopicRowsWithTheLearnersMasterySummary() {

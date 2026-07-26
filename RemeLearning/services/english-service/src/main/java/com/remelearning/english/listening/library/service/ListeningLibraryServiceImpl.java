@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.exception.BusinessException;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.listening.dto.ListeningAudioResource;
 import com.remelearning.english.listening.dto.ListeningPracticeItemDto;
@@ -373,8 +374,8 @@ public class ListeningLibraryServiceImpl implements ListeningLibraryService {
 		return new ListeningAudioResource(
 				storageClient.read(section.getAudioStorageKey()),
 				storageClient.size(section.getAudioStorageKey()),
-				"audio/wav",
-				"listening-library-" + sectionId + ".wav");
+				AudioContentTypes.contentType(section.getAudioStorageKey()),
+				"listening-library-" + sectionId + AudioContentTypes.extension(section.getAudioStorageKey()));
 	}
 
 	// Resolves a question's stored correctOption letter ("A"-"D") to the matching option text

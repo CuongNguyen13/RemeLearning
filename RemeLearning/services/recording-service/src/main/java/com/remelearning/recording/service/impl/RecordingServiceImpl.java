@@ -1,7 +1,9 @@
 package com.remelearning.recording.service.impl;
 
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.common.exception.ErrorCode;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.S3StorageClient;
 import com.remelearning.recording.domain.Recording;
 import com.remelearning.recording.dto.RecordingResponse;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,6 +31,7 @@ public class RecordingServiceImpl implements RecordingService {
 
 	private final RecordingMapper recordingMapper;
 	private final S3StorageClient s3StorageClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 	private final RecordingUploadedProducer recordingUploadedProducer;
 	private final String recordingBucket;
 
@@ -36,17 +40,22 @@ public class RecordingServiceImpl implements RecordingService {
 	public RecordingServiceImpl(
 			RecordingMapper recordingMapper,
 			S3StorageClient s3StorageClient,
+			AudioTranscodeClient audioTranscodeClient,
 			RecordingUploadedProducer recordingUploadedProducer,
 			@Value("${reme.s3.recording-bucket}") String recordingBucket) {
 		this.recordingMapper = recordingMapper;
 		this.s3StorageClient = s3StorageClient;
+		this.audioTranscodeClient = audioTranscodeClient;
 		this.recordingUploadedProducer = recordingUploadedProducer;
 		this.recordingBucket = recordingBucket;
 	}
 
 	// Validates the incoming multipart request, uploads the file to S3 under a
 	// userId/recordingId/filename key, persists the recording row, then publishes
-	// recording.uploaded so ai-service can pick it up for STT + diarization.
+	// recording.uploaded so ai-service can pick it up for STT + diarization. Audio-only uploads
+	// (content-type "audio/*") are transcoded to Opus before storage to save space; video uploads
+	// are stored as-is since ai-service's vision/face-recognition steps need the original video
+	// track, which a lossy audio-only transcode would strip.
 	@Override
 	@Transactional
 	public RecordingResponse upload(MultipartFile file, String userId, String languageCode) {
@@ -60,10 +69,20 @@ public class RecordingServiceImpl implements RecordingService {
 		String recordingId = UUID.randomUUID().toString();
 		String resolvedLanguageCode = (languageCode == null || languageCode.isBlank())
 				? DEFAULT_LANGUAGE_CODE : languageCode;
-		String s3Key = userId + "/" + recordingId + "/" + file.getOriginalFilename();
+		boolean isAudioOnly = file.getContentType() != null
+				&& file.getContentType().toLowerCase().startsWith("audio/");
+		String s3Key = isAudioOnly
+				? userId + "/" + recordingId + "/" + stripExtension(file.getOriginalFilename()) + AudioContentTypes.OPUS_EXTENSION
+				: userId + "/" + recordingId + "/" + file.getOriginalFilename();
+		String storedContentType = isAudioOnly ? "audio/ogg" : file.getContentType();
 
 		try {
-			s3StorageClient.upload(recordingBucket, s3Key, file.getInputStream(), file.getSize());
+			if (isAudioOnly) {
+				byte[] opusBytes = audioTranscodeClient.toOpus(file.getInputStream(), file.getOriginalFilename());
+				s3StorageClient.upload(recordingBucket, s3Key, new ByteArrayInputStream(opusBytes), opusBytes.length);
+			} else {
+				s3StorageClient.upload(recordingBucket, s3Key, file.getInputStream(), file.getSize());
+			}
 		} catch (Exception e) {
 			log.error("Failed to upload recording {} to s3://{}/{}", recordingId, recordingBucket, s3Key, e);
 			throw new BusinessException(ErrorCode.EXTERNAL_SERVICE_ERROR,
@@ -77,7 +96,7 @@ public class RecordingServiceImpl implements RecordingService {
 				.s3Key(s3Key)
 				.languageCode(resolvedLanguageCode)
 				.originalFilename(file.getOriginalFilename())
-				.contentType(file.getContentType())
+				.contentType(storedContentType)
 				.status(UPLOADED_STATUS)
 				.build();
 		recordingMapper.insert(recording);
@@ -109,6 +128,16 @@ public class RecordingServiceImpl implements RecordingService {
 		return recordingMapper.findByUserId(userId).stream()
 				.map(this::toResponse)
 				.toList();
+	}
+
+	// Drops the extension from an uploaded filename (e.g. "clip.wav" -> "clip") so the Opus
+	// transcode can be stored under the same basename with a ".opus" extension instead.
+	private static String stripExtension(String filename) {
+		if (filename == null) {
+			return "audio";
+		}
+		int dotIndex = filename.lastIndexOf('.');
+		return dotIndex > 0 ? filename.substring(0, dotIndex) : filename;
 	}
 
 	private RecordingResponse toResponse(Recording recording) {

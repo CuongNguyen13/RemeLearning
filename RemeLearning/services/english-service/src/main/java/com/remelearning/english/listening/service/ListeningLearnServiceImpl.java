@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.constants.LearningCategories;
 import com.remelearning.common.exception.BusinessException;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.english.learn.common.DialogueAudioSynthesizer;
 import com.remelearning.english.learn.common.SynthesizedDialogue;
@@ -60,7 +61,7 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 	// own internal controller route - this URL is returned straight to the FE client, which only ever
 	// talks to bff-service.
 	private static final String AUDIO_URL = "/api/v1/learners/%s/learn/listening/items/%d/audio";
-	private static final String GENERATED_KEY = "listening/%s/%d.wav";
+	private static final String GENERATED_KEY = "listening/%s/%d.opus";
 
 	private final ListeningMapper listeningMapper;
 	private final ListeningPracticeGenerator generator;
@@ -120,7 +121,8 @@ public class ListeningLearnServiceImpl implements ListeningLearnService {
 			throw BusinessException.notFound("Listening practice audio not ready: id=" + itemId);
 		}
 		return new ListeningAudioResource(
-				storageClient.read(item.getStorageKey()), storageClient.size(item.getStorageKey()), "audio/wav", "listening-" + itemId + ".wav");
+				storageClient.read(item.getStorageKey()), storageClient.size(item.getStorageKey()),
+				AudioContentTypes.contentType(item.getStorageKey()), "listening-" + itemId + AudioContentTypes.extension(item.getStorageKey()));
 	}
 
 	@Override

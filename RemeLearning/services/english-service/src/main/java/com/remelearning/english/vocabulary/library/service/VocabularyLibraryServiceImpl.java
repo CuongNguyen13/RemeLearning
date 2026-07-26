@@ -3,10 +3,12 @@ package com.remelearning.english.vocabulary.library.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.ai.audio.AudioTranscodeClient;
 import com.remelearning.common.ai.tts.TtsAudio;
 import com.remelearning.common.ai.tts.TtsClient;
 import com.remelearning.common.ai.tts.TtsRequest;
 import com.remelearning.common.exception.BusinessException;
+import com.remelearning.common.storage.AudioContentTypes;
 import com.remelearning.common.storage.StorageClient;
 import com.remelearning.common.constants.LearningCategories;
 import com.remelearning.english.listening.scoring.OpenAnswerGrade;
@@ -61,7 +63,7 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 	private static final int TOP_UP_BATCH_SIZE = 15;
 	private static final String ITEM_ID_PREFIX = "vocab:";
 	private static final String AUDIO_URL = "/api/v1/learn/vocabulary/library/words/%d/audio";
-	private static final String GENERATED_AUDIO_KEY = "vocab-library/%d/%d.wav";
+	private static final String GENERATED_AUDIO_KEY = "vocab-library/%d/%d.opus";
 
 	private final VocabularyTopicMapper topicMapper;
 	private final VocabularyLibraryWordMapper libraryWordMapper;
@@ -69,20 +71,22 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 	private final LibraryWordGenerator libraryWordGenerator;
 	private final TtsClient ttsClient;
 	private final StorageClient storageClient;
+	private final AudioTranscodeClient audioTranscodeClient;
 	private final PracticeService practiceService;
 	private final OpenAnswerGrader openAnswerGrader;
 	private final ObjectMapper objectMapper;
 
 	public VocabularyLibraryServiceImpl(VocabularyTopicMapper topicMapper, VocabularyLibraryWordMapper libraryWordMapper,
 			VocabularySectionMapper sectionMapper, LibraryWordGenerator libraryWordGenerator, TtsClient ttsClient,
-			StorageClient storageClient, PracticeService practiceService, OpenAnswerGrader openAnswerGrader,
-			ObjectMapper objectMapper) {
+			StorageClient storageClient, AudioTranscodeClient audioTranscodeClient, PracticeService practiceService,
+			OpenAnswerGrader openAnswerGrader, ObjectMapper objectMapper) {
 		this.topicMapper = topicMapper;
 		this.libraryWordMapper = libraryWordMapper;
 		this.sectionMapper = sectionMapper;
 		this.libraryWordGenerator = libraryWordGenerator;
 		this.ttsClient = ttsClient;
 		this.storageClient = storageClient;
+		this.audioTranscodeClient = audioTranscodeClient;
 		this.practiceService = practiceService;
 		this.openAnswerGrader = openAnswerGrader;
 		this.objectMapper = objectMapper;
@@ -208,7 +212,7 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 		}
 		return new VocabularyAudioResource(
 				storageClient.read(word.getAudioStorageKey()), storageClient.size(word.getAudioStorageKey()),
-				"audio/wav", "vocab-" + wordId + ".wav");
+				AudioContentTypes.contentType(word.getAudioStorageKey()), "vocab-" + wordId + AudioContentTypes.extension(word.getAudioStorageKey()));
 	}
 
 	// --- helpers (shared by later tasks too) ---
@@ -243,8 +247,9 @@ public class VocabularyLibraryServiceImpl implements VocabularyLibraryService {
 	// stores it via the shared StorageClient, mirroring ListeningLearnServiceImpl.generate.
 	private void synthesizeAndStoreAudio(VocabularyLibraryWord word) {
 		TtsAudio audio = ttsClient.synthesize(TtsRequest.builder().text(word.getWord()).languageCode("en").build());
+		byte[] opusAudio = audioTranscodeClient.toOpus(new ByteArrayInputStream(audio.getAudioBytes()), "word.wav");
 		String key = GENERATED_AUDIO_KEY.formatted(word.getTopicId(), word.getId());
-		storageClient.write(key, new ByteArrayInputStream(audio.getAudioBytes()), audio.getAudioBytes().length);
+		storageClient.write(key, new ByteArrayInputStream(opusAudio), opusAudio.length);
 		libraryWordMapper.updateAudioStorageKey(word.getId(), key);
 		word.setAudioStorageKey(key);
 	}

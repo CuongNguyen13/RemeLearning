@@ -14,7 +14,7 @@ config:
 flowchart TD
     subgraph Input["Input"]
         MultipartUpload["multipart file upload<br/>(POST /api/v1/upload)"]
-        RawFile["Raw video/audio file<br/>(mp4, mkv, mp3, ...)"]
+        RawFile["Raw video/audio file<br/>(mp4, mkv, mp3, opus, ...)"]
         S3Obj["S3/MinIO object<br/>(s3_bucket + s3_key)"]
         EventIn["recording.uploaded event<br/>{recording_id, user_id, s3_bucket, s3_key, language_code?}"]
     end
