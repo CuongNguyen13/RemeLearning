@@ -51,10 +51,13 @@ class PracticeSessionServiceImplTest {
 	private final GrammarWeakPointService grammarWeakPointService = mock(GrammarWeakPointService.class);
 	private final PronunciationWeakPointService pronunciationWeakPointService = mock(PronunciationWeakPointService.class);
 	private final ListeningWeakPointService listeningWeakPointService = mock(ListeningWeakPointService.class);
+	private final com.remelearning.english.writing.service.WritingLearnService writingLearnService =
+			mock(com.remelearning.english.writing.service.WritingLearnService.class);
 
 	private final PracticeSessionServiceImpl service = new PracticeSessionServiceImpl(
 			mapper, vocabLearnService, grammarLearnService, listeningLearnService, speakingLearnService,
-			vocabularyWeakPointService, grammarWeakPointService, pronunciationWeakPointService, listeningWeakPointService);
+			writingLearnService, vocabularyWeakPointService, grammarWeakPointService,
+			pronunciationWeakPointService, listeningWeakPointService);
 
 	// Every generate() returns a usable item DTO so slots persist without NPEs.
 	private void stubAllGenerators() {
@@ -66,6 +69,9 @@ class PracticeSessionServiceImplTest {
 				.thenReturn(ListeningPracticeItemDto.builder().practiceItemId(30L).topic("Listening topic").build());
 		when(speakingLearnService.generate(any(), any()))
 				.thenReturn(SpeakingPracticeItemDto.builder().practiceItemId(40L).topic("Speaking topic").build());
+		when(writingLearnService.generate(any(), any()))
+				.thenReturn(com.remelearning.english.writing.dto.WritingPracticeItemDto.builder()
+						.practiceItemId(50L).topic("Writing topic").build());
 	}
 
 	private void noWeakPoints() {
@@ -87,13 +93,17 @@ class PracticeSessionServiceImplTest {
 		when(listeningWeakPointService.getWeakPoints(eq("user-1"), any())).thenReturn(List.of());
 		stubAllGenerators();
 
-		PracticeSessionDto dto = service.startSession("user-1", 4);
+		PracticeSessionDto dto = service.startSession("user-1", 4, null);
 
 		assertThat(dto.getTotalExercises()).isEqualTo(4);
+		// Writing joins the rotation because grammar/vocabulary have weak points - it has no weak-point
+		// table of its own and borrows theirs, ranked by whichever is more urgent (vocabulary's 0.9 here,
+		// tying with vocabulary itself and landing after it since collectFocuses adds it last).
 		assertThat(dto.getExercises()).extracting("category")
-				.containsExactly("vocabulary", "grammar", "vocabulary", "grammar");
+				.containsExactly("vocabulary", "writing", "grammar", "vocabulary");
 		verify(vocabLearnService, times(2)).generate(eq("user-1"), any());
-		verify(grammarLearnService, times(2)).generate(eq("user-1"), any());
+		verify(grammarLearnService, times(1)).generate(eq("user-1"), any());
+		verify(writingLearnService, times(1)).generate(eq("user-1"), any());
 		verify(listeningLearnService, never()).generate(any(), any());
 		verify(speakingLearnService, never()).generate(any(), any());
 	}
@@ -107,7 +117,7 @@ class PracticeSessionServiceImplTest {
 		when(listeningWeakPointService.getWeakPoints(any(), any())).thenReturn(List.of());
 		stubAllGenerators();
 
-		service.startSession("user-1", 1);
+		service.startSession("user-1", 1, null);
 
 		ArgumentCaptor<GenerateVocabPracticeRequest> captor = ArgumentCaptor.forClass(GenerateVocabPracticeRequest.class);
 		verify(vocabLearnService).generate(eq("user-1"), captor.capture());
@@ -115,18 +125,19 @@ class PracticeSessionServiceImplTest {
 	}
 
 	@Test
-	void coldStartSpreadsOneExerciseAcrossAllFourSkills() {
+	void coldStartSpreadsOneExerciseAcrossAllFiveSkills() {
 		noWeakPoints();
 		stubAllGenerators();
 
-		PracticeSessionDto dto = service.startSession("user-1", 4);
+		PracticeSessionDto dto = service.startSession("user-1", 5, null);
 
 		assertThat(dto.getExercises()).extracting("category")
-				.containsExactly("vocabulary", "grammar", "listening", "speaking");
+				.containsExactly("vocabulary", "grammar", "listening", "speaking", "writing");
 		verify(vocabLearnService, times(1)).generate(any(), any());
 		verify(grammarLearnService, times(1)).generate(any(), any());
 		verify(listeningLearnService, times(1)).generate(any(), any());
 		verify(speakingLearnService, times(1)).generate(any(), any());
+		verify(writingLearnService, times(1)).generate(any(), any());
 	}
 
 	@Test
@@ -139,7 +150,7 @@ class PracticeSessionServiceImplTest {
 		when(pronunciationWeakPointService.getTopWeakPoints(any(), anyInt())).thenReturn(List.of());
 		stubAllGenerators();
 
-		service.startSession("user-1", 1);
+		service.startSession("user-1", 1, null);
 
 		ArgumentCaptor<GenerateListeningPracticeRequest> captor =
 				ArgumentCaptor.forClass(GenerateListeningPracticeRequest.class);
@@ -156,7 +167,7 @@ class PracticeSessionServiceImplTest {
 		when(listeningWeakPointService.getWeakPoints(any(), any())).thenReturn(List.of());
 		stubAllGenerators();
 
-		service.startSession("user-1", 1);
+		service.startSession("user-1", 1, null);
 
 		ArgumentCaptor<GenerateSpeakingPracticeRequest> captor =
 				ArgumentCaptor.forClass(GenerateSpeakingPracticeRequest.class);
@@ -165,11 +176,66 @@ class PracticeSessionServiceImplTest {
 	}
 
 	@Test
+	void writingSlotBorrowsBothGrammarAndVocabularyLabelsAndPicksAWritingMode() {
+		// Writing is the one exercise that drills grammar and vocabulary at the same time, so it gets
+		// both label sets rather than one domain's.
+		when(vocabularyWeakPointService.getTopWeakPoints(eq("user-1"), anyInt()))
+				.thenReturn(List.of(VocabularyWeakPoint.builder().label("reluctant").forgettingScore(0.4).build()));
+		when(grammarWeakPointService.getTopWeakPoints(eq("user-1"), anyInt()))
+				.thenReturn(List.of(GrammarWeakPoint.builder().label("past perfect").forgettingScore(0.99).build()));
+		when(pronunciationWeakPointService.getTopWeakPoints(any(), anyInt())).thenReturn(List.of());
+		when(listeningWeakPointService.getWeakPoints(any(), any())).thenReturn(List.of());
+		stubAllGenerators();
+
+		// grammar 0.99 ranks first, writing ties it at 0.99 (max of the two) and comes next.
+		service.startSession("user-1", 2, null);
+
+		ArgumentCaptor<com.remelearning.english.writing.dto.GenerateWritingPracticeRequest> captor =
+				ArgumentCaptor.forClass(com.remelearning.english.writing.dto.GenerateWritingPracticeRequest.class);
+		verify(writingLearnService).generate(eq("user-1"), captor.capture());
+		assertThat(captor.getValue().getFocusItems()).containsExactly("past perfect", "reluctant");
+		// taskType is mandatory for the writing generator (unlike the other domains' optional facets).
+		assertThat(captor.getValue().getTaskType()).isNotNull();
+	}
+
+	@Test
+	void theChosenExamStyleReachesEveryDomainGeneratorNormalized() {
+		noWeakPoints();
+		stubAllGenerators();
+
+		service.startSession("user-1", 5, "ielts");
+
+		ArgumentCaptor<GenerateVocabPracticeRequest> vocabCaptor =
+				ArgumentCaptor.forClass(GenerateVocabPracticeRequest.class);
+		verify(vocabLearnService).generate(any(), vocabCaptor.capture());
+		// Normalized once per session, so "ielts" and "IELTS" can't produce two different stored values.
+		assertThat(vocabCaptor.getValue().getExamType()).isEqualTo("IELTS");
+
+		ArgumentCaptor<com.remelearning.english.writing.dto.GenerateWritingPracticeRequest> writingCaptor =
+				ArgumentCaptor.forClass(com.remelearning.english.writing.dto.GenerateWritingPracticeRequest.class);
+		verify(writingLearnService).generate(any(), writingCaptor.capture());
+		assertThat(writingCaptor.getValue().getExamType()).isEqualTo("IELTS");
+	}
+
+	@Test
+	void anUnspecifiedExamStyleStaysNullRatherThanBecomingAString() {
+		noWeakPoints();
+		stubAllGenerators();
+
+		service.startSession("user-1", 1, "   ");
+
+		ArgumentCaptor<GenerateVocabPracticeRequest> captor =
+				ArgumentCaptor.forClass(GenerateVocabPracticeRequest.class);
+		verify(vocabLearnService).generate(any(), captor.capture());
+		assertThat(captor.getValue().getExamType()).isNull();
+	}
+
+	@Test
 	void persistsSessionHeaderAndOneExercisePerSlot() {
 		noWeakPoints();
 		stubAllGenerators();
 
-		service.startSession("user-1", 4);
+		service.startSession("user-1", 4, null);
 
 		ArgumentCaptor<PracticeSession> sessionCaptor = ArgumentCaptor.forClass(PracticeSession.class);
 		verify(mapper).insertSession(sessionCaptor.capture());

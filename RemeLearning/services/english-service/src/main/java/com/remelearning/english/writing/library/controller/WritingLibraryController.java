@@ -44,8 +44,9 @@ public class WritingLibraryController {
 			+ "chain is not yet at full length; resumes an already-started prompt otherwise")
 	@PostMapping("/{userId}/topics/{topicId}/prompts")
 	public ApiResponse<WritingLibraryPromptDto> startOrResumePrompt(
-			@PathVariable String userId, @PathVariable Long topicId, @RequestParam WritingTaskType taskType) {
-		return ApiResponse.ok(writingLibraryService.startOrResumePrompt(userId, topicId, taskType));
+			@PathVariable String userId, @PathVariable Long topicId, @RequestParam WritingTaskType taskType,
+			@RequestParam(required = false) String examType) {
+		return ApiResponse.ok(writingLibraryService.startOrResumePrompt(userId, topicId, taskType, examType));
 	}
 
 	@Operation(summary = "Grade a submitted library text, reveal the reference answer, feed its labelled errors into the "
@@ -62,7 +63,8 @@ public class WritingLibraryController {
 			+ "same practice bank as the learn tab")
 	@PostMapping("/{userId}/attempts/{attemptId}/ai-practice")
 	public ApiResponse<List<WritingPracticeItemDto>> generatePracticeFromAttempt(
-			@PathVariable String userId, @PathVariable Long attemptId) {
-		return ApiResponse.ok(writingLibraryService.generatePracticeFromAttempt(userId, attemptId));
+			@PathVariable String userId, @PathVariable Long attemptId,
+			@RequestParam(required = false) String examType) {
+		return ApiResponse.ok(writingLibraryService.generatePracticeFromAttempt(userId, attemptId, examType));
 	}
 }

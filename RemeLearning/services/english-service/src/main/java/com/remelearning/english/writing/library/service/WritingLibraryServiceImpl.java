@@ -113,7 +113,8 @@ public class WritingLibraryServiceImpl implements WritingLibraryService {
 	// passed it hands back the last prompt for review only (submitAnswer no longer advances anything).
 	@Override
 	@Transactional
-	public WritingLibraryPromptDto startOrResumePrompt(String userId, Long topicId, WritingTaskType taskType) {
+	public WritingLibraryPromptDto startOrResumePrompt(
+			String userId, Long topicId, WritingTaskType taskType, String examType) {
 		WritingLibraryTopic topic = requireTopic(topicId);
 		requireUnlocked(userId, topicId);
 
@@ -127,7 +128,7 @@ public class WritingLibraryServiceImpl implements WritingLibraryService {
 		if (nextUnpassed.isPresent()) {
 			prompt = nextUnpassed.get();
 		} else if (existing.size() < targetPromptCount(topicId)) {
-			prompt = generator.generatePrompt(topic, taskType);
+			prompt = generator.generatePrompt(topic, taskType, examType);
 			existing = promptMapper.findByTopicId(topicId);
 		} else {
 			prompt = existing.get(existing.size() - 1);
@@ -216,7 +217,8 @@ public class WritingLibraryServiceImpl implements WritingLibraryService {
 	// regenerate.
 	@Override
 	@Transactional
-	public List<WritingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId) {
+	public List<WritingPracticeItemDto> generatePracticeFromAttempt(
+			String userId, Long attemptId, String examType) {
 		WritingLibraryAttempt attempt = attemptMapper.findByIdAndUserId(attemptId, userId);
 		if (attempt == null) {
 			throw BusinessException.notFound("Writing library attempt not found: id=" + attemptId);
@@ -228,7 +230,7 @@ public class WritingLibraryServiceImpl implements WritingLibraryService {
 		WritingLibraryPrompt prompt = requirePrompt(attempt.getPromptId());
 		WritingLibraryTopic topic = requireTopic(prompt.getTopicId());
 		return writingLearnService.generatePracticeForLabels(
-				userId, prompt.getTaskType(), mistakeLabels, topic.getLevel(), null);
+				userId, prompt.getTaskType(), mistakeLabels, topic.getLevel(), examType);
 	}
 
 	// --- helpers ---

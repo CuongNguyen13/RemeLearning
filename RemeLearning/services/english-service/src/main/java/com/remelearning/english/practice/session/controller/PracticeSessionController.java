@@ -28,7 +28,7 @@ public class PracticeSessionController {
 	@Operation(summary = "Start a new practice session - generates one AI exercise per slot (mixed skills, top weak points first)")
 	@PostMapping
 	public ApiResponse<PracticeSessionDto> start(@Valid @RequestBody StartPracticeSessionRequest request) {
-		return ApiResponse.ok(practiceSessionService.startSession(request.getUserId(), request.getExerciseCount()));
+		return ApiResponse.ok(practiceSessionService.startSession(request.getUserId(), request.getExerciseCount(), request.getExamType()));
 	}
 
 	@Operation(summary = "Read back a session with its exercise slots")

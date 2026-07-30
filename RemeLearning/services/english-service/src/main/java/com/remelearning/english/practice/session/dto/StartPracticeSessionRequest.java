@@ -10,4 +10,10 @@ import lombok.Data;
 public class StartPracticeSessionRequest {
 	private String userId;
 	private Integer exerciseCount;
+	/**
+	 * Exam style every exercise in the session is generated for (see {@code ExamTypes}: TOEIC, IELTS,
+	 * TOEFL, VSTEP, General). Optional - null means no exam in mind, which is what the session did
+	 * unconditionally before this field existed.
+	 */
+	private String examType;
 }

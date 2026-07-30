@@ -255,7 +255,7 @@ class WritingLearnServiceImplTest {
 		when(mapper.findItemsByUserId("user-1")).thenReturn(List.of());
 		simulateGeneratedItemId(40L);
 
-		service.generatePracticeFromAttempt("user-1", 31L);
+		service.generatePracticeFromAttempt("user-1", 31L, null);
 
 		verify(generator).generate(
 				eq(WritingTaskType.TRANSLATE_EN_VI),
@@ -267,7 +267,7 @@ class WritingLearnServiceImplTest {
 	void generatePracticeFromAttemptRejectsAnotherLearnersAttempt() {
 		when(mapper.findAttemptDetailByIdAndUserId(99L, "user-1")).thenReturn(null);
 
-		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L))
+		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L, null))
 				.isInstanceOf(BusinessException.class);
 	}
 

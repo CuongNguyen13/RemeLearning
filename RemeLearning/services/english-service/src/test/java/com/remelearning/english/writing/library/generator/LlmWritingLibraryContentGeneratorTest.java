@@ -34,7 +34,7 @@ class LlmWritingLibraryContentGeneratorTest {
 				 "minWords": 120, "explanation": "Chú ý văn phong trang trọng."}""");
 
 		WritingLibraryPrompt prompt = generator.generatePrompt(
-				topic(10L, "genre", "Email công việc"), WritingTaskType.COMPOSE);
+				topic(10L, "genre", "Email công việc"), WritingTaskType.COMPOSE, null);
 
 		assertThat(prompt.getPromptText()).isEqualTo("Viết một email công việc...");
 		assertThat(prompt.getReferenceAnswer()).isEqualTo("Dear Sir,...");
@@ -48,7 +48,7 @@ class LlmWritingLibraryContentGeneratorTest {
 		stubLlm("""
 				{"promptText": "p", "referenceAnswer": "r", "minWords": 80}""");
 
-		generator.generatePrompt(topic(10L, "vocab_theme", "Travel"), WritingTaskType.TRANSLATE_VI_EN);
+		generator.generatePrompt(topic(10L, "vocab_theme", "Travel"), WritingTaskType.TRANSLATE_VI_EN, null);
 
 		verify(aiContentClient).completeJson(
 				anyString(), contains("Axis: vocab_theme"), anyDouble(), anyInt(),
@@ -63,7 +63,7 @@ class LlmWritingLibraryContentGeneratorTest {
 		stubLlm("""
 				{"promptText": "p", "referenceAnswer": "r", "minWords": 0}""");
 
-		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE)
+		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null)
 				.getMinWords()).isEqualTo(80);
 	}
 
@@ -75,7 +75,7 @@ class LlmWritingLibraryContentGeneratorTest {
 				.thenThrow(new AiContentException("boom"));
 
 		WritingLibraryPrompt prompt = generator.generatePrompt(
-				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE);
+				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null);
 
 		// Offline, the task must still name the topic and state its requirement in Vietnamese.
 		assertThat(prompt.getPromptText())
@@ -91,9 +91,9 @@ class LlmWritingLibraryContentGeneratorTest {
 				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
 				.thenThrow(new AiContentException("boom"));
 
-		assertThat(generator.generatePrompt(topic(10L, "genre", "Báo cáo ngắn"), WritingTaskType.COMPOSE)
+		assertThat(generator.generatePrompt(topic(10L, "genre", "Báo cáo ngắn"), WritingTaskType.COMPOSE, null)
 				.getPromptText()).contains("đúng thể loại");
-		assertThat(generator.generatePrompt(topic(10L, "vocab_theme", "Travel"), WritingTaskType.COMPOSE)
+		assertThat(generator.generatePrompt(topic(10L, "vocab_theme", "Travel"), WritingTaskType.COMPOSE, null)
 				.getPromptText()).contains("từ/cụm từ thuộc chủ đề");
 	}
 
@@ -105,7 +105,7 @@ class LlmWritingLibraryContentGeneratorTest {
 				.thenThrow(new AiContentException("boom"));
 
 		// A row with a taxonomy this build doesn't know must not break the learner's session.
-		assertThat(generator.generatePrompt(topic(10L, "phonics", "Weird"), WritingTaskType.COMPOSE)
+		assertThat(generator.generatePrompt(topic(10L, "phonics", "Weird"), WritingTaskType.COMPOSE, null)
 				.getPromptText()).contains("viết mạch lạc");
 	}
 
@@ -116,9 +116,9 @@ class LlmWritingLibraryContentGeneratorTest {
 				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
 				.thenThrow(new AiContentException("boom"));
 
-		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_VI_EN)
+		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_VI_EN, null)
 				.getPromptText()).startsWith("Dịch đoạn văn sau sang tiếng Anh:");
-		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_EN_VI)
+		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_EN_VI, null)
 				.getPromptText()).startsWith("Dịch đoạn văn sau sang tiếng Việt:");
 	}
 
@@ -128,7 +128,7 @@ class LlmWritingLibraryContentGeneratorTest {
 				{"promptText": "  ", "referenceAnswer": "r"}""");
 
 		WritingLibraryPrompt prompt = generator.generatePrompt(
-				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE);
+				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null);
 
 		assertThat(prompt.getPromptText()).contains("Past Perfect");
 	}
@@ -139,7 +139,7 @@ class LlmWritingLibraryContentGeneratorTest {
 				{"prompt_text": "Viết ...", "reference_answer": "Ref.", "min_words": 100}""");
 
 		ArgumentCaptor<WritingLibraryPrompt> captor = ArgumentCaptor.forClass(WritingLibraryPrompt.class);
-		generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE);
+		generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null);
 
 		verify(promptMapper).insert(captor.capture());
 		assertThat(captor.getValue().getPromptText()).isEqualTo("Viết ...");

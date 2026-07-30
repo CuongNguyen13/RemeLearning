@@ -43,9 +43,13 @@ public interface WritingLearnService {
 
 	/**
 	 * Generates a fresh prompt aimed at one past attempt's mistakes, reusing that attempt's task
-	 * type/level/exam style, and returns the learner's refreshed prompt list.
+	 * type/level, and returns the learner's refreshed prompt list.
+	 *
+	 * @param examType exam style for the retry task; null keeps the original attempt's exam style, so
+	 *                 a learner can either "practise these mistakes again for the same exam" or switch
+	 *                 exam style without losing the mistake targeting
 	 */
-	List<WritingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId);
+	List<WritingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId, String examType);
 
 	/**
 	 * Shared generate-and-persist step used by {@link #generate} and the retry action, exposed so the

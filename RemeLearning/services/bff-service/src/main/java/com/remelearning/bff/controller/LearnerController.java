@@ -745,8 +745,10 @@ public class LearnerController {
 			+ "này\" action); thin proxy to english-service")
 	@PostMapping("/{userId}/learn/writing/history/{attemptId}/ai-practice")
 	public Mono<ApiResponse<List<WritingPracticeItemDto>>> generateWritingPracticeFromAttempt(
-			@PathVariable String userId, @PathVariable Long attemptId) {
-		return englishServiceClient.generateWritingPracticeFromAttempt(userId, attemptId).map(ApiResponse::ok);
+			@PathVariable String userId, @PathVariable Long attemptId,
+			@RequestParam(required = false) String examType) {
+		return englishServiceClient.generateWritingPracticeFromAttempt(userId, attemptId, examType)
+				.map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Writing-library topics on one taxonomy axis (grammar | genre | vocab_theme) with this learner's "
@@ -761,8 +763,10 @@ public class LearnerController {
 			+ "thin proxy to english-service")
 	@PostMapping("/{userId}/learn/writing/library/topics/{topicId}/prompts")
 	public Mono<ApiResponse<WritingLibraryPromptDto>> startOrResumeWritingLibraryPrompt(
-			@PathVariable String userId, @PathVariable Long topicId, @RequestParam String taskType) {
-		return englishServiceClient.startOrResumeWritingLibraryPrompt(userId, topicId, taskType).map(ApiResponse::ok);
+			@PathVariable String userId, @PathVariable Long topicId, @RequestParam String taskType,
+			@RequestParam(required = false) String examType) {
+		return englishServiceClient.startOrResumeWritingLibraryPrompt(userId, topicId, taskType, examType)
+				.map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "Grade a submitted writing-library text and advance the topic chain, unlocking the next topic on "
@@ -778,7 +782,9 @@ public class LearnerController {
 			+ "proxy to english-service")
 	@PostMapping("/{userId}/learn/writing/library/attempts/{attemptId}/ai-practice")
 	public Mono<ApiResponse<List<WritingPracticeItemDto>>> generateWritingPracticeFromLibraryAttempt(
-			@PathVariable String userId, @PathVariable Long attemptId) {
-		return englishServiceClient.generateWritingPracticeFromLibraryAttempt(userId, attemptId).map(ApiResponse::ok);
+			@PathVariable String userId, @PathVariable Long attemptId,
+			@RequestParam(required = false) String examType) {
+		return englishServiceClient.generateWritingPracticeFromLibraryAttempt(userId, attemptId, examType)
+				.map(ApiResponse::ok);
 	}
 }

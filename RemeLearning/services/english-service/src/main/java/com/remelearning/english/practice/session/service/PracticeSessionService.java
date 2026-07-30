@@ -11,7 +11,7 @@ import com.remelearning.english.practice.session.dto.PracticeSessionDto;
 public interface PracticeSessionService {
 
 	/** Generates and persists a new session (one AI exercise per slot), returning it for the client to run. */
-	PracticeSessionDto startSession(String userId, Integer exerciseCount);
+	PracticeSessionDto startSession(String userId, Integer exerciseCount, String examType);
 
 	/** Reads back a session with its exercise slots. Not-found if the id is unknown. */
 	PracticeSessionDto getSession(Long sessionId);

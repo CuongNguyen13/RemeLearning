@@ -3,6 +3,7 @@ package com.remelearning.english.writing.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.remelearning.common.constants.ExamTypes;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.english.grammar.domain.GrammarWeakPoint;
 import com.remelearning.english.grammar.service.GrammarWeakPointService;
@@ -170,13 +171,19 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 	// learner, pulls its error labels via the pure WritingMistakeAnalyzer, then reuses the exact same
 	// generate-and-persist pipeline generate() uses so the new prompt lands in the same bank as a
 	// normal "học thường" one.
+	//
+	// A caller-supplied examType overrides the original attempt's, letting the learner re-target the
+	// same mistakes at a different exam ("I got these wrong on a General task - give me them in IELTS
+	// register"); omitting it keeps the original, which is the common case.
 	@Override
 	@Transactional
-	public List<WritingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId) {
+	public List<WritingPracticeItemDto> generatePracticeFromAttempt(String userId, Long attemptId, String examType) {
 		WritingAttemptDetailRow attempt = requireAttempt(userId, attemptId);
 		List<String> mistakeLabels = WritingMistakeAnalyzer.extractMistakeLabels(attempt.getErrorsJson());
+		String resolvedExamType = ExamTypes.normalize(examType) == null
+				? attempt.getExamType() : ExamTypes.normalize(examType);
 		return generatePracticeForLabels(
-				userId, attempt.getTaskType(), mistakeLabels, attempt.getLevel(), attempt.getExamType());
+				userId, attempt.getTaskType(), mistakeLabels, attempt.getLevel(), resolvedExamType);
 	}
 
 	@Override
@@ -193,13 +200,16 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 	// calls the AI generator and inserts the resulting prompt.
 	private WritingPracticeItemDto generateAndPersist(
 			String userId, WritingTaskType taskType, List<String> targetLabels, String level, String examType) {
-		GeneratedWritingPractice generated = generator.generate(taskType, targetLabels, level, examType);
+		// Normalized once here so "toeic"/"Toeic"/"TOEIC" all persist as one value - the retry action
+		// and the exam-profile lookup both key off this column.
+		String normalizedExamType = ExamTypes.normalize(examType);
+		GeneratedWritingPractice generated = generator.generate(taskType, targetLabels, level, normalizedExamType);
 
 		WritingPracticeItem item = WritingPracticeItem.builder()
 				.userId(userId)
 				.taskType(taskType)
 				.level(level)
-				.examType(examType)
+				.examType(normalizedExamType)
 				.topic(generated.topic())
 				.promptText(generated.promptText())
 				.sourceLang(taskType.sourceLang())

@@ -1038,10 +1038,21 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch writing attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
 	}
 
-	/** Asks english-service to generate practice targeted at one past writing attempt's own mistakes. */
-	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromAttempt(String userId, Long attemptId) {
+	/**
+	 * Asks english-service to generate practice targeted at one past writing attempt's own mistakes.
+	 * A null examType keeps the original attempt's exam style; passing one re-targets the same mistakes
+	 * at a different exam.
+	 */
+	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromAttempt(
+			String userId, Long attemptId, String examType) {
 		return englishServiceClient.post()
-				.uri("/api/v1/learn/writing/history/{userId}/{attemptId}/ai-practice", userId, attemptId)
+				.uri(uriBuilder -> {
+					var builder = uriBuilder.path("/api/v1/learn/writing/history/{userId}/{attemptId}/ai-practice");
+					if (examType != null && !examType.isBlank()) {
+						builder.queryParam("examType", examType);
+					}
+					return builder.build(userId, attemptId);
+				})
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingPracticeItemDto>>>() {})
 				.map(ApiResponse::getData)
@@ -1062,12 +1073,18 @@ public class EnglishServiceClient {
 	}
 
 	/** Starts or resumes the next prompt in a writing-library topic's chain. */
-	public Mono<WritingLibraryPromptDto> startOrResumeWritingLibraryPrompt(String userId, Long topicId, String taskType) {
+	public Mono<WritingLibraryPromptDto> startOrResumeWritingLibraryPrompt(
+			String userId, Long topicId, String taskType, String examType) {
 		return englishServiceClient.post()
-				.uri(uriBuilder -> uriBuilder
-						.path("/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts")
-						.queryParam("taskType", taskType)
-						.build(userId, topicId))
+				.uri(uriBuilder -> {
+					var builder = uriBuilder
+							.path("/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts")
+							.queryParam("taskType", taskType);
+					if (examType != null && !examType.isBlank()) {
+						builder.queryParam("examType", examType);
+					}
+					return builder.build(userId, topicId);
+				})
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingLibraryPromptDto>>() {})
 				.map(ApiResponse::getData)
@@ -1088,9 +1105,17 @@ public class EnglishServiceClient {
 	}
 
 	/** Asks english-service to generate practice targeted at one writing-library attempt's mistakes. */
-	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromLibraryAttempt(String userId, Long attemptId) {
+	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromLibraryAttempt(
+			String userId, Long attemptId, String examType) {
 		return englishServiceClient.post()
-				.uri("/api/v1/learn/writing/library/{userId}/attempts/{attemptId}/ai-practice", userId, attemptId)
+				.uri(uriBuilder -> {
+					var builder = uriBuilder
+							.path("/api/v1/learn/writing/library/{userId}/attempts/{attemptId}/ai-practice");
+					if (examType != null && !examType.isBlank()) {
+						builder.queryParam("examType", examType);
+					}
+					return builder.build(userId, attemptId);
+				})
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingPracticeItemDto>>>() {})
 				.map(ApiResponse::getData)

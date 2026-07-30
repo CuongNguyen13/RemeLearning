@@ -48,6 +48,7 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 	static final String CATEGORY_GRAMMAR = "grammar";
 	static final String CATEGORY_LISTENING = "listening";
 	static final String CATEGORY_SPEAKING = "speaking";
+	static final String CATEGORY_WRITING = "writing";
 
 	private static final int DEFAULT_EXERCISE_COUNT = 4;
 	private static final int MIN_EXERCISE_COUNT = 1;
@@ -57,7 +58,8 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 
 	/** Cold-start rotation when the learner has no weak points anywhere yet - one exercise per skill. */
 	private static final List<String> DEFAULT_SPREAD =
-			List.of(CATEGORY_VOCABULARY, CATEGORY_GRAMMAR, CATEGORY_LISTENING, CATEGORY_SPEAKING);
+			List.of(CATEGORY_VOCABULARY, CATEGORY_GRAMMAR, CATEGORY_LISTENING, CATEGORY_SPEAKING,
+					CATEGORY_WRITING);
 
 	private final PracticeSessionMapper mapper;
 
@@ -65,6 +67,7 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 	private final GrammarLearnService grammarLearnService;
 	private final ListeningLearnService listeningLearnService;
 	private final SpeakingLearnService speakingLearnService;
+	private final com.remelearning.english.writing.service.WritingLearnService writingLearnService;
 
 	private final com.remelearning.english.vocabulary.service.VocabularyWeakPointService vocabularyWeakPointService;
 	private final GrammarWeakPointService grammarWeakPointService;
@@ -76,8 +79,10 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 	// purpose - each domain generate is @Transactional and listening/speaking synthesize TTS audio.
 	@Override
 	@Transactional
-	public PracticeSessionDto startSession(String userId, Integer exerciseCount) {
+	public PracticeSessionDto startSession(String userId, Integer exerciseCount, String examType) {
 		int slots = clampCount(exerciseCount);
+		// Normalized once so every slot in the session is generated for the same, canonical exam style.
+		String normalizedExamType = com.remelearning.common.constants.ExamTypes.normalize(examType);
 
 		// Rank the categories that actually have weak points (highest score first); fall back to an
 		// even spread across all four skills when the learner has no weak points yet (cold start).
@@ -103,7 +108,7 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 		for (int order = 1; order <= slots; order++) {
 			String category = rotation.get((order - 1) % rotation.size());
 			List<String> focusItems = focusItemsFor(category, focuses);
-			GeneratedSlot generated = generateSlot(userId, category, focusItems);
+			GeneratedSlot generated = generateSlot(userId, category, focusItems, normalizedExamType);
 
 			PracticeSessionExercise exercise = PracticeSessionExercise.builder()
 					.sessionId(session.getId())
@@ -191,6 +196,20 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 		addIfPresent(focuses, CATEGORY_LISTENING, listening,
 				ListeningWeakPoint::getForgettingScore, ListeningWeakPoint::getLabel);
 
+		// Writing has no weak-point table of its own by design (its mistakes are stored as grammar/
+		// vocabulary ones - see the writing package), so it can't be ranked off one. It borrows both
+		// lists: ranked by whichever of the two is more urgent, and given both sets of labels as focus,
+		// since a writing task is the one exercise that drills grammar and vocabulary simultaneously.
+		if (!grammar.isEmpty() || !vocab.isEmpty()) {
+			double writingScore = Math.max(
+					grammar.isEmpty() ? 0.0 : grammar.get(0).getForgettingScore(),
+					vocab.isEmpty() ? 0.0 : vocab.get(0).getForgettingScore());
+			List<String> writingLabels = new ArrayList<>();
+			grammar.forEach(weakPoint -> writingLabels.add(weakPoint.getLabel()));
+			vocab.forEach(weakPoint -> writingLabels.add(weakPoint.getLabel()));
+			focuses.add(new CategoryFocus(CATEGORY_WRITING, writingScore, writingLabels));
+		}
+
 		return focuses;
 	}
 
@@ -224,34 +243,58 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 	}
 
 	// Dispatches to the owning domain's existing generate() and normalizes the result to (itemId, topic).
-	private GeneratedSlot generateSlot(String userId, String category, List<String> focusItems) {
+	private GeneratedSlot generateSlot(
+			String userId, String category, List<String> focusItems, String examType) {
 		switch (category) {
 			case CATEGORY_VOCABULARY -> {
 				GenerateVocabPracticeRequest request = new GenerateVocabPracticeRequest();
 				request.setFocusItems(focusItems);
+				request.setExamType(examType);
 				VocabPracticeItemDto item = vocabLearnService.generate(userId, request);
 				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
 			}
 			case CATEGORY_GRAMMAR -> {
 				GenerateGrammarPracticeRequest request = new GenerateGrammarPracticeRequest();
 				request.setFocusItems(focusItems);
+				request.setExamType(examType);
 				GrammarPracticeItemDto item = grammarLearnService.generate(userId, request);
 				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
 			}
 			case CATEGORY_LISTENING -> {
 				GenerateListeningPracticeRequest request = new GenerateListeningPracticeRequest();
 				request.setFocusItems(focusItems);
+				request.setExamType(examType);
 				ListeningPracticeItemDto item = listeningLearnService.generate(userId, request);
 				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
 			}
 			case CATEGORY_SPEAKING -> {
 				GenerateSpeakingPracticeRequest request = new GenerateSpeakingPracticeRequest();
 				request.setFocusItems(focusItems);
+				request.setExamType(examType);
 				SpeakingPracticeItemDto item = speakingLearnService.generate(userId, request);
+				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
+			}
+			case CATEGORY_WRITING -> {
+				com.remelearning.english.writing.dto.GenerateWritingPracticeRequest request =
+						new com.remelearning.english.writing.dto.GenerateWritingPracticeRequest();
+				// Rotates the three writing modes so a multi-exercise session doesn't serve the same mode
+				// twice; taskType is required by the writing generator, unlike the other domains' facets.
+				request.setTaskType(randomWritingTaskType());
+				request.setFocusItems(focusItems);
+				request.setExamType(examType);
+				com.remelearning.english.writing.dto.WritingPracticeItemDto item =
+						writingLearnService.generate(userId, request);
 				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
 			}
 			default -> throw new IllegalStateException("Unknown practice category: " + category);
 		}
+	}
+
+	// One of the three writing modes at random (write from a brief / translate either direction), so a
+	// session's writing slot isn't always the same kind of task.
+	private com.remelearning.english.writing.domain.WritingTaskType randomWritingTaskType() {
+		var types = com.remelearning.english.writing.domain.WritingTaskType.values();
+		return types[java.util.concurrent.ThreadLocalRandom.current().nextInt(types.length)];
 	}
 
 	// Loads a session or fails with not-found.

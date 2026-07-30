@@ -5,6 +5,7 @@ import com.remelearning.english.learn.common.AiContentClient;
 import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.writing.domain.WritingTaskType;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -112,6 +113,91 @@ class LlmWritingPracticeGeneratorTest {
 		GeneratedWritingPractice generated = generator.generate(WritingTaskType.COMPOSE, List.of(), "B1", null);
 
 		assertThat(generated.topic()).isEqualTo("B1 writing task");
+	}
+
+	@Test
+	void tellsTheModelExactlyHowManySentencesTheExamStyleCallsFor() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), "B1", "TOEIC");
+
+		ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				anyString(), userPrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		// The count is decided in Java, not left to the model - that is what makes a TOEIC passage
+		// actually shorter than an IELTS one instead of the model guessing from the label.
+		String sent = userPrompt.getValue();
+		assertThat(sent).contains("Sentences the passage must have:");
+		int count = Integer.parseInt(
+				sent.split("Sentences the passage must have: ")[1].lines().findFirst().orElseThrow().trim());
+		assertThat(count).isBetween(
+				WritingExamProfile.TOEIC.minSentences(), WritingExamProfile.TOEIC.maxSentences());
+	}
+
+	@Test
+	void passesTheExamStylesRegisterAndSubjectAreaThroughNormalized() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.TRANSLATE_EN_VI, List.of(), null, "ielts");
+
+		ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				anyString(), userPrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		assertThat(userPrompt.getValue())
+				.contains("Exam style: IELTS")
+				.contains("Register: " + WritingExamProfile.IELTS.registerHint())
+				.contains("Suggested subject area:");
+	}
+
+	@Test
+	void asksForATextFormatOnlyForComposeTasks() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.COMPOSE, List.of(), null, "TOEIC");
+		ArgumentCaptor<String> composePrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				anyString(), composePrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		// COMPOSE is the only mode where "which kind of text" is a choice - a translation task's format
+		// is fixed by its source passage.
+		assertThat(composePrompt.getValue()).contains("Text format to ask for:");
+	}
+
+	@Test
+	void aTranslationTaskIsNeverAskedForATextFormat() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), null, "TOEIC");
+
+		ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				anyString(), userPrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		assertThat(userPrompt.getValue()).doesNotContain("Text format to ask for:");
+	}
+
+	@Test
+	void anUnknownExamStyleStillProducesAUsablePromptViaTheGeneralProfile() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), null, "Cambridge FCE");
+
+		ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				anyString(), userPrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		// The label is passed through untouched so the model can still use it, while the concrete
+		// length/register fall back to the General profile.
+		assertThat(userPrompt.getValue())
+				.contains("Exam style: Cambridge FCE")
+				.contains("Register: " + WritingExamProfile.GENERAL.registerHint());
 	}
 
 	private void stubLlm(String json) {

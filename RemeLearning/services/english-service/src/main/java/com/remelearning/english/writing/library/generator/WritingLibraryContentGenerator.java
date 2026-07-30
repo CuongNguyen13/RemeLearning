@@ -15,6 +15,9 @@ public interface WritingLibraryContentGenerator {
 	 * topic's chain. Never returns null and never throws for an LLM/parse failure - it degrades to a
 	 * template built from the topic itself, since a learner opening a topic must always get something
 	 * to write.
+	 *
+	 * @param examType exam style being prepared for (see {@code ExamTypes}); decides the passage
+	 *                 length and register. Null/blank/unrecognised means everyday English.
 	 */
-	WritingLibraryPrompt generatePrompt(WritingLibraryTopic topic, WritingTaskType taskType);
+	WritingLibraryPrompt generatePrompt(WritingLibraryTopic topic, WritingTaskType taskType, String examType);
 }

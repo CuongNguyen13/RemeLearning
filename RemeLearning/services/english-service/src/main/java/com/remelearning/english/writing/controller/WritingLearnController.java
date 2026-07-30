@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -82,10 +83,12 @@ public class WritingLearnController {
 	}
 
 	@Operation(summary = "Generate practice targeted at one specific past attempt's mistakes (the \"Luyện lại những lỗi "
-			+ "này\" action from a result panel or history row)")
+			+ "này\" action from a result panel or history row); an explicit examType re-targets the same mistakes at a "
+			+ "different exam style, omitting it keeps the original attempt's one")
 	@PostMapping("/history/{userId}/{attemptId}/ai-practice")
 	public ApiResponse<List<WritingPracticeItemDto>> generateFromAttempt(
-			@PathVariable String userId, @PathVariable Long attemptId) {
-		return ApiResponse.ok(writingLearnService.generatePracticeFromAttempt(userId, attemptId));
+			@PathVariable String userId, @PathVariable Long attemptId,
+			@RequestParam(required = false) String examType) {
+		return ApiResponse.ok(writingLearnService.generatePracticeFromAttempt(userId, attemptId, examType));
 	}
 }

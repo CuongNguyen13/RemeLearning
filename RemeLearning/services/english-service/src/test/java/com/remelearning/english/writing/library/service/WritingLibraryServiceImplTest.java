@@ -203,10 +203,10 @@ class WritingLibraryServiceImplTest {
 				.thenReturn(progress(3L, WritingTopicStatus.UNLOCKED));
 		when(promptMapper.findByTopicId(3L)).thenReturn(List.of());
 		when(attemptMapper.findByUserId("user-1")).thenReturn(List.of());
-		when(generator.generatePrompt(eq(topic), eq(WritingTaskType.COMPOSE)))
+		when(generator.generatePrompt(eq(topic), eq(WritingTaskType.COMPOSE), any()))
 				.thenReturn(prompt(50L, 3L, WritingTaskType.COMPOSE));
 
-		WritingLibraryPromptDto dto = service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE);
+		WritingLibraryPromptDto dto = service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE, null);
 
 		assertThat(dto.getPromptId()).isEqualTo(50L);
 		assertThat(dto.getTopicName()).isEqualTo("Present Perfect");
@@ -225,11 +225,11 @@ class WritingLibraryServiceImplTest {
 		// Only the first prompt is passed, so the second is the one owed.
 		when(attemptMapper.findByUserId("user-1")).thenReturn(passedAttemptsFor(chain.subList(0, 1)));
 
-		WritingLibraryPromptDto dto = service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE);
+		WritingLibraryPromptDto dto = service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE, null);
 
 		assertThat(dto.getPromptId()).isEqualTo(chain.get(1).getId());
 		assertThat(dto.getPosition()).isEqualTo(2);
-		verify(generator, never()).generatePrompt(any(), any());
+		verify(generator, never()).generatePrompt(any(), any(), any());
 	}
 
 	@Test
@@ -237,7 +237,7 @@ class WritingLibraryServiceImplTest {
 		when(topicMapper.findById(3L)).thenReturn(topic(3L, "grammar", 7, "Present Perfect"));
 		when(progressMapper.findByUserIdAndTopicId("user-1", 3L)).thenReturn(null);
 
-		assertThatThrownBy(() -> service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE))
+		assertThatThrownBy(() -> service.startOrResumePrompt("user-1", 3L, WritingTaskType.COMPOSE, null))
 				.isInstanceOf(BusinessException.class);
 	}
 
@@ -253,7 +253,7 @@ class WritingLibraryServiceImplTest {
 		when(promptMapper.findById(100L)).thenReturn(prompt(100L, 3L, WritingTaskType.TRANSLATE_VI_EN));
 		when(topicMapper.findById(3L)).thenReturn(topic(3L, "grammar", 7, "Present Perfect"));
 
-		service.generatePracticeFromAttempt("user-1", 70L);
+		service.generatePracticeFromAttempt("user-1", 70L, null);
 
 		verify(writingLearnService).generatePracticeForLabels(
 				"user-1", WritingTaskType.TRANSLATE_VI_EN, List.of("past perfect"), "B1", null);
@@ -264,7 +264,7 @@ class WritingLibraryServiceImplTest {
 		when(attemptMapper.findByIdAndUserId(70L, "user-1")).thenReturn(WritingLibraryAttempt.builder()
 				.id(70L).promptId(100L).errorsJson("[]").build());
 
-		assertThat(service.generatePracticeFromAttempt("user-1", 70L)).isEmpty();
+		assertThat(service.generatePracticeFromAttempt("user-1", 70L, null)).isEmpty();
 		verify(writingLearnService, never()).generatePracticeForLabels(any(), any(), any(), any(), any());
 	}
 
@@ -272,7 +272,7 @@ class WritingLibraryServiceImplTest {
 	void generatePracticeFromAttemptRejectsAnotherLearnersAttempt() {
 		when(attemptMapper.findByIdAndUserId(99L, "user-1")).thenReturn(null);
 
-		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L))
+		assertThatThrownBy(() -> service.generatePracticeFromAttempt("user-1", 99L, null))
 				.isInstanceOf(BusinessException.class);
 	}
 

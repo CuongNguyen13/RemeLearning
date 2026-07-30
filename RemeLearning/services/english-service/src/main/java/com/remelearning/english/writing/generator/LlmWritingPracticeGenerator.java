@@ -2,6 +2,7 @@ package com.remelearning.english.writing.generator;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.remelearning.common.constants.ExamTypes;
 import com.remelearning.english.learn.common.AiContentClient;
 import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.writing.domain.WritingTaskType;
@@ -27,19 +28,27 @@ public class LlmWritingPracticeGenerator implements WritingPracticeGenerator {
 	private static final String SYSTEM_PROMPT = """
 			You are an English writing coach preparing ONE practice task for a Vietnamese learner.
 			You're given a task type, a list of grammar/vocabulary weak-point labels to target
-			(possibly empty - if empty, pick a suitable everyday topic yourself for the requested
-			level), an optional CEFR level and an optional exam style.
+			(possibly empty), an optional CEFR level, the exam style being prepared for, and - decided
+			by the caller, NOT by you - the exact number of sentences the source passage must have, a
+			suggested subject area, the register to write in, and (for COMPOSE) which kind of text to
+			ask for.
 
 			Build the task according to the task type:
 			- COMPOSE: "promptText" is a writing brief written IN VIETNAMESE telling the learner what
-			  to write in English. It must state a minimum word count and explicitly list the target
-			  structures/words they have to use. "referenceAnswer" is a model answer IN ENGLISH.
-			- TRANSLATE_VI_EN: "promptText" is a short VIETNAMESE passage (3-5 sentences) that
-			  naturally requires the target structures/words when translated. "referenceAnswer" is
-			  your reference ENGLISH translation.
-			- TRANSLATE_EN_VI: "promptText" is a short ENGLISH passage (3-5 sentences) naturally
-			  using the target structures/words. "referenceAnswer" is your reference VIETNAMESE
-			  translation.
+			  to write in English, in the requested text format. It must state a minimum word count and
+			  explicitly list the target structures/words they have to use. "referenceAnswer" is a model
+			  answer IN ENGLISH.
+			- TRANSLATE_VI_EN: "promptText" is a VIETNAMESE passage of EXACTLY the requested number of
+			  sentences, which naturally requires the target structures/words when translated.
+			  "referenceAnswer" is your reference ENGLISH translation.
+			- TRANSLATE_EN_VI: "promptText" is an ENGLISH passage of EXACTLY the requested number of
+			  sentences, naturally using the target structures/words. "referenceAnswer" is your
+			  reference VIETNAMESE translation.
+
+			Obey the requested sentence count exactly - it is what makes each generated task a
+			different length instead of always the same shape. Use the suggested subject area when no
+			target labels were given; when labels ARE given, they win and the subject area is only a
+			backdrop. Match the requested register.
 
 			For both TRANSLATE_* types, "promptText" MUST begin with a one-line Vietnamese
 			instruction (e.g. "Dịch đoạn văn sau sang tiếng Anh:") followed by a blank line and then
@@ -53,16 +62,35 @@ public class LlmWritingPracticeGenerator implements WritingPracticeGenerator {
 	// One LLM call per generated task; any failure (unreachable LLM, non-JSON reply, missing field)
 	// degrades to the static template below rather than propagating, since the caller has already
 	// committed to returning the learner a task.
+	//
+	// The exam style is resolved into a WritingExamProfile first, and the concrete choices it implies
+	// (sentence count, subject area, register, COMPOSE text format) are decided HERE and handed to the
+	// model as instructions. Letting the model interpret "TOEIC" itself produced passages that were
+	// all the same length and roughly the same register regardless of the exam.
 	@Override
 	public GeneratedWritingPractice generate(
 			WritingTaskType taskType, List<String> targetLabels, String level, String examType) {
+		WritingExamProfile profile = WritingExamProfile.fromExamType(examType);
+		int sentenceCount = profile.randomSentenceCount();
 		try {
-			String userPrompt = "Task type: %s\nTarget labels: %s\nLevel: %s\nExam style: %s".formatted(
+			String userPrompt = """
+					Task type: %s
+					Target labels: %s
+					Level: %s
+					Exam style: %s
+					Sentences the passage must have: %d
+					Suggested subject area: %s
+					Register: %s%s""".formatted(
 					taskType.name(),
 					targetLabels == null || targetLabels.isEmpty()
-							? "(none - please choose a suitable topic yourself)" : targetLabels,
+							? "(none - build the task around the suggested subject area instead)" : targetLabels,
 					level == null ? "(unspecified)" : level,
-					examType == null ? "(unspecified)" : examType);
+					ExamTypes.normalize(examType) == null ? "General (no exam in mind)" : ExamTypes.normalize(examType),
+					sentenceCount,
+					profile.randomTopic(),
+					profile.registerHint(),
+					taskType == WritingTaskType.COMPOSE
+							? "%nText format to ask for: %s".formatted(profile.randomComposeFormat()) : "");
 			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1400, LlmPayload.class);
 			if (isBlank(payload.promptText)) {
 				throw new AiContentException("LLM returned a writing task with no prompt text");
