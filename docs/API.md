@@ -56,14 +56,20 @@ tương tự `grammar.learn`; `listening`/`speaking` là hai package đỉnh m�
 cũ. Cả 4 domain đều chấm điểm rồi gọi thẳng `PracticeService.redo(...)` (dùng lại nguyên
 `WeakPointScoringOrchestrator`/`mistake_history`/`AnalysisRequestedProducer` của mục "Practice /
 redo-exercise" — không có publisher riêng) để đẩy từng câu/từ đã chấm vào pipeline weak-point/spaced-
-repetition sẵn có. Category mới `"listening"` (`LearningCategories.LISTENING`, xem
-`common/.../constants/LearningCategories.java`) **không có bảng weak-point/Kafka consumer riêng** —
-`WeakPointDispatcherImpl.dispatch(...)` chỉ có `case` cho `vocabulary/grammar/pronunciation`; category
-`listening` rơi vào `default` (log warning, không ghi gì) — nên dù `mistake_history`/
-`item_difficulty_stats` vẫn được cập nhật cho category này (đủ để `learning.gap.analysis.requested`
-vẫn publish với `history` chứa các item `listening`), **không có** `listening_weak_points` nào được
-lưu/đọc lại ở đâu cả (không `GET /api/v1/listening/weak-points/...`, không xuất hiện trong
-`GET /api/v1/learners/{userId}/weak-points` của bff-service) — điểm còn thiếu, chưa gap-fill.
+repetition sẵn có. Category `"listening"` (`LearningCategories.LISTENING`, xem
+`common/.../constants/LearningCategories.java`) **nay đã là điểm yếu (weak point) thứ 4**, ngang hàng
+`vocabulary/grammar/pronunciation` — package mới `english.listening.weakpoint` có bảng riêng
+(`listening_weak_points`, migration `V24`), Kafka consumer riêng (`groupId
+english-service-listening`), và `WeakPointDispatcherImpl.dispatch(...)` nay có thêm `case "listening"`
+gọi `ListeningWeakPointService.applyJavaComputedScore(...)` (trước đây rơi vào `default`, chỉ log
+warning, không ghi gì — điểm gap đã nêu ở bản cũ, nay đã vá). Điểm yếu listening có **hai nguồn**, phân
+biệt bằng cột `source_type`: (1) `DICTATION` — mỗi từ chép sai trong dictation được **dual-write** thêm
+một `WeakPointPayload` category `"listening"` (cùng `itemId`/`label`/`forgettingScore`/`recommendation`,
+gộp vào CÙNG event `learning.gap.analyzed` với payload category gốc — vocabulary/grammar/pronunciation
+— chứ không publish hai lần); (2) `COMPREHENSION` — chấm trực tiếp bởi Java engine qua
+`PracticeService.redo(...)` cho các câu hỏi nghe hiểu. `GET /api/v1/listening/weak-points/{userId}`
+(+ `/grouped`) tồn tại, và `GET /api/v1/learners/{userId}/weak-points` của bff-service nay trả đủ 4
+category. Xem mục 1, 6.
 `speaking` tái dùng category `"pronunciation"` đã có sẵn (không tạo category mới), nên speaking-practice
 attempts **có** cập nhật `pronunciation_weak_points` bình thường.
 
@@ -260,6 +266,48 @@ Giống endpoint trên nhưng nhóm theo `PronunciationType` (không có query p
 - **Path param**: `userId` (string)
 - **Response `data`**: `Map<PronunciationType, PronunciationWeakPoint[]>`
 
+### Listening weak points (package `listening.weakpoint`)
+
+Điểm yếu thứ 4, gộp từ **hai nguồn** khác nhau, phân biệt bằng cột `sourceType`:
+- `DICTATION` — mỗi từ chép sai trong một lần làm dictation được **dual-write** thành một
+  `WeakPointPayload` thứ hai với `category="listening"` (cùng `itemId`/`label`/`forgettingScore`/
+  `recommendation` với payload category gốc — vocabulary/grammar/pronunciation — của chính từ đó),
+  gộp vào **cùng một event** `learning.gap.analyzed` (xem `DictationServiceImpl.publishWeakPoints`,
+  mục 6) chứ không phải một lần publish riêng.
+- `COMPREHENSION` — chấm trực tiếp bằng Java engine qua `PracticeService.redo(...)` khi learner làm lại
+  câu hỏi nghe hiểu (category `"listening"` trong `PracticeAttemptRequest`, xem mục "Practice /
+  redo-exercise" bên dưới).
+
+### GET `/api/v1/listening/weak-points/{userId}`
+
+Danh sách điểm yếu nghe của một learner, sắp giảm dần theo `forgettingScore`.
+
+- **Path param**: `userId` (string)
+- **Query param** (tùy chọn): `sourceType` — `ListeningSourceType` enum: `DICTATION | COMPREHENSION`
+- **Response `data`** — `ListeningWeakPoint[]`:
+
+| Field | Type | Mô tả |
+|---|---|---|
+| `id` | long | |
+| `recordingId` | string | |
+| `userId` | string | |
+| `itemId` | string | |
+| `label` | string | Mô tả điểm yếu nghe |
+| `sourceType` | `ListeningSourceType` | `DICTATION` (dual-write từ dictation) hoặc `COMPREHENSION` (redo nghe hiểu) |
+| `forgettingScore` | double | Điểm yếu tổng hợp — xem mục "Cơ chế chấm điểm" bên dưới |
+| `recommendation` | string | Gợi ý luyện lại |
+| `masteryLevel` | double, nullable | Xác suất đã nắm vững (BKT), null nếu item chưa từng được Java engine chấm |
+| `nextReviewAt` | Instant, nullable | Lịch ôn tiếp theo (Leitner), null nếu item chưa từng được Java engine chấm |
+| `scoreSource` | `"PYTHON_LEGACY" \| "JAVA_ENGINE"` | `PYTHON_LEGACY` cho mọi bản ghi `DICTATION` (dual-write qua Kafka), `JAVA_ENGINE` cho mọi bản ghi `COMPREHENSION` |
+| `updatedAt` | Instant | |
+
+### GET `/api/v1/listening/weak-points/{userId}/grouped`
+
+Giống endpoint trên nhưng nhóm theo `sourceType` (không có query param `sourceType`).
+
+- **Path param**: `userId` (string)
+- **Response `data`**: `Map<ListeningSourceType, ListeningWeakPoint[]>`
+
 ### Practice / redo-exercise (package `practice`)
 
 ### POST `/api/v1/practice/redo`
@@ -275,8 +323,8 @@ cả 3 domain (vocabulary/grammar/pronunciation) trong cùng một lần submit.
 | `attempts` | `PracticeAttemptRequest[]` | bắt buộc, ít nhất 1 phần tử |
 
 `PracticeAttemptRequest`: `itemId` (string, bắt buộc), `category` (string, bắt buộc — `"vocabulary" |
-"grammar" | "pronunciation"`, phải khớp category gốc của item), `label` (string, bắt buộc), `correct`
-(boolean).
+"grammar" | "pronunciation" | "listening"`, phải khớp category gốc của item), `label` (string, bắt
+buộc), `correct` (boolean).
 
 - **Xử lý** (`PracticeServiceImpl` + `WeakPointScoringOrchestrator`, mỗi attempt xử lý tuần tự, không
   song song — bắt buộc để khóa `SELECT ... FOR UPDATE` bên dưới hoạt động đúng):
@@ -292,7 +340,8 @@ cả 3 domain (vocabulary/grammar/pronunciation) trong cùng một lần submit.
        `mastery`, `leitner_box`, `next_review_at`, `last_weak_score`), cập nhật bảng thống kê độ khó
        toàn cục `item_difficulty_stats` (khóa `(category, label_key)`), rồi **upsert thẳng** vào bảng
        weak-point của domain tương ứng (`vocabulary_weak_points`/`grammar_weak_points`/
-       `pronunciation_weak_points`) với `scoreSource = JAVA_ENGINE`.
+       `pronunciation_weak_points`/`listening_weak_points`, category `"listening"` ghi vào
+       `listening_weak_points` với `source_type = COMPREHENSION`) với `scoreSource = JAVA_ENGINE`.
   3. Sau khi xử lý xong toàn bộ batch, vẫn đọc lại **toàn bộ** `mistake_history` hiện tại của `userId`,
      build một `AnalysisRequestedEvent` (`recordingId` sinh 1 lần dùng chung cho cả batch, dạng
      `"practice-<uuid>"`, `segments` rỗng vì không có transcript) rồi publish
@@ -304,10 +353,11 @@ cả 3 domain (vocabulary/grammar/pronunciation) trong cùng một lần submit.
 - **Response `data`**: `null` (chỉ trả `success: true`).
 
 **Chống ghi đè điểm cũ (`score_source` guard):** vì giờ có 2 nguồn ghi vào cùng một bảng weak-point
-(consumer Kafka của `learning.gap.analyzed`, và đường Java trực tiếp ở trên), câu `upsert` của cả 3
-domain có thêm điều kiện: một bản ghi `PYTHON_LEGACY` bị bỏ qua (không ghi đè) nếu dòng hiện tại đang
-là `JAVA_ENGINE` — một chiều, không đảo ngược. Nhờ vậy kết quả tính chậm hơn của `ai-service` không thể
-âm thầm ghi đè điểm mới hơn vừa tính trực tiếp bằng Java.
+(consumer Kafka của `learning.gap.analyzed`, và đường Java trực tiếp ở trên), câu `upsert` của cả 4
+domain (kể cả `listening_weak_points` mới) có thêm điều kiện: một bản ghi `PYTHON_LEGACY` bị bỏ qua
+(không ghi đè) nếu dòng hiện tại đang là `JAVA_ENGINE` — một chiều, không đảo ngược. Nhờ vậy kết quả
+tính chậm hơn của `ai-service`/dictation không thể âm thầm ghi đè điểm mới hơn vừa tính trực tiếp bằng
+Java.
 
 `mistake_history` được seed lần đầu (occurrenceCount=1) bởi `MistakeHistorySeedConsumer` (mục 8) ngay khi
 một item lần đầu xuất hiện trong `learning.gap.analyzed`, kể cả trước khi learner từng redo — nên
@@ -331,6 +381,43 @@ theo `nextReviewAt` (gần nhất trước).
 
 Nguồn dữ liệu là trực tiếp `mistake_history` (không cần join sang 3 bảng weak-point vì `last_weak_score`
 và `label_key` đã được lưu sẵn ở đó), lọc `next_review_at <= now()`.
+
+### Practice session — buổi luyện tập (package `practice.session`)
+
+Tính năng **"Luyện tập"** được làm lại: thay vì lật thẻ tự đánh giá, một **buổi luyện tập** gồm ~4 bài
+tập AI thật (chủ đề ngẫu nhiên), trộn cả 4 kỹ năng, nhắm vào weak point điểm cao nhất. Tầng này **chỉ
+điều phối**: xếp hạng category theo `forgettingScore` weak point cao nhất (vocabulary/grammar qua
+`getTopWeakPoints`, pronunciation→speaking qua `PronunciationWeakPointService.getTopWeakPoints` mới
+thêm, listening tự fallback theo keyword sai gần đây), gọi `generate()` sẵn có của từng domain cho mỗi
+slot, và lưu tiến độ (bảng `practice_sessions` + `practice_session_exercises`, migration `V25`). Việc
+chấm điểm vẫn dùng **endpoint submit sẵn có của từng domain** — feed weak point y như luồng "Học".
+
+#### POST `/api/v1/practice/sessions`
+
+- **Body** — `StartPracticeSessionRequest`: `userId` (string), `exerciseCount` (int, nullable — mặc
+  định 4, kẹp 1..8).
+- **Response `data`** — `PracticeSession` (xem shape dưới). Sinh bài đồng bộ; slot listening/speaking
+  tổng hợp audio nên phản hồi có thể chậm.
+
+#### GET `/api/v1/practice/sessions/{sessionId}`
+- **Response `data`** — `PracticeSession`.
+
+#### GET `/api/v1/practice/sessions/latest/{userId}`
+- Buổi đang làm dở gần nhất (để "Tiếp tục"), hoặc `data = null` nếu không có.
+
+#### POST `/api/v1/practice/sessions/{sessionId}/exercises/{order}/complete`
+- **Body** — `CompletePracticeExerciseRequest`: `score` (double, 0..1 — điểm bài vừa chấm ở domain).
+- Đánh dấu slot `DONE`; khi mọi slot xong thì buổi `COMPLETED`. **Response `data`** — `PracticeSession`.
+
+**`PracticeSession`**: `sessionId` (int64), `status` (`IN_PROGRESS|COMPLETED`), `totalExercises` (int),
+`exercises` (`PracticeSessionExercise[]`), `createdAt`, `completedAt` (nullable).
+**`PracticeSessionExercise`**: `order` (int), `category` (`vocabulary|grammar|listening|speaking`),
+`practiceItemId` (int64 — trỏ tới bảng practice item của domain), `topic` (nullable), `status`
+(`PENDING|DONE`), `score` (double, nullable).
+
+> `bff-service` proxy 1:1 các endpoint này dưới `/api/v1/learners/{userId}/practice/sessions...` (xem
+> mục bff-service), trong đó `userId` được đóng dấu từ path; route `latest` ở bff là
+> `/practice/sessions/latest` (không kèm `{userId}` trong path).
 
 ### Dictation practice — nghe chép chính tả (package `dictation`)
 
@@ -1180,6 +1267,187 @@ mặc định vẫn `rule-based` (Ebbinghaus đơn lẻ) để tương thích ng
 `updateHalfLifeContinuous`, quy về đúng bằng nhánh nhị phân tại 0.0/1.0. Ước lượng tham số BKT/Rasch từ
 dữ liệu thật: `app/scoring/fit.py` (bộ ước lượng offline đã có test; còn nối vào review log thật).
 
+### Writing Learn — luyện viết & luyện dịch với AI (package `writing`)
+
+Một domain phục vụ **cả ba dạng bài**, phân biệt bằng `taskType`:
+
+| `taskType` | `promptText` là gì | Người học viết bằng | Tiêu chí thứ 4 |
+|---|---|---|---|
+| `COMPOSE` | Đề bài **tiếng Việt** (nêu số từ tối thiểu + cấu trúc bắt buộc dùng) | tiếng Anh | `taskResponse` (bám đề) |
+| `TRANSLATE_VI_EN` | Đoạn nguồn **tiếng Việt** | tiếng Anh | `accuracy` (độ sát nghĩa) |
+| `TRANSLATE_EN_VI` | Đoạn nguồn **tiếng Anh** | tiếng Việt | `accuracy` |
+
+**Không có endpoint weak-point riêng cho `writing`** — đây là điểm khác biệt duy nhất so với 4 kỹ năng
+kia. Mỗi lỗi AI chấm ra đã mang sẵn `category` là `"grammar"` hoặc `"vocabulary"`, nên lỗi được đổ về
+đúng `grammar_weak_points`/`vocabulary_weak_points` qua `PracticeService.redo`. Nhờ vậy lỗi
+"past perfect" mắc khi viết **cộng dồn vào cùng một dòng** với "past perfect" đã tích lũy từ
+dictation/listening, thay vì tạo một bảng thống kê song song.
+
+`prompt_text` **luôn** có dòng chỉ dẫn tiếng Việt (kể cả bản fallback khi LLM lỗi), theo quy tắc chung
+của dự án: mọi bài luyện tập phải hiển thị yêu cầu bằng tiếng Việt.
+
+### POST `/api/v1/learn/writing/{userId}/generate`
+
+Sinh 1 đề. Body: `{ "taskType": "COMPOSE", "level": "B1", "examType": "IELTS", "focusItems": ["past perfect"] }`
+— chỉ `taskType` bắt buộc. `focusItems` rỗng/thiếu ⇒ lấy **top weak point của cả `grammar` và
+`vocabulary`** gộp lại (writing là kỹ năng duy nhất luyện đồng thời cả hai), giới hạn 8 nhãn; không có
+lịch sử ⇒ để LLM tự chọn chủ đề.
+
+Response `data` (`WritingPracticeItem`) — **không có `referenceAnswer`**, để bài mẫu/bản dịch tham
+chiếu không lộ ra client trước khi nộp:
+
+```json
+{
+  "practiceItemId": 12,
+  "taskType": "TRANSLATE_VI_EN",
+  "level": "B1",
+  "examType": null,
+  "topic": "Daily routine",
+  "promptText": "Dịch đoạn văn sau sang tiếng Anh:\n\nTôi đã sống ở Hà Nội trong năm năm...",
+  "sourceLang": "vi",
+  "targetLang": "en",
+  "targetLabels": ["past perfect", "collocation: make/do"],
+  "createdAt": "2026-07-30T10:00:00Z"
+}
+```
+
+LLM lỗi/trả JSON sai ⇒ fallback template tĩnh riêng cho từng `taskType` (không ném lỗi).
+
+### GET `/api/v1/learn/writing/items/{itemId}` · GET `/api/v1/learn/writing/{userId}/items`
+
+Chi tiết 1 đề (không kèm `referenceAnswer`) và danh sách đề của người học, mới nhất trước.
+
+### POST `/api/v1/learn/writing/suggest`
+
+Gợi ý câu tiếp theo. Body: `{ "practiceItemId": 12, "draftText": "I have lived here..." }` —
+`draftText` để trống nghĩa là người học chưa bắt đầu, cần gợi ý mở bài.
+
+Response `data`: 2–3 `WritingSuggestion`:
+
+```json
+[
+  {
+    "ideaVi": "Dịch tiếp câu thứ hai, chú ý mốc thời gian trước quá khứ.",
+    "structureHint": "past perfect: had + V3",
+    "usefulPhrases": ["move to", "get used to"]
+  }
+]
+```
+
+Ba điều quan trọng:
+
+1. **Chỉ tốn chi phí khi người học bấm nút.** Không debounce, không ghost-text, không job nền.
+2. **Với `TRANSLATE_*`, prompt bị giới hạn cứng**: chỉ được nêu *tên cấu trúc* cần dùng và giải nghĩa
+   tối đa 2 từ khó, tuyệt đối không dịch câu tiếp theo. `referenceAnswer` **không** được truyền vào
+   suggester (interface không có tham số đó), nên bản dịch mẫu không thể lọt vào gợi ý.
+3. LLM lỗi ⇒ trả **mảng rỗng**, không ném lỗi — một gợi ý hỏng không được làm gián đoạn phiên viết.
+
+### POST `/api/v1/learn/writing/attempts`
+
+Nộp bài, chấm ngay (đồng bộ). Body: `{ "userId": "u1", "practiceItemId": 12, "submittedText": "..." }`.
+
+Response `data` (`WritingAttemptResult`):
+
+```json
+{
+  "attemptId": 34,
+  "overallScore": 0.7,
+  "criteria": { "grammar": 0.4, "vocabulary": 0.6, "coherence": 0.8, "accuracy": 1.0, "taskResponse": null },
+  "correctedText": "I went to Hanoi last week.",
+  "errors": [
+    {
+      "wrong": "I have went to Hanoi last week",
+      "corrected": "I went to Hanoi last week",
+      "label": "past simple vs present perfect",
+      "category": "grammar",
+      "explanationVi": "Có mốc thời gian xác định trong quá khứ nên dùng past simple.",
+      "severity": "major"
+    }
+  ],
+  "feedback": "Ý tưởng rõ ràng, nhưng cần chú ý thì của động từ.",
+  "referenceAnswer": "I went to Hanoi last week...",
+  "actionAdvice": ["Ôn lại quy tắc \"past simple vs present perfect\" rồi viết lại 3 câu cho đúng."]
+}
+```
+
+Chi tiết cách chấm và cách lỗi lan ra hệ thống:
+
+- `overallScore` do **Java tự tính** là trung bình các tiêu chí có giá trị, **không** dùng con số
+  `overallScore` mà LLM trả về (LLM thường cho điểm tổng lệch khỏi chính các tiêu chí nó vừa chấm).
+  Từng tiêu chí bị kẹp về `[0, 1]`; tiêu chí thiếu ⇒ tính 0 và ghi `log.warn`.
+- Chỉ tiêu chí thứ 4 phù hợp `taskType` được điền, cái còn lại luôn `null`.
+- Lỗi có `category` khác `grammar`/`vocabulary` bị **bỏ khỏi** vòng weak-point (vẫn lưu và vẫn hiển thị
+  cho người học) — không domain nào sở hữu nó.
+- Lỗi được **dedupe theo `(category, label)`** trong cùng một bài: sai "past perfect" 3 lần trong một
+  đoạn ⇒ 1 weak point, không phải 3.
+- `itemId` gửi vào `PracticeService.redo` dùng **đúng prefix sẵn có của từng domain**:
+  `grammar` → `"grammar:"`, `vocabulary` → **`"vocab:"`** (không phải `"vocabulary:"`). Đây là điểm dễ
+  sai nhất: suy prefix từ tên category sẽ sinh `"vocabulary:..."` và âm thầm tạo một tập weak point
+  song song thay vì cộng dồn vào tập thật của người học.
+- Bài không có lỗi nào ⇒ **không** gọi `redo`, không phát event vô nghĩa.
+- Một lần `redo` kéo theo: cập nhật `grammar_weak_points`/`vocabulary_weak_points` (qua
+  `WeakPointDispatcher`), cập nhật `mistake_history` ⇒ nhãn xuất hiện trong
+  `GET /api/v1/practice/review-queue/{userId}`, và publish `learning.gap.analysis.requested` ⇒
+  ai-service → `learning.gap.analyzed` → recommendation-service + dashboard-service.
+  **Không có Kafka topic hay consumer mới nào được thêm.**
+
+### GET `/api/v1/learn/writing/history/{userId}` · GET `/api/v1/learn/writing/history/{userId}/{attemptId}`
+
+Lịch sử làm bài (mới nhất trước) và chi tiết 1 lần làm bài. Chi tiết đọc lại từ bản chấm đã lưu
+(`criteria`/`errors` dạng JSON trong `writing_attempts`), **không chấm lại** — mở lịch sử không tốn
+LLM và luôn hiện đúng thứ người học đã thấy. 404 nếu attempt thuộc người học khác.
+
+### POST `/api/v1/learn/writing/history/{userId}/{attemptId}/ai-practice`
+
+"Luyện lại những lỗi này": đọc `errors` của bài cũ, rút danh sách nhãn lỗi (qua
+`WritingMistakeAnalyzer` — hàm thuần, không LLM/DB), rồi gọi lại **đúng** pipeline sinh đề mà
+`/generate` dùng với cùng `taskType`/`level`/`examType`. Đề mới vào cùng bank `writing_practice_items`.
+Trả về danh sách đề đã cập nhật.
+
+### Writing Library — thư viện đề viết/dịch theo 3 trục taxonomy (package `writing.library`)
+
+Thư viện duy nhất có **3 trục độc lập**, chọn bằng query param `taxonomy`:
+
+| `taxonomy` | Nội dung | Số topic |
+|---|---|---|
+| `grammar` | Đúng bộ 60 chủ điểm ngữ pháp của `grammar_library_topics`/`listening_library_topics` (cùng `code`/`name`/thứ tự) — mỗi bài buộc dùng cấu trúc đó | 60 |
+| `genre` | Thể loại văn bản thực tế: tin nhắn, email công việc, đoạn miêu tả/kể chuyện, luận quan điểm, luận lợi–hại, IELTS Task 1/2, thư khiếu nại, thư xin việc, báo cáo, luận tranh luận | 12 |
+| `vocab_theme` | Bộ chủ đề của `vocabulary_topics` (V16): daily-life, food, travel, business, technology, health, education, environment | 8 |
+
+`sequence_order` **chỉ unique trong từng trục** và bắt đầu lại từ 1, việc mở khóa topic kế tiếp cũng
+**chỉ tìm trong cùng trục** — nên tiến độ 3 trục hoàn toàn độc lập (có thể đang ở topic 40 của trục
+`grammar` mà vẫn ở topic 1 của trục `genre`).
+
+Mỗi topic là một **chuỗi 3–6 đề** (số lượng suy ra từ `topicId`, không lưu DB). Catalogue chỉ ship
+topic, **không** ship nội dung: mỗi đề được LLM sinh lần đầu người học đi tới vị trí đó rồi lưu lại,
+nên quay lại vẫn thấy đúng đề cũ. Topic chỉ chuyển `PASSED` khi chuỗi đã đủ độ dài **và** mọi đề trong
+chuỗi đều đạt (score ≥ 0.7).
+
+### GET `/api/v1/learn/writing/library/{userId}/topics?taxonomy=grammar`
+
+Danh sách topic của **một trục** kèm trạng thái gating của người học (`LOCKED`/`UNLOCKED`/
+`IN_PROGRESS`/`PASSED`; chưa có dòng progress ⇒ `LOCKED`) và tiến độ chuỗi
+(`passedPromptCount`/`targetPromptCount`). Tự mở topic đầu tiên **của trục đó** cho người học mới.
+`taxonomy` lạ ⇒ **400**, không phải danh sách rỗng (rỗng sẽ trông như catalogue bị thiếu).
+
+### POST `/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts?taskType=COMPOSE`
+
+Lấy đề tiếp theo trong chuỗi: đề đầu tiên chưa đạt, hoặc sinh mới nếu chuỗi chưa đủ độ dài; khi đã
+đạt hết thì trả đề cuối để xem lại. Topic `LOCKED` ⇒ **403**. Response `WritingLibraryPrompt` có
+`position`/`targetPromptCount` để hiện "bài 3/6", `minWords`, và **không** có `referenceAnswer`.
+
+### POST `/api/v1/learn/writing/library/{userId}/prompts/{promptId}/submit`
+
+Body `{ "submittedText": "..." }`. Chấm bằng **đúng `WritingGrader`** mà tab "học thường" dùng, đổ lỗi
+qua **đúng** vòng weak-point đó, rồi cập nhật tiến độ. Response là superset của
+`WritingAttemptResult`: thêm `passed`, `passedPromptCount`/`targetPromptCount`, `topicPassed`,
+`nextTopicId`/`nextTopicUnlocked` (topic kế tiếp **cùng trục**).
+
+### POST `/api/v1/learn/writing/library/{userId}/attempts/{attemptId}/ai-practice`
+
+Sinh đề "học thường" nhắm vào lỗi của một lần làm bài trong thư viện, đưa vào cùng bank
+`writing_practice_items`. Bài không có lỗi ⇒ trả mảng rỗng.
+
 ---
 
 ## 2. `user-service` (Java) — REST
@@ -1407,13 +1675,17 @@ từ lúc bff-service còn là skeleton) được dùng thật.
 
 ### GET `/api/v1/learners/{userId}/weak-points`
 
-Composite: fan-out song song sang cả 3 endpoint weak-points của `english-service` (mục 1) —
-`/api/v1/vocabulary/weak-points/{userId}`, `/grammar/...`, `/pronunciation/...` — gộp theo `category` thành
-một view duy nhất (english-service không tự gộp giữa 3 domain của chính nó; đây là nơi đầu tiên có view đó).
+Composite: fan-out song song sang cả 4 endpoint weak-points của `english-service` (mục 1) —
+`/api/v1/vocabulary/weak-points/{userId}`, `/grammar/...`, `/pronunciation/...`, `/listening/...` — gộp theo
+`category` thành một view duy nhất (english-service không tự gộp giữa 4 domain của chính nó; đây là nơi
+đầu tiên có view đó).
 
-- **Response `data`**: `Map<string category, WeakPointDto[]>` — key là `"vocabulary"`/`"grammar"`/`"pronunciation"`.
-  `WeakPointDto`: `itemId, label, category, forgettingScore, recommendation` (`category` được bff-service tự
-  gán theo endpoint nguồn, vì response gốc của english-service không có field này).
+- **Response `data`**: `Map<string category, WeakPointDto[]>` — key là
+  `"vocabulary"`/`"grammar"`/`"pronunciation"`/`"listening"`.
+  `WeakPointDto`: `itemId, label, category, forgettingScore, recommendation, sourceType` (`category` được
+  bff-service tự gán theo endpoint nguồn, vì response gốc của english-service không có field này;
+  `sourceType` chỉ có giá trị khi `category = "listening"`, bind tự động qua Jackson vì english-service's
+  JSON đã dùng cùng tên field).
 
 ### GET `/api/v1/learners/{userId}/recommendations`
 
@@ -1424,9 +1696,9 @@ Proxy thuần túy (không cần gộp, recommendation-service đã group sẵn)
 
 ### GET `/api/v1/learners/{userId}/practice/next`
 
-Bộ "bài tập cần làm lại": gộp 3 endpoint weak-points của english-service (giống
+Bộ "bài tập cần làm lại": gộp 4 endpoint weak-points của english-service (giống
 `GET .../weak-points` ở trên, tái dùng cùng `WeakPointAggregationService`), rồi sắp giảm dần theo
-`forgettingScore` trên toàn bộ 3 domain và lấy top `limit` — đây là danh sách item học lại có mức độ
+`forgettingScore` trên toàn bộ 4 domain và lấy top `limit` — đây là danh sách item học lại có mức độ
 quên cao nhất, dùng để dựng bài tập redo cho learner.
 
 - **Query param** (tùy chọn): `limit` — mặc định `10`
@@ -1652,6 +1924,45 @@ english-service qua `WebClient.toEntityFlux(DataBuffer)`.
   sang `GET /api/v1/dictation/ai-practice/items/{practiceItemId}/detail` → `DictationPracticeItemDetailDto`
   `{practiceItemId, audioUrl, scriptText, level, examType, topic, sentences[]}` (mỗi `sentence` nay có
   thêm `translation?`), mở bài luyện AI để chép chính tả theo từng câu (xem mục english-service ở trên).
+
+### Writing (BFF proxy) — luyện viết & luyện dịch, proxy sang `english-service` (mục 1)
+
+Thin proxy 1-1 sang 12 endpoint `writing`/`writing.library` của `english-service`, base
+`/api/v1/learners/{userId}/learn/writing/...` — cùng convention `userId` luôn nằm trong path. DTO là
+class riêng trong `com.remelearning.bff.dto`, field giống 1-1: `WritingPracticeItemDto`,
+`GenerateWritingPracticeRequestDto`, `SuggestNextSentenceRequestDto`, `WritingSuggestionDto`,
+`SubmitWritingAttemptRequestDto`, `WritingAttemptResultDto`, `WritingCriteriaScoresDto`,
+`WritingErrorDto`, `WritingAttemptHistoryEntryDto`, `WritingAttemptDetailDto`,
+`WritingLibraryTopicDto`, `WritingLibraryPromptDto`, `SubmitWritingLibraryAnswerRequestDto`,
+`SubmitWritingLibraryAnswerResponseDto`. `taskType`/`taxonomy` để dạng `String` ở bff, không mirror
+enum của english-service.
+
+**Không có route weak-point cho `writing`** — lỗi viết/dịch đã được english-service đổ vào weak point
+`grammar`/`vocabulary`, nên chúng xuất hiện sẵn trong `GET /api/v1/learners/{userId}/weak-points`
+(fan-out 4 endpoint weak-points) mà không cần endpoint thứ 5.
+
+- **POST `/api/v1/learners/{userId}/learn/writing/generate`** (body
+  `GenerateWritingPracticeRequestDto` `{taskType, level?, examType?, focusItems?}`) → sinh 1 đề →
+  `WritingPracticeItemDto` (không kèm `referenceAnswer`).
+- **GET `/api/v1/learners/{userId}/learn/writing/items`** · **`.../items/{itemId}`** → danh sách đề /
+  chi tiết 1 đề.
+- **POST `/api/v1/learners/{userId}/learn/writing/suggest`** (body `{practiceItemId, draftText?}`) →
+  `WritingSuggestionDto[]` (2–3 gợi ý; mảng rỗng khi AI không khả dụng).
+- **POST `/api/v1/learners/{userId}/learn/writing/attempts`** (body
+  `{practiceItemId, submittedText}`) → chấm bài → `WritingAttemptResultDto`. `userId` **lấy từ path và
+  ghi đè lên body**, nên client không thể nộp hộ người khác.
+- **GET `/api/v1/learners/{userId}/learn/writing/history`** · **`.../history/{attemptId}`** → lịch sử /
+  chi tiết 1 lần làm bài (đọc lại bản chấm đã lưu, không chấm lại).
+- **POST `/api/v1/learners/{userId}/learn/writing/history/{attemptId}/ai-practice`** — nút "Luyện lại
+  những lỗi này" → `WritingPracticeItemDto[]`.
+- **GET `/api/v1/learners/{userId}/learn/writing/library/topics?taxonomy=grammar|genre|vocab_theme`** →
+  `WritingLibraryTopicDto[]` của **một trục**, kèm gating + tiến độ chuỗi.
+- **POST `/api/v1/learners/{userId}/learn/writing/library/topics/{topicId}/prompts?taskType=...`** →
+  bắt đầu/tiếp tục đề trong chuỗi → `WritingLibraryPromptDto`; `403` nếu topic `LOCKED`.
+- **POST `/api/v1/learners/{userId}/learn/writing/library/prompts/{promptId}/submit`** (body
+  `{submittedText}`) → chấm + tiến độ → `SubmitWritingLibraryAnswerResponseDto`.
+- **POST `/api/v1/learners/{userId}/learn/writing/library/attempts/{attemptId}/ai-practice`** → sinh
+  đề "học thường" từ lỗi của 1 lần làm bài thư viện → `WritingPracticeItemDto[]`.
 
 ---
 
@@ -1909,6 +2220,17 @@ và cả ba domain đều đọc lại qua `GET /api/v1/transcripts/{recordingId
   `category == "pronunciation"`; phân loại `PronunciationType` qua `PronunciationClassifier` (rule-based
   hoặc LLM). Lỗi được log, không rethrow.
 
+### `LearningGapAnalyzedConsumer` — topic `learning.gap.analyzed` (domain `listening.weakpoint`)
+
+- File: `english-service/.../listening/weakpoint/kafka/LearningGapAnalyzedConsumer.java`
+- `groupId`: `english-service-listening`
+- Payload: giống hệt bản của `vocabulary` (bản sao DTO riêng dùng chung `common.event.*`)
+- Xử lý: `ListeningWeakPointService.saveWeakPoints(event)` — chỉ giữ item có `category ==
+  "listening"`, luôn set `sourceType = DICTATION` (đường Kafka này hiện chỉ có
+  `DictationServiceImpl`'s dual-write publish category "listening" — không có suy luận nào từ
+  `itemId`; nếu về sau có thêm producer Kafka khác cho category này thì cần xem lại). Lỗi được log,
+  không rethrow.
+
 ### `MistakeHistorySeedConsumer` — topic `learning.gap.analyzed` (domain `practice`)
 
 - File: `english-service/.../practice/kafka/MistakeHistorySeedConsumer.java`
@@ -2063,7 +2385,7 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | `recording.uploaded` | recording-service | ai-service | ✅ hoạt động |
 | `transcript.ready` | ai-service | english-service/vocabulary | ✅ hoạt động |
 | `learning.gap.analysis.requested` | english-service (`practice`, khi learner làm lại bài tập) | ai-service | ✅ hoạt động |
-| `learning.gap.analyzed` | ai-service | english-service (vocabulary/grammar/pronunciation), recommendation-service, dashboard-service | ✅ hoạt động (5 consumer, 5 `groupId` riêng) |
+| `learning.gap.analyzed` | ai-service, english-service/dictation (dual-write category `listening`) | english-service (vocabulary/grammar/pronunciation/listening/practice), recommendation-service, dashboard-service | ✅ hoạt động (7 consumer, 7 `groupId` riêng) |
 | `pronunciation.analyzed` | english-service/pronunciation (dự kiến) | — | ⚠️ chỉ tồn tại tên hằng số, chưa có producer/consumer |
 | `grammar.analyzed` | english-service/grammar (dự kiến) | — | ⚠️ chỉ tồn tại tên hằng số, chưa có producer/consumer |
 | `vocabulary.analyzed` | english-service/vocabulary (dự kiến) | — | ⚠️ chỉ tồn tại tên hằng số, chưa có producer/consumer |
@@ -2081,10 +2403,14 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | PATCH | `/api/v1/users/{userId}` | proxy sang user-service |
 | bff-service | REST | POST | `/api/v1/recordings` | proxy multipart streaming sang recording-service |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/overview` | fan-out user-service + dashboard-service + recording-service |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/weak-points` | fan-out 3 endpoint weak-points của english-service |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/weak-points` | fan-out 4 endpoint weak-points của english-service |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/recommendations` | proxy `/recommendations/{userId}/grouped` |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/practice/next` | fan-out 3 endpoint weak-points, top N theo `forgettingScore` |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/practice/next` | fan-out 4 endpoint weak-points, top N theo `forgettingScore` |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/practice/redo` | proxy sang english-service `/api/v1/practice/redo` |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/practice/sessions` | proxy: bắt đầu một buổi luyện tập (~4 bài AI trộn 4 kỹ năng) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/practice/sessions/latest` | proxy: buổi đang làm dở gần nhất (để tiếp tục), hoặc null |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/practice/sessions/{sessionId}` | proxy: một buổi luyện tập + danh sách bài |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/practice/sessions/{sessionId}/exercises/{order}/complete` | proxy: ghi nhận điểm một bài, hoàn tất buổi khi đủ |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/vocabulary/generate` | proxy `POST /api/v1/learn/vocabulary/{userId}/generate` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/items` | proxy danh sách bộ đề đã sinh |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/vocabulary/items/{itemId}` | proxy chi tiết 1 bộ đề |
@@ -2156,6 +2482,18 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | POST | `/api/v1/learners/{userId}/dictation/ai-practice/generate` | proxy tổng hợp audio AI-practice, body `{level?, examType?, translationLang?}` |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/audio` | relay stream audio AI-practice |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/dictation/ai-practice/items/{practiceItemId}/detail` | proxy chi tiết 1 bài luyện AI (passage + sentences, cho chép chính tả từng câu) |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/generate` | proxy `POST /api/v1/learn/writing/{userId}/generate` |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/writing/items` | proxy danh sách đề đã sinh |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/writing/items/{itemId}` | proxy chi tiết 1 đề |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/suggest` | proxy gợi ý câu tiếp theo |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/attempts` | proxy chấm bài (`userId` gán đè lên body) |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/writing/history` | proxy lịch sử làm bài |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/writing/history/{attemptId}` | proxy chi tiết 1 lần làm bài |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/history/{attemptId}/ai-practice` | proxy sinh đề từ lỗi bài cũ |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/writing/library/topics` | proxy topic 1 trục taxonomy (query `taxonomy`) |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/library/topics/{topicId}/prompts` | proxy lấy/sinh đề trong chuỗi (query `taskType`) |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/library/prompts/{promptId}/submit` | proxy chấm bài thư viện + tiến độ |
+| bff-service | REST | POST | `/api/v1/learners/{userId}/learn/writing/library/attempts/{attemptId}/ai-practice` | proxy sinh đề từ lỗi bài thư viện |
 | user-service | REST | POST | `/api/v1/auth/register` | hash password, phát JWT, `409` nếu email trùng |
 | user-service | REST | POST | `/api/v1/auth/login` | phát JWT, `401` chung cho email sai/không tồn tại |
 | user-service | REST | GET | `/api/v1/users/{userId}` | 404 nếu không tồn tại |
@@ -2168,8 +2506,14 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (grammar) | REST | GET | `/api/v1/grammar/weak-points/{userId}/grouped` | nhóm theo `GrammarType` |
 | english-service (pronunciation) | REST | GET | `/api/v1/pronunciation/weak-points/{userId}` | filter `?type=` tùy chọn |
 | english-service (pronunciation) | REST | GET | `/api/v1/pronunciation/weak-points/{userId}/grouped` | nhóm theo `PronunciationType` |
+| english-service (listening.weakpoint) | REST | GET | `/api/v1/listening/weak-points/{userId}` | filter `?sourceType=` tùy chọn |
+| english-service (listening.weakpoint) | REST | GET | `/api/v1/listening/weak-points/{userId}/grouped` | nhóm theo `ListeningSourceType` (DICTATION/COMPREHENSION) |
 | english-service (practice) | REST | POST | `/api/v1/practice/redo` | chấm điểm redo-exercise, chấm điểm trực tiếp bằng Java scoring engine, refresh mistake history, trigger re-analysis |
 | english-service (practice) | REST | GET | `/api/v1/practice/review-queue/{userId}` | item đến hạn ôn lại theo lịch Leitner |
+| english-service (practice.session) | REST | POST | `/api/v1/practice/sessions` | bắt đầu buổi luyện tập: chọn weak point điểm cao nhất, sinh ~4 bài AI (chủ đề ngẫu nhiên) trộn 4 kỹ năng |
+| english-service (practice.session) | REST | GET | `/api/v1/practice/sessions/{sessionId}` | một buổi + danh sách bài |
+| english-service (practice.session) | REST | GET | `/api/v1/practice/sessions/latest/{userId}` | buổi đang làm dở gần nhất, hoặc null |
+| english-service (practice.session) | REST | POST | `/api/v1/practice/sessions/{sessionId}/exercises/{order}/complete` | ghi nhận điểm một bài; hoàn tất buổi khi mọi bài xong |
 | english-service (vocabulary.learn) | REST | POST | `/api/v1/learn/vocabulary/{userId}/generate` | sinh bộ đề luyện từ vựng bằng AI |
 | english-service (vocabulary.learn) | REST | GET | `/api/v1/learn/vocabulary/items/{itemId}` | chi tiết bộ đề (nay kèm `answer`/`translation` cho FE chấm local); `404` |
 | english-service (vocabulary.learn) | REST | GET | `/api/v1/learn/vocabulary/{userId}/items` | danh sách bộ đề đã sinh của learner |
@@ -2241,6 +2585,18 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (dictation) | REST | POST | `/api/v1/dictation/ai-practice/{userId}/generate` | body `GenerateAiPracticeRequest` `{level?, examType?, translationLang?}` (hỗ trợ `"RANDOM"`); Gemini sinh một đoạn hội thoại/độc thoại duy nhất kèm `topic` + bản dịch tùy chọn + Supertonic tổng hợp audio từng câu rồi ghép lại |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/items/{practiceItemId}/audio` | stream audio AI-practice |
 | english-service (dictation) | REST | GET | `/api/v1/dictation/ai-practice/items/{practiceItemId}/detail` | chi tiết 1 bài luyện AI: passage tách thành sentences (dòng nếu hội thoại, câu nếu độc thoại) kèm bản dịch; sentences luôn `startMs`/`endMs` null; `404` |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/{userId}/generate` | sinh 1 đề viết/dịch (COMPOSE / TRANSLATE_VI_EN / TRANSLATE_EN_VI) nhắm weak point grammar+vocabulary |
+| english-service (writing) | REST | GET | `/api/v1/learn/writing/items/{itemId}` | chi tiết 1 đề (không kèm `referenceAnswer`) |
+| english-service (writing) | REST | GET | `/api/v1/learn/writing/{userId}/items` | danh sách đề đã sinh |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/suggest` | 2-3 gợi ý câu tiếp theo; chế độ dịch bị giới hạn cứng, không nhận `referenceAnswer` |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/attempts` | chấm theo tiêu chí + trả lỗi có nhãn; đổ lỗi về weak point grammar/vocabulary |
+| english-service (writing) | REST | GET | `/api/v1/learn/writing/history/{userId}` | lịch sử làm bài |
+| english-service (writing) | REST | GET | `/api/v1/learn/writing/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài (đọc bản chấm đã lưu) |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/history/{userId}/{attemptId}/ai-practice` | sinh đề mới nhắm đúng lỗi bài cũ |
+| english-service (writing) | REST | GET | `/api/v1/learn/writing/library/{userId}/topics` | topic 1 trục taxonomy (`grammar`/`genre`/`vocab_theme`) + gating riêng từng trục |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts` | lấy/sinh đề tiếp theo trong chuỗi của topic |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/library/{userId}/prompts/{promptId}/submit` | chấm bài thư viện + mở khóa topic kế tiếp cùng trục |
+| english-service (writing) | REST | POST | `/api/v1/learn/writing/library/{userId}/attempts/{attemptId}/ai-practice` | sinh đề "học thường" từ lỗi 1 bài thư viện |
 | recording-service | REST | POST | `/api/v1/recordings` | multipart upload → S3 + publish `recording.uploaded` |
 | recording-service | REST | GET | `/api/v1/recordings/{recordingId}` | 404 nếu không tồn tại |
 | recording-service | REST | GET | `/api/v1/recordings/user/{userId}` | danh sách theo user |
@@ -2261,6 +2617,8 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (vocabulary) | Kafka in | `learning.gap.analyzed` | `LearningGapAnalyzedConsumer` (groupId `english-service`) | lưu weak points (chỉ category vocabulary) |
 | english-service (grammar) | Kafka in | `learning.gap.analyzed` | `LearningGapAnalyzedConsumer` (groupId `english-service-grammar`) | lưu weak points (chỉ category grammar) |
 | english-service (pronunciation) | Kafka in | `learning.gap.analyzed` | `LearningGapAnalyzedConsumer` (groupId `english-service-pronunciation`) | lưu weak points (chỉ category pronunciation) |
+| english-service (listening.weakpoint) | Kafka in | `learning.gap.analyzed` | `LearningGapAnalyzedConsumer` (groupId `english-service-listening`) | lưu weak points (chỉ category listening, luôn `sourceType=DICTATION`) |
+| english-service (dictation) | Kafka out | `learning.gap.analyzed` | `DictationGapEventPublisher` (dual-write) | mỗi từ chép sai publish 2 payload trong cùng event: category gốc (vocabulary/grammar/pronunciation) + category `listening` |
 | english-service (practice) | Kafka in | `learning.gap.analyzed` | `MistakeHistorySeedConsumer` (groupId `english-service-practice`) | seed `mistake_history` lần đầu, không lọc category |
 | english-service (practice) | Kafka out | `learning.gap.analysis.requested` | `AnalysisRequestedProducer` | key `recordingId` giả (`practice-<uuid>`), snake_case, không envelope |
 | recording-service | Kafka out | `recording.uploaded` | `RecordingUploadedProducer` | key `recordingId`, snake_case, không envelope |

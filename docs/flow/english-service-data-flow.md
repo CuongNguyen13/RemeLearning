@@ -1,17 +1,21 @@
 # english-service — Data Flow
 
 Focuses on **what happens to the data** (transformations, formats, storage) as it moves through
-`english-service`'s three analysis domains — `vocabulary`, `grammar`, `pronunciation` — plus the
-cross-cutting `practice` (redo-exercise) and `dictation` (listen-and-type practice) packages, as
-opposed to the sequence diagrams in [../sequence/English_service/](../sequence/English_service/)
-which focus on call order between components. Only `vocabulary` ingests `transcript.ready`; `grammar`
-and `pronunciation` each run their own weak-point ingestion off the same `learning.gap.analyzed`
+`english-service`'s four analysis domains — `vocabulary`, `grammar`, `pronunciation`,
+`listening.weakpoint` — plus the cross-cutting `practice` (redo-exercise) and `dictation`
+(listen-and-type practice) packages, as opposed to the sequence diagrams in
+[../sequence/English_service/](../sequence/English_service/) which focus on call order between
+components. Only `vocabulary` ingests `transcript.ready`; `grammar`, `pronunciation`, and
+`listening.weakpoint` each run their own weak-point ingestion off the same `learning.gap.analyzed`
 event, filtered to their own `category`, on their own Kafka `groupId`. `practice` also consumes
 `learning.gap.analyzed` (no category filter, to seed `mistake_history`) and is the first component in
 `english-service` to *produce* a Kafka event, `learning.gap.analysis.requested`, once a learner redoes
 an exercise. `dictation` is pull-based, not event-driven: it reads `vocabulary`/`grammar`'s weak-point
 tables in-process to pick sentences, calls out to an LLM and Google Cloud TTS, and stores generated
-audio in S3/MinIO.
+audio in S3/MinIO. `dictation`'s grading step also **dual-writes** onto `learning.gap.analyzed`: every
+missed word publishes a second `WeakPointPayload` under `category="listening"` (in addition to its
+root-cause vocabulary/grammar/pronunciation payload), in the same event, which
+`listening.weakpoint`'s own consumer picks up.
 
 **"Học & Luyện tập với AI" — four new "learn" skill packages.** `vocabulary/learn`, `grammar/learn`
 (each nested under their existing domain package), plus two brand-new top-level domains,
@@ -22,9 +26,10 @@ item (Gemini text, and for `listening`/`speaking` also Supertonic TTS audio via 
 feed every graded item straight into the **existing** `PracticeService.redo(...)` call used by
 manual redo exercises (`mistake_history`/`WeakPointScoringEngine`/`learning.gap.analysis.requested`,
 see `PracticeFlow` below). `vocabulary`/`grammar` route into their own pre-existing weak-point tables
-this way; `speaking` reuses `pronunciation_weak_points` (category `"pronunciation"`); `listening`
-introduces a brand-new category, `"listening"` (`LearningCategories.LISTENING`), that has **no**
-matching weak-point table — see the `ListeningLearnFlow`/`SpeakingLearnFlow`/`VocabLearnFlow`/
+this way; `speaking` reuses `pronunciation_weak_points` (category `"pronunciation"`); `listening`'s
+category, `"listening"` (`LearningCategories.LISTENING`), now routes into the new
+`listening_weak_points` table (`sourceType = COMPREHENSION`) via `WeakPointDispatcherImpl`'s
+`"listening"` case — see the `ListeningLearnFlow`/`SpeakingLearnFlow`/`VocabLearnFlow`/
 `GrammarLearnFlow` subgraphs and the note below the diagram.
 
 ```mermaid
@@ -65,6 +70,12 @@ flowchart TD
         DiscardP["skip<br/>(owned by vocabulary's/grammar's own consumer)"]
         ClassifyP["PronunciationClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) with<br/>fallback to OTHER on failure"]
         UpsertP["upsert keyed on (user_id, item_id)"]
+
+        Decode2L["EventCodec decode (listening.weakpoint)<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
+        FilterL{"category == listening?"}
+        DiscardL["skip<br/>(owned by vocabulary's/grammar's/pronunciation's own consumer)"]
+        HardcodeL["sourceType hard-coded to DICTATION<br/>(this Kafka path only ever carries dictation's dual-write - no classifier)"]
+        UpsertL["upsert keyed on (user_id, item_id)"]
     end
 
     subgraph PracticeFlow["Practice / redo-exercise (package practice)"]
@@ -77,7 +88,7 @@ flowchart TD
         RecordAttempt["recordAttempt per attempt<br/>occurrence_count += (correct ? 0 : 1), last_seen_at = now()"]
         ScoreEngine["common.scoring.WeakPointScoringEngine<br/>forgetting (adaptive half-life) x (1-mastery, BKT)<br/>x difficultyWeight (Rasch) x recurrenceBoost"]
         UpdateState["updateScoringState + item_difficulty_stats upsertIncrement"]
-        DispatchDomain["dispatch to owning domain's<br/>applyJavaComputedScore (scoreSource=JAVA_ENGINE)"]
+        DispatchDomain["dispatch to owning domain's<br/>applyJavaComputedScore (scoreSource=JAVA_ENGINE)<br/>vocabulary/grammar/pronunciation/listening (listening -> sourceType=COMPREHENSION)"]
         BuildHistory["findByUserId -> build AnalysisRequestedEvent<br/>{recordingId: practice-&lt;uuid&gt;, userId, segments: [], history[]}"]
         PublishAR["AnalysisRequestedProducer.publish<br/>-> learning.gap.analysis.requested"]
         RevQueue["GET /api/v1/practice/review-queue/{userId}<br/>findDueForReview(userId, now)"]
@@ -99,7 +110,7 @@ flowchart TD
         ScoreSentenceMistakes["rev 3: DictationScorer.score(expectedText, attemptedText) per sentenceMistakes[] entry<br/>-> extra missing/substituted words merged into the same miss list"]
         InsertAttempt["insertAttempt + insertMisses (missing/substituted words from userTranscript's diff, plus any from ScoreSentenceMistakes)"]
         Analyze["DictationAnalyzer.analyzeAttempt(referenceText, userTranscript, diff)<br/>rule-based heuristic, or Gemini -> root-cause-classified errorTable (LEXICON/GRAMMAR/PHONOLOGY) + rootCauses + actionAdvice + practice sentences"]
-        PublishGap["DictationGapEventPublisher -> learning.gap.analyzed<br/>toLearningCategory: LEXICON-&gt;vocabulary, GRAMMAR-&gt;grammar, PHONOLOGY-&gt;pronunciation<br/>(unclassified word, e.g. a sentence-mode retry miss -> vocabulary)"]
+        PublishGap["DictationGapEventPublisher -> learning.gap.analyzed<br/>toLearningCategory: LEXICON-&gt;vocabulary, GRAMMAR-&gt;grammar, PHONOLOGY-&gt;pronunciation<br/>(unclassified word, e.g. a sentence-mode retry miss -> vocabulary)<br/>DUAL-WRITE: each word ALSO gets a second payload, category=listening,<br/>same itemId/label/forgettingScore/recommendation, in the SAME event/list"]
 
         AiGen["POST /ai-practice/{userId}/generate<br/>{level?, examType?, translationLang?} -> resolveLevel/resolveExamType (concrete value, RANDOM from a fixed CEFR pool<br/>A1/A2/B1/B2/C1 or the library's own distinct exam types w/ TOEIC/IELTS/TOEFL/General fallback, or unset)<br/>-> pending items' text (or top missed words if none pending) + resolved level/examType/translationLang -> LlmDictationDialogueGenerator (Gemini)<br/>-> one monologue/multi-speaker dialogue with a topic label + parallel per-line translation (only if translationLang != en)<br/>-> random voice per speaker -> Supertonic (ai-service) per line, synthesized from the SAME text persisted as the graded sentence<br/>-> WavAudioMerger -> one merged WAV -> AudioTranscodeClient.toOpus (ai-service) -> StorageClient.write (.opus) -> replaces prior pending items"]
         AiGenFromAttempt["POST /dictation/history/{userId}/{attemptId}/ai-practice<br/>{translationLang?} -> one attempt's own missed words -> same LlmDictationDialogueGenerator as AiGen (level/examType left unset)<br/>-> Supertonic (ai-service) -> AudioTranscodeClient.toOpus -> StorageClient.write (.opus)"]
@@ -329,6 +340,7 @@ flowchart TD
         T40[("speaking_topic_progress")]
         T41[("speaking_library_attempts")]
         T42[("listening_library_attempt_answers")]
+        T43[("listening_weak_points")]
     end
 
     subgraph ReadOut["Read-out (REST)"]
@@ -336,6 +348,7 @@ flowchart TD
         GetWeakV["GET /api/v1/vocabulary/weak-points/{userId}[/grouped]<br/>-> List or Map[VocabularyType, List]"]
         GetWeakG["GET /api/v1/grammar/weak-points/{userId}[/grouped]<br/>-> List or Map[GrammarType, List]"]
         GetWeakP["GET /api/v1/pronunciation/weak-points/{userId}[/grouped]<br/>-> List or Map[PronunciationType, List]"]
+        GetWeakL["GET /api/v1/listening/weak-points/{userId}[/grouped]<br/>-> List or Map[ListeningSourceType, List]"]
         GetDictationHistory["GET /api/v1/dictation/history/{userId}<br/>-> List[DictationHistoryEntryDto]{attemptId, clipId, title, skill,<br/>level, examType, accuracy, wer, attemptedAt, attemptCount, practiceType}"]
         GetAttemptDetail["GET /api/v1/dictation/history/{userId}/{attemptId}<br/>findAttemptDetailByIdAndUserId + findMissesByAttemptId<br/>-> DictationAttemptDetailDto{referenceText, userTranscript, mistakes[], errorTable[], rootCauses[], actionAdvice[]}"]
     end
@@ -368,6 +381,12 @@ flowchart TD
     ClassifyP --> UpsertP
     UpsertP --> T5
 
+    LGAEvent --> Decode2L --> FilterL
+    FilterL -->|no| DiscardL
+    FilterL -->|yes| HardcodeL
+    HardcodeL --> UpsertL
+    UpsertL --> T43
+
     LGAEvent --> Decode2Pr --> SeedPr --> T6
 
     RedoReq --> LogAttempt --> T7
@@ -381,7 +400,7 @@ flowchart TD
     DispatchDomain -->|category=vocabulary| T3
     DispatchDomain -->|category=grammar| T4
     DispatchDomain -->|category=pronunciation| T5
-    DispatchDomain -->|category=listening| NoDispatch["WeakPointDispatcherImpl: no case for 'listening'<br/>-> log.warn, computed score dropped<br/>(mistake_history/item_difficulty_stats above are still updated)"]
+    DispatchDomain -->|category=listening, sourceType=COMPREHENSION| T43
     RecordAttempt --> BuildHistory
     T6 --> BuildHistory
     BuildHistory --> PublishAR --> AREvent
@@ -392,6 +411,7 @@ flowchart TD
     T3 --> GetWeakV
     T4 --> GetWeakG
     T5 --> GetWeakP
+    T43 --> GetWeakL
 
     ImportLib --> T9
     ImportLib --> T13
@@ -602,6 +622,171 @@ flowchart TD
     SLibTopicLookup --> SLibDelegate --> SLGenerate
 ```
 
+## Writing & translation skill (`writing`, `writing.library`)
+
+Kept as its own flowchart rather than folded into the one above: this skill's interesting
+transformation is not a new pipeline but a **re-routing** — the AI grader's output is split by each
+error's own `category` and fed into the *existing* grammar/vocabulary weak-point tables, so no new
+weak-point table, Kafka topic, consumer or producer exists for it.
+
+```mermaid
+flowchart TD
+    subgraph Generate["Generate a task"]
+        WGenReq["POST /learn/writing/{userId}/generate<br/>{taskType, level?, examType?, focusItems?}"]
+        WFocusCheck{"focusItems given?"}
+        WTopGrammar["GrammarWeakPointService.getTopWeakPoints(userId, 8)"]
+        WTopVocab["VocabularyWeakPointService.getTopWeakPoints(userId, 8)"]
+        WMergeLabels["concat + distinct + limit 8<br/>(writing exercises BOTH domains at once)"]
+        WGen["LlmWritingPracticeGenerator.generate(taskType, labels, level, examType)"]
+        WGenFallback["fallback template per taskType<br/>(still has its Vietnamese instruction line)"]
+        WInsertItem[("writing_practice_items<br/>+ reference_answer, target_labels")]
+        WItemDto["WritingPracticeItemDto<br/>(NO referenceAnswer field)"]
+    end
+
+    subgraph Suggest["Hint while writing (only on button press)"]
+        WSuggestReq["POST /learn/writing/suggest<br/>{practiceItemId, draftText?}"]
+        WSuggestPromptPick{"taskType is TRANSLATE_*?"}
+        WSuggestRestricted["restricted prompt: name the structure,<br/>gloss <=2 words, NEVER translate"]
+        WSuggestScaffold["scaffolding prompt: idea + pattern + phrases,<br/>NEVER a finished sentence"]
+        WSuggestOut["WritingSuggestion[]<br/>{ideaVi, structureHint, usefulPhrases[]}<br/>(empty list on any failure)"]
+    end
+
+    subgraph Grade["Submit + grade"]
+        WSubmitReq["POST /learn/writing/attempts<br/>{userId, practiceItemId, submittedText}"]
+        WGrader["LlmWritingGrader.grade(taskType, promptText, referenceAnswer, submittedText)"]
+        WClamp["clamp criteria to [0,1]; missing -> 0<br/>keep only the 4th criterion for this taskType"]
+        WDropErr["drop errors with blank label<br/>or category outside grammar/vocabulary"]
+        WNeutral["LLM failure -> neutral 0.5, empty errors"]
+        WAvg["WritingErrorPipeline.averageCriteria()<br/>= overallScore (Java-computed, LLM's own figure ignored)"]
+        WInsertAttempt[("writing_attempts<br/>criteria JSON + errors JSON + corrected_text")]
+        WFeed["WritingErrorPipeline.feedWeakPoints()"]
+        WPrefix["itemId = prefix + label.toLowerCase()<br/>grammar -> 'grammar:'  ·  vocabulary -> 'vocab:'<br/>dedupe by (category, label)"]
+        WAnyErr{"any routable error?"}
+        WRedo["PracticeService.redo(PracticeRedoRequest)"]
+        WNoop["no call - no pointless event"]
+        WResult["WritingAttemptResultDto<br/>(referenceAnswer revealed here)"]
+    end
+
+    subgraph Fanout["Existing pipeline, unchanged"]
+        WDispatch["WeakPointDispatcher"]
+        WGrammarTbl[("grammar_weak_points")]
+        WVocabTbl[("vocabulary_weak_points")]
+        WHistory[("mistake_history<br/>-> review queue")]
+        WEvent>"learning.gap.analysis.requested<br/>-> ai-service -> learning.gap.analyzed<br/>-> recommendation-service + dashboard-service"]
+    end
+
+    subgraph Retry["Retry from a past attempt"]
+        WRetryReq["POST /learn/writing/history/{userId}/{attemptId}/ai-practice"]
+        WOwnCheck{"attempt belongs to this learner?"}
+        WAnalyzer["WritingMistakeAnalyzer.extractMistakeLabels(errorsJson)<br/>(pure, no LLM/DB; malformed JSON -> empty list)"]
+        W404["404"]
+    end
+
+    subgraph Library["Thư viện - three independent axes"]
+        WLibTopicsReq["GET /learn/writing/library/{userId}/topics?taxonomy="]
+        WAxisCheck{"taxonomy is grammar|genre|vocab_theme?"}
+        WLib400["400"]
+        WLibBootstrap["bootstrapFirstTopic for THIS axis only"]
+        WLibTopics[("writing_library_topics<br/>UNIQUE(taxonomy, code)<br/>UNIQUE(taxonomy, sequence_order)")]
+        WLibProgress[("writing_topic_progress<br/>LOCKED/UNLOCKED/IN_PROGRESS/PASSED")]
+        WLibPromptReq["POST .../topics/{topicId}/prompts?taskType="]
+        WLibChainCheck{"unpassed prompt in chain?"}
+        WLibGen["LlmWritingLibraryContentGenerator<br/>(axis fed into the prompt)"]
+        WLibPrompts[("writing_library_prompts")]
+        WLibSubmitReq["POST .../prompts/{promptId}/submit"]
+        WLibAttempts[("writing_library_attempts")]
+        WLibPassCheck{"score >= 0.7 AND chain full AND all passed?"}
+        WLibUnlock["unlockIfLocked(next topic on the SAME axis)"]
+    end
+
+    WGenReq --> WFocusCheck
+    WFocusCheck -->|yes| WGen
+    WFocusCheck -->|no| WTopGrammar --> WMergeLabels
+    WFocusCheck -->|no| WTopVocab --> WMergeLabels
+    WMergeLabels --> WGen
+    WGen -->|LLM/parse failure| WGenFallback --> WInsertItem
+    WGen --> WInsertItem --> WItemDto
+
+    WSuggestReq --> WSuggestPromptPick
+    WSuggestPromptPick -->|yes| WSuggestRestricted --> WSuggestOut
+    WSuggestPromptPick -->|no| WSuggestScaffold --> WSuggestOut
+    WInsertItem -.->|promptText only, never reference_answer| WSuggestReq
+
+    WSubmitReq --> WGrader
+    WInsertItem -->|promptText + reference_answer| WGrader
+    WGrader --> WClamp --> WDropErr --> WAvg
+    WGrader -->|failure| WNeutral --> WAvg
+    WAvg --> WInsertAttempt --> WFeed --> WPrefix --> WAnyErr
+    WAnyErr -->|no| WNoop
+    WAnyErr -->|yes| WRedo
+    WAvg --> WResult
+
+    WRedo --> WDispatch
+    WDispatch -->|category grammar| WGrammarTbl
+    WDispatch -->|category vocabulary| WVocabTbl
+    WRedo --> WHistory
+    WRedo --> WEvent
+
+    WRetryReq --> WOwnCheck
+    WOwnCheck -->|no| W404
+    WOwnCheck -->|yes| WAnalyzer
+    WInsertAttempt --> WAnalyzer
+    WAnalyzer --> WGen
+
+    WLibTopicsReq --> WAxisCheck
+    WAxisCheck -->|no| WLib400
+    WAxisCheck -->|yes| WLibBootstrap --> WLibProgress
+    WLibBootstrap --> WLibTopics
+    WLibPromptReq --> WLibChainCheck
+    WLibTopics --> WLibChainCheck
+    WLibChainCheck -->|yes, resume| WLibPrompts
+    WLibChainCheck -->|no, chain not full| WLibGen --> WLibPrompts
+    WLibSubmitReq --> WGrader
+    WLibPrompts --> WGrader
+    WAvg --> WLibAttempts --> WLibPassCheck
+    WLibPassCheck -->|yes| WLibUnlock --> WLibProgress
+    WLibAttempts --> WAnalyzer
+```
+
+### Data shape at each stage (writing)
+
+| Stage | Format | Notes |
+|---|---|---|
+| `GenerateWritingPracticeRequest` | `{taskType, level?, examType?, focusItems?}` | only `taskType` required; empty `focusItems` ⇒ top weak points of **both** grammar and vocabulary, merged and capped at 8 |
+| `WritingTaskType` | enum `COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI` | carries its own `sourceLang`/`targetLang`, so those are derived server-side rather than sent by the client |
+| `GeneratedWritingPractice` (in-memory) | `{topic, promptText, referenceAnswer}` | `promptText` = Vietnamese brief (COMPOSE) or source passage (TRANSLATE_*), always prefixed with a Vietnamese instruction line — including in the offline fallback |
+| `writing_practice_items` row | `{id, user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang, reference_answer, target_labels, created_at}` | `reference_answer` never leaves the service before a submission — `WritingPracticeItemDto` has no field for it |
+| `WritingPracticeItemDto` | `{practiceItemId, taskType, level, examType, topic, promptText, sourceLang, targetLang, targetLabels[], createdAt}` | deliberately missing `referenceAnswer` |
+| `SuggestNextSentenceRequest` | `{practiceItemId, draftText?}` | blank `draftText` = help me start |
+| `WritingSuggestion` | `{ideaVi, structureHint, usefulPhrases[]}` | Vietnamese idea + English scaffolding, never a complete sentence; empty array on any LLM/parse failure |
+| `WritingGrade` (in-memory) | `{criteria, correctedText, errors[], feedbackVi}` | **no overall score** by design — the caller computes it, since the LLM's own figure routinely contradicts the criteria it just scored |
+| `WritingCriteriaScores` | `{grammar, vocabulary, coherence, accuracy?, taskResponse?}` | each clamped to `[0,1]`; only the fourth criterion matching the task type is populated (`accuracy` for TRANSLATE_*, `taskResponse` for COMPOSE), the other stays null; a criterion the LLM omitted scores 0 + `log.warn` |
+| `WritingErrorItem` | `{wrong, corrected, label, category, explanationVi, severity}` | `label` is a short reusable weakness name ("past perfect", "collocation: make/do"), `category` is exactly `grammar` or `vocabulary`; anything else is dropped from routing (still stored and shown) |
+| `writing_attempts` row | `{id, practice_item_id, user_id, submitted_text, corrected_text, overall_score, criteria, errors, feedback, created_at}` | `criteria`/`errors` stored as JSON so history is read back rather than re-graded — grading is LLM-backed and must not re-run just to view a past attempt |
+| `PracticeAttemptRequest` (per error) | `{itemId: "grammar:past perfect" \| "vocab:collocation: make/do", category, label, correct: false}` | the prefixes are the **existing** per-domain ones, NOT the category names — `vocabulary`'s rows are keyed `"vocab:"`, so deriving the prefix from `category` would fork the learner's history into a parallel set of rows |
+| `writing_library_topics` row | `{id, taxonomy, code, name, description, level, sequence_order, created_at}` | `UNIQUE(taxonomy, code)` and `UNIQUE(taxonomy, sequence_order)` — `sequence_order` restarts at 1 per axis, which is what makes the three progressions independent |
+| `writing_library_prompts` row | `{id, topic_id, task_type, prompt_text, reference_answer, min_words, explanation, created_at}` | generated lazily the first time a learner reaches that chain position, then persisted so it stays stable |
+| `writing_topic_progress` row | `{id, user_id, topic_id, status, unlocked_at, passed_at, updated_at}` | same shape as `listening_topic_progress`; the axis is reached through `topic_id`, so no extra column |
+| `writing_library_attempts` row | `{id, user_id, prompt_id, submitted_text, corrected_text, score, criteria, errors, feedback, started_at, completed_at}` | same grader-output columns as `writing_attempts`, so one FE result panel renders both tabs and the retry action reads either source |
+| `SubmitWritingLibraryAnswerResponse` | `WritingAttemptResult` + `{passed, passedPromptCount, targetPromptCount, topicPassed, nextTopicId, nextTopicUnlocked}` | a strict superset, so the FE maps it down onto the learn tab's shape for rendering |
+
+### Where writing data comes from / can go next
+
+- **Nothing new enters from Kafka.** Both entry points are learner-initiated REST calls; the only
+  upstream data this skill reads is the learner's own existing `grammar_weak_points`/
+  `vocabulary_weak_points` (to aim the generated task) — i.e. output of the pipeline documented above
+  becomes input here.
+- **Nothing new leaves via Kafka either.** The single outbound effect is the in-process
+  `PracticeService#redo` call, which reuses `practice`'s existing
+  `learning.gap.analysis.requested` producer. There is no `writing.analyzed` topic and no
+  `"writing"` case in `WeakPointDispatcher`.
+- `LearningCategories.WRITING` (`"writing"`) exists but is **not** used as a weak-point category — it
+  marks the skill itself (recommendation exercise templates, FE routing). `ExerciseTemplates` in
+  `recommendation-service` gained a `"writing"` entry (and a `"listening"` one, previously missing and
+  falling through to the generic default).
+- Both tabs share `WritingGrader` and `WritingErrorPipeline`, so scoring and weak-point routing cannot
+  drift between "học thường" and "Thư viện".
+
 ## Data shape at each stage
 
 | Stage | Format | Notes |
@@ -616,7 +801,9 @@ flowchart TD
 | `GrammarType` | enum `TENSE, SUBJECT_VERB_AGREEMENT, ARTICLE, PREPOSITION, WORD_ORDER, PLURAL, PUNCTUATION, OTHER` | assigned by `GrammarClassifier` |
 | `pronunciation_weak_points` row | `{id, recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation, mastery_level, next_review_at, score_source, updated_at}` | upserted on `(user_id, item_id)`, same shape/guard as vocabulary's table |
 | `PronunciationType` | enum `VOWEL, CONSONANT, STRESS, INTONATION, LINKING, RHYTHM, OTHER` | assigned by `PronunciationClassifier` |
-| `PracticeRedoRequest` | `{userId, attempts: [{itemId, category, label, correct}]}` | REST request body, not an event |
+| `listening_weak_points` row | `{id, recording_id, user_id, item_id, label, source_type, forgetting_score, recommendation, mastery_level, next_review_at, score_source, updated_at}` | upserted on `(user_id, item_id)`, same guard shape as the other three tables; `source_type` replaces the domain-classifier-derived type column the other three have, since listening has no rule-based/LLM classifier — it's set directly by whichever path wrote the row |
+| `ListeningSourceType` | enum `DICTATION, COMPREHENSION` | `DICTATION` = hard-coded by the Kafka consumer (only ever sees dictation's dual-write for this category); `COMPREHENSION` = hard-coded by `WeakPointDispatcherImpl`'s `"listening"` case (only ever sees the practice/redo Java engine for this category) — no classifier involved either way |
+| `PracticeRedoRequest` | `{userId, attempts: [{itemId, category, label, correct}]}` | REST request body, not an event — `category` may now be `"listening"` too |
 | `practice_attempts` row | `{id, user_id, item_id, category, label, is_correct, attempted_at}` | audit-log insert only, never read back by the scoring pipeline |
 | `mistake_history` row | `{id, user_id, item_id, category, label, occurrence_count, last_seen_at, updated_at, ease_factor, half_life_days, mastery, leitner_box, next_review_at, last_weak_score, label_key}` | upserted on `(user_id, item_id)`; `occurrence_count`/`last_seen_at` seeded/updated as before, the scoring-state columns are read (locked via `FOR UPDATE`) then updated by `WeakPointScoringOrchestrator` around each redo attempt |
 | `item_difficulty_stats` row | `{category, label_key, correct_count, incorrect_count, updated_at}` | population-level (cross-user) aggregate, keyed `(category, label_key)` — feeds `RaschDifficultyEstimator`'s item-difficulty weight; `label_key` is `LabelKeys.normalize(label)` (trim/collapse-whitespace/lowercase), used because `item_id` isn't a verified cross-user-shared identifier in this system |
@@ -639,9 +826,11 @@ flowchart TD
 | `GenerateAiPracticeRequest` (rev 7) | `{level?, examType?, translationLang?}` | REST request body for `AiGen`; `level`/`examType` each accept a concrete value, the literal `"RANDOM"` (server resolves it - level from `A1,A2,B1,B2,C1`, examType from the library's own distinct exam types, falling back to `TOEIC,IELTS,TOEFL,General`), or unset (no preference, LLM's own default) |
 | `DictationPracticeItemDetailDto` (rev 6, taxonomy+translation rev 7) | `{practiceItemId, audioUrl, scriptText, level?, examType?, topic?, sentences: [{index, text, startMs: null, endMs: null, translation?}]}` | REST response for `GetAiPracticeDetail`; `sentences` split in-memory from `sentence_text`/`translation_text` in parallel (one per dialogue line, or by sentence-ending punctuation for a monologue) - mirrors `DictationClipDetailDto` but timings are always null since the passage is one merged audio file |
 | `DictationAttemptResultDto` | `{referenceText, accuracy, wer, diff[], errorTable: [{original, transcribed, category: LEXICON\|GRAMMAR\|PHONOLOGY, note?}], rootCauses: [{category, summary, examples[]}], actionAdvice[], practiceSentences[]}` | REST grading response; `rootCauses` only lists categories that actually occurred; only point `script_text` is exposed |
-| published `learning.gap.analyzed` | `{recording_id: "dictation-clip-<id>", user_id, weak_points: [{item_id: "dictation:<word>", category: vocabulary\|grammar\|pronunciation, label, forgetting_score, recommendation: actionAdvice[0]}]}` | **category is per-word, not always `"vocabulary"`**: `toLearningCategory` maps each missed word's `errorTable` root-cause (`LEXICON`/`GRAMMAR`/`PHONOLOGY`) to `vocabulary`/`grammar`/`pronunciation`; a word with no `errorTable` entry (e.g. a sentence-mode-retry miss, which never goes through `DictationAnalyzer`) defaults to `vocabulary`; dictation misses fed into the existing recommendation pipeline this way |
+| published `learning.gap.analyzed` | `{recording_id: "dictation-clip-<id>", user_id, weak_points: [{item_id: "dictation:<word>", category: vocabulary\|grammar\|pronunciation, label, forgetting_score, recommendation: actionAdvice[0]}, {item_id: "dictation:<word>", category: "listening", label, forgetting_score, recommendation: actionAdvice[0]}, ...]}` | **category is per-word, not always `"vocabulary"`**: `toLearningCategory` maps each missed word's `errorTable` root-cause (`LEXICON`/`GRAMMAR`/`PHONOLOGY`) to `vocabulary`/`grammar`/`pronunciation`; a word with no `errorTable` entry (e.g. a sentence-mode-retry miss, which never goes through `DictationAnalyzer`) defaults to `vocabulary`; **dual-write**: every missed word ALSO gets a second payload, category `"listening"`, same `item_id`/`label`/`forgetting_score`/`recommendation`, appended to the SAME `weak_points` array (one `publish()` call, not two) — since a dictation attempt is itself a listening exercise regardless of what root-caused the specific miss; dictation misses fed into the existing recommendation pipeline this way |
 | `DictationHistoryEntryDto.practiceType` | `LIBRARY \| AI_PRACTICE` | derived in Java from `clipId` being present/null - not a DB column - so the FE can badge each history row |
 | `GenerateVocabPracticeRequest` / `GenerateGrammarPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body; `focusItems` (explicit words/rules from a "Luyện ngay" deep-link) wins over the learner's own weak points |
+| `StartPracticeSessionRequest` (practice.session) | `{userId, exerciseCount?}` | REST request body for `POST /practice/sessions`; `exerciseCount` defaults to 4 (clamped 1..8). The service ranks categories by their top `forgettingScore`, then for each slot calls the owning domain's `generate(...)` with `focusItems = that category's top weak-point labels` (listening: empty focus → self-fallback) — reusing the exact `GenerateVocab/Grammar/Listening/SpeakingPracticeRequest` shapes above, no new generator |
+| `PracticeSession` / `PracticeSessionExercise` (practice.session) | `{sessionId, status, totalExercises, exercises: [{order, category, practiceItemId, topic, status, score}], createdAt, completedAt}` | REST response; each exercise is a **reference** (`practiceItemId` into the domain's own `*_practice_items` bank, no physical FK) — the FE fetches full item detail via the domain's existing `getItem`, runs its existing runner, and grades via the domain's existing `submit` (which feeds weak points through `PracticeService.redo`). `POST /practice/sessions/{id}/exercises/{order}/complete {score}` only records progress; the session flips to `COMPLETED` once no slot is `PENDING` |
 | `vocab_practice_items` / `grammar_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_words\|target_rules (JSON string[]), items (JSON `VocabQuestionItem[]`\|`GrammarQuestionItem[]`), created_at}` | one row per generated set; `items` holds the full graded content (prompt/type/options/answer/translation), now surfaced on `getItem`/`listItems` too (see `VocabQuestionDto`/`GrammarQuestionDto` below) |
 | `VocabQuestionItem` | `{targetWord, type: CLOZE\|MCQ\|MATCHING, prompt, options?, answer, translation}` | `options` null for `CLOZE`; JSON element of `vocab_practice_items.items` |
 | `GrammarQuestionItem` | `{targetRule, type: ERROR_CORRECTION\|FILL_TENSE\|TRANSFORM\|MCQ, prompt, options?, answer, translation, translationVi}` | `options` only for `MCQ`; JSON element of `grammar_practice_items.items`. `translationVi` is a plain Vietnamese meaning-translation of `answer`, distinct from `translation` (a grammar-rule explanation) - grammar-only, `VocabQuestionItem` has no equivalent |
@@ -662,7 +851,7 @@ flowchart TD
 | `OpenAnswerGrade` (in-memory) | `{score: 0..1, feedback}` | `OpenAnswerGrader` (LLM) output for `OPEN` questions only; `MCQ`/`KEYWORD` are scored by the pure `ListeningQuestionScoring.scoreClosed` instead |
 | `listening_attempts` row | `{id, practice_item_id, user_id, answers (JSON string[]), results (JSON `ListeningAttemptQuestionResultDto[]`), score, created_at}` | `score` = mean of all `subScore`s (each question's own 0..1); each result now also carries the question's `type` (`MCQ`\|`KEYWORD`\|`OPEN`), added so `ListeningMistakeAnalyzer.extractMissedTopics` can tell OPEN questions apart from KEYWORD/MCQ (`null` for attempts persisted before this field existed) |
 | `ListeningAttemptResultDto` | `{accuracy, results: [{index, prompt, yourAnswer, correctAnswer, correct, subScore, explanation}], transcript, translation?, actionAdvice[]}` | REST grading response; `transcript`/`translation` returned **only** on this response, not on `getItem`/`listItems` (those would leak the passage; note the per-question `answer`/`explanation` themselves are now on `getItem`/`listItems` for client-side grading, `answer` null for `OPEN`) |
-| `PracticeAttemptRequest` fed from listening learn | `{itemId: "listening:<label>", category: "listening", label, correct}` | one per distinct label (KEYWORD's `answer`, or MCQ/OPEN's `skill`); **`category = "listening"` has no matching consumer in `WeakPointDispatcherImpl`** - `mistake_history`/`item_difficulty_stats`/the review queue and `learning.gap.analysis.requested`'s `history[]` still pick it up (all category-agnostic), but no `listening_weak_points` table exists and the Java-computed score for it is simply logged and dropped - see the note below |
+| `PracticeAttemptRequest` fed from listening learn | `{itemId: "listening:<label>", category: "listening", label, correct}` | one per distinct label (KEYWORD's `answer`, or MCQ/OPEN's `skill`); `category = "listening"` now routes through `WeakPointDispatcherImpl`'s `"listening"` case into `listening_weak_points` (`sourceType = COMPREHENSION`) - `mistake_history`/`item_difficulty_stats`/the review queue and `learning.gap.analysis.requested`'s `history[]` also still pick it up as before (all category-agnostic) |
 | `ListeningMistakeAnalyzer.extractMissedTopics` output (in-memory) | `List<String>` distinct `correctAnswer` values | pure function over an attempt's persisted `resultsJson` (`ListeningAttemptQuestionResultDto[]`, already graded - not re-scored); `resultsJson` carries no per-question topic/skill tag of its own (only `prompt`/`correctAnswer`/`explanation`), so each wrong question's own `correctAnswer` is used as the retry target text (the missed keyword itself for `KEYWORD`, the correct option/model answer for `MCQ`/`OPEN`); feeds straight into `ListeningPracticeGenerator.generate(missedTopics, level, examType, translationLang=null)` for `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` |
 | `listening_library_attempt_answers` row | `{id, attempt_id, question_id, selected_option, correct_option, is_correct, created_at}` | one row per submitted answer within a `listening_library_attempts` row (Task 1), so a later feature can regenerate AI practice targeting only the questions actually missed - mirrors dictation's mistake-history pattern |
 | `ListeningMistakeAnalyzer.hasAnyMissedQuestion` output (in-memory) | `boolean` | pure function over a Listening Library section's most recent attempt's `listening_library_attempt_answers` rows; library questions carry no explicit topic tag of their own and a Section is already scoped to one topic, so there is no per-question topic to diff out - this only answers whether the attempt had any mistake. When `true`, the call site (`ListeningLibraryServiceImpl.generatePracticeFromSection`) builds the target-keywords list itself as `List.of(topic.getName())` (the section's owning topic name) and feeds that into `ListeningPracticeGenerator.generate(...)` via `ListeningLearnService.generatePracticeForKeywords`; when `false` (or no completed attempt exists), generation is skipped entirely and an empty list is returned |
@@ -719,7 +908,7 @@ flowchart TD
 | `SubmitListeningAnswersResponse` (REST) | `{score, correctCount, totalQuestions, topicPassed, nextTopicId?, nextTopicUnlocked, questionResults: {questionId, questionText, options, selectedOption, correctOption, isCorrect}[]}` | `POST .../sections/{sectionId}/answers` response; `topicPassed = score >= 0.7` **for this Section only**; `nextTopicId`/`nextTopicUnlocked` only populated once the learner has passed **every** Section in the topic's chain (`hasPassedAllSections`), not just this one; `questionResults` gives the FE a full đúng/sai review list, not just the aggregate score |
 | `ListeningLibraryAttempt` (REST, history) | `{id, userId, sectionId, score, correctCount, totalQuestions, startedAt, completedAt}` | `GET .../{userId}/sections/history` response; the domain row is returned directly, unlike `GrammarLibraryHistoryEntryDto` which is a dedicated DTO - no separate history-view type exists for listening library today |
 | `ListeningHistoryEntryDto` (REST, new) | `{source: "LEARN"\|"LIBRARY", attemptOrSessionId, completedAt?, score?, sectionId?, topicId?}` | `GET /api/v1/learn/listening/merged-history/{userId}` response - normalizes `ListeningAttemptHistoryEntryDto` (learn) and the raw `ListeningLibraryAttempt` (library) into one shape, built by a new standalone `ListeningHistoryServiceImpl` for the same circular-dependency-avoidance reason as `GrammarHistoryServiceImpl`. `sectionId`/`topicId` only populated for `LIBRARY` rows; `topicId` is resolved from `sectionId` via `ListeningLibraryService#resolveTopicId(sectionId)` (a section row already carries its owning `topicId` - see `ListeningLibrarySection`) so the FE's "Làm lại" button can deep-link straight to the owning topic instead of just switching to the library tab |
-| listening library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | unlike every other "library"/"learn" skill, scoring here writes only to `listening_library_attempts`/`listening_topic_progress` - it does not reach the weak-point/spaced-repetition pipeline at all (consistent with the pre-existing gap that category `listening` has no dedicated weak-point table anywhere in the service, see the `PracticeAttemptRequest fed from listening learn` row above) |
+| listening library has no `PracticeAttemptRequest`/`PracticeService.redo(...)` feed | — | unlike every other "library"/"learn" skill, scoring here writes only to `listening_library_attempts`/`listening_topic_progress` - it does not reach the weak-point/spaced-repetition pipeline at all; this is a deliberate scope cut for the library flow specifically, not a gap in `listening_weak_points` itself (which does exist now, fed by listening **learn**'s redo attempts and by dictation's dual-write - see the `PracticeAttemptRequest fed from listening learn` row above) |
 | `speaking_library_topics` row | `{id, code, name, description?, level, sequence_order, created_at}` | fixed, hand-seeded catalog (`V20__speaking_library.sql`, same topic set/order as `grammar_library_topics`/`listening_library_topics`), never generated/topped up at runtime |
 | `GeneratedSpeakingLibrarySection` (LLM JSON) | `{sentences: [{text, ipa}] (5 items)}` | `LlmSpeakingLibraryGenerator.generateSection` output; same "no static-template fallback" behavior as `GeneratedListeningLibrarySection` - any call/parse failure or empty `sentences` throws `AiContentException`, so a failed generation simply produces no Section |
 | `speaking_library_sections` row | `{id, topic_id, created_at}` | one row per generated Section, inserted **before** its sentences (it carries no content columns of its own, unlike `listening_library_sections`) |
@@ -881,20 +1070,21 @@ flowchart TD
   leak). The authoritative score is still produced only by the submit-attempt endpoint - the in-memory
   scorers, `PracticeService.redo`, and the Kafka flow above are unchanged; client-side grading is
   display-only.
-- **`category = "listening"` is new and has no dedicated weak-point table.** Unlike `vocabulary`/
-  `grammar`/`pronunciation` (each backed by its own `*_weak_points` table and Kafka consumer),
-  `LearningCategories.LISTENING` (`RemeLearning/common/.../constants/LearningCategories.java`) has no
-  matching branch in `WeakPointDispatcherImpl.dispatch` - a `listening` attempt still updates
-  `mistake_history`/`item_difficulty_stats` (category-agnostic) and still surfaces in the learner's
-  `mistake_history`-driven review queue and in `learning.gap.analysis.requested`'s `history[]`, but the
-  Java-computed weak score itself is discarded (`log.warn("Unknown category ...")`), and `dictation`'s
-  `learning.gap.analyzed` republish / ai-service's original forgetting pipeline never emit `"listening"`
-  either, so **no Kafka consumer anywhere persists a `listening` weak point today**. Per
-  `V14__listening_practice.sql`'s own migration comment, target-word/keyword selection for regenerating
-  listening practice is instead read straight from this service's own `listening_attempts`/
-  `listening_practice_items` history (`ListeningLearnServiceImpl.resolveTargetKeywords`), the same way
-  `dictation` mines its own miss table rather than a shared weak-point table. If a `listening_weak_points`
-  table is ever added, `WeakPointDispatcherImpl` would need a new `"listening"` case wired to it.
+- **`category = "listening"` is now the fourth weak-point domain (previously a gap, now fixed).**
+  `LearningCategories.LISTENING` (`RemeLearning/common/.../constants/LearningCategories.java`) now has
+  a matching branch in `WeakPointDispatcherImpl.dispatch` (`case "listening" ->
+  listeningWeakPointService.applyJavaComputedScore(update)`), backed by a new `listening_weak_points`
+  table and its own `LearningGapAnalyzedConsumer` (package `listening.weakpoint`, `groupId
+  english-service-listening`). Unlike `vocabulary`/`grammar`/`pronunciation`, this domain has **no
+  classifier** - instead of a rule-based/LLM type, each row carries `source_type`
+  (`DICTATION`/`COMPREHENSION`) telling apart its two producers: the Kafka consumer hard-codes
+  `DICTATION` (this topic only ever carries dictation's dual-write for this category, see below), and
+  `WeakPointDispatcherImpl`'s case hard-codes `COMPREHENSION` (only the practice/redo flow reaches it).
+  Per `V14__listening_practice.sql`'s own migration comment, target-word/keyword selection for
+  regenerating listening **practice content** is still read straight from this service's own
+  `listening_attempts`/`listening_practice_items` history
+  (`ListeningLearnServiceImpl.resolveTargetKeywords`), unrelated to `listening_weak_points` (which
+  feeds the weak-points UI/aggregation, not practice-content generation).
 - **New: `vocabulary.library` (topic word bank + Leitner-lite Section practice), extending
   `VocabLearnFlow` above.** Three transformations distinct from call order (see
   [../sequence/English_service/vocabulary-library.md](../sequence/English_service/vocabulary-library.md)
@@ -929,16 +1119,23 @@ flowchart TD
   `PracticeAttemptRequest`, so a word drilled three times in one Section produces three requests
   batched into the same `redo` call, letting `WeakPointScoringEngine`'s same-batch recurrence boost
   see the in-session repetition the whole Section design exists to create.
-- **Dictation's published `learning.gap.analyzed` no longer always uses category `"vocabulary"`.**
-  `DictationServiceImpl.publishWeakPoints`/`toLearningCategory` now map each missed word's
-  `DictationAnalyzer`-assigned root cause - `LEXICON`/`GRAMMAR`/`PHONOLOGY` (the same `errorTable`
-  categories `DictationAttemptResultDto` returns) - onto `LearningCategories.VOCABULARY`/`GRAMMAR`/
-  `PRONUNCIATION` respectively, so a dictation session's misses now fan out across all three existing
-  domain consumers/tables instead of only ever landing in `vocabulary_weak_points`. A word with no
-  `errorTable` entry (only possible for a sentence-mode-retry miss, scored via `ScoreSentenceMistakes`
-  rather than `DictationAnalyzer`) still defaults to `vocabulary`, preserving the old behavior for that
-  one case. This is a pure category-routing change - the published event's shape, the
-  `learning.gap.analyzed` topic, and the downstream consumer fan-out are otherwise unchanged.
+- **Dictation's published `learning.gap.analyzed` no longer always uses category `"vocabulary"`, and
+  now dual-writes a `"listening"` payload per word too.** `DictationServiceImpl.publishWeakPoints`/
+  `toLearningCategory` map each missed word's `DictationAnalyzer`-assigned root cause -
+  `LEXICON`/`GRAMMAR`/`PHONOLOGY` (the same `errorTable` categories `DictationAttemptResultDto`
+  returns) - onto `LearningCategories.VOCABULARY`/`GRAMMAR`/`PRONUNCIATION` respectively, so a
+  dictation session's misses fan out across all three existing domain consumers/tables instead of
+  only ever landing in `vocabulary_weak_points`. A word with no `errorTable` entry (only possible for
+  a sentence-mode-retry miss, scored via `ScoreSentenceMistakes` rather than `DictationAnalyzer`) still
+  defaults to `vocabulary`, preserving the old behavior for that one case. **On top of that root-cause
+  payload, every missed word ALSO gets a second `WeakPointPayload`** with `category = "listening"`
+  (same `itemId`/`label`/`forgettingScore`/`recommendation`), appended to the same `weakPoints` list
+  and published in the same event (one `publish()` call per attempt, not two) - reasoning: a dictation
+  attempt is itself a listening exercise, so every miss should count toward the "listening" weak-point
+  domain regardless of whether it root-caused to vocabulary/grammar/pronunciation. The published
+  event's overall shape, the `learning.gap.analyzed` topic, and the downstream consumer fan-out for the
+  three original categories are otherwise unchanged; `listening.weakpoint`'s own consumer is simply a
+  new fourth reader of the same event.
 - **ai-service's pronunciation-scoring stage (`app/pronunciation/`), consumed by `SpeakingLearnFlow`
   above.** Mirrors the style of ai-service's own STT/forgetting-score pipeline documented in
   [ai-service-data-flow.md](ai-service-data-flow.md), but that file does not yet cover this new

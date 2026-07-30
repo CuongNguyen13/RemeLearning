@@ -38,13 +38,16 @@ flowchart TD
         VocabCall["GET english-service /vocabulary/weak-points/{userId}<br/>-> List[VocabularyWeakPoint]"]
         GrammarCall["GET english-service /grammar/weak-points/{userId}<br/>-> List[GrammarWeakPoint]"]
         PronCall["GET english-service /pronunciation/weak-points/{userId}<br/>-> List[PronunciationWeakPoint]"]
+        ListenCall["GET english-service /listening/weak-points/{userId}<br/>-> List[ListeningWeakPoint]"]
         StampVocab["map -> WeakPointDto, category='vocabulary'"]
         StampGrammar["map -> WeakPointDto, category='grammar'"]
         StampPron["map -> WeakPointDto, category='pronunciation'"]
+        StampListen["map -> WeakPointDto, category='listening'<br/>(sourceType binds automatically - same field name both sides)"]
         VocabFallback{"error?"}
         GrammarFallback{"error?"}
         PronFallback{"error?"}
-        ZipWeakPoints["Mono.zip -> Map{vocabulary: [...],<br/>grammar: [...], pronunciation: [...]}"]
+        ListenFallback{"error?"}
+        ZipWeakPoints["Mono.zip -> Map{vocabulary: [...],<br/>grammar: [...], pronunciation: [...], listening: [...]}"]
     end
 
     subgraph Auth["POST /api/v1/auth/register, /login + GET/PATCH /api/v1/users/{userId}"]
@@ -89,6 +92,9 @@ flowchart TD
     PronCall --> StampPron --> PronFallback
     PronFallback -->|yes| ZipWeakPoints
     PronFallback -->|no| ZipWeakPoints
+    ListenCall --> StampListen --> ListenFallback
+    ListenFallback -->|yes| ZipWeakPoints
+    ListenFallback -->|no| ZipWeakPoints
 
     RecoCall --> RecoPassthrough
 
@@ -114,9 +120,10 @@ flowchart TD
 | `UserDto` | `{userId, email, name, role, createdAt}` | 1:1 with user-service's `UserResponse`, unwrapped from `ApiResponse.data`; defaulted to `null` on downstream error (wrapped in `Optional` internally so `Mono.zip` still has a value to zip) |
 | `AuthResponseDto` | `{token, user: UserDto}` | 1:1 with user-service's `AuthResponse`; passed straight through with no bff-side transformation |
 | `LearnerOverviewResponse` | `{userId, categoryProgress, recentRecommendations, recentRecordings, user}` | merge of `DashboardSummaryDto`'s two lists + `RecordingDto[]` + `UserDto` |
-| `WeakPointDto` | `{itemId, label, category, forgettingScore, recommendation}` | deserialized from each domain's own weak-point JSON (extra fields like `vocabularyType`/`id`/`recordingId` are ignored); `category` is not in the source JSON - `EnglishServiceClient` stamps it itself per endpoint called |
-| Weak points merged map | `Map<String, List<WeakPointDto>>` keyed `"vocabulary"/"grammar"/"pronunciation"` | any category whose upstream call failed is present as `[]`, not omitted |
+| `WeakPointDto` | `{itemId, label, category, forgettingScore, recommendation, sourceType}` | deserialized from each domain's own weak-point JSON (extra fields like `vocabularyType`/`id`/`recordingId` are ignored); `category` is not in the source JSON - `EnglishServiceClient` stamps it itself per endpoint called; `sourceType` (`DICTATION`/`COMPREHENSION`) is the one exception - it binds automatically via Jackson since english-service's `listening` JSON already names the field `sourceType`, and stays `null` for the other three categories |
+| Weak points merged map | `Map<String, List<WeakPointDto>>` keyed `"vocabulary"/"grammar"/"pronunciation"/"listening"` | any category whose upstream call failed is present as `[]`, not omitted |
 | `RecommendationDto` | `{itemId, category, label, forgettingScore, recommendationText, updatedAt}` | 1:1 with recommendation-service's `Recommendation`; passed straight through with no bff-side transformation |
+| `PracticeSessionDto` / `PracticeSessionExerciseDto` | `{sessionId, status, totalExercises, exercises: [{order, category, practiceItemId, topic, status, score}], createdAt, completedAt}` | 1:1 pass-through of english-service's `practice.session` DTO for the four `/practice/sessions[...]` proxy routes; `userId` is stamped from the path into the start-request body, otherwise no bff-side transformation. Each exercise is a reference (`practiceItemId`) the FE resolves via the existing `/learn/*` item + submit routes |
 | `ListeningLibraryTopicDto` / `SpeakingLibraryTopicDto` | `{id, name, level, status}` | 1:1 with english-service's own topic DTO; `status` is a flat `String` (`LOCKED`/`UNLOCKED`/`IN_PROGRESS`/`PASSED`), passed straight through with no bff-side transformation |
 | `ListeningLibrarySectionDto` / `SpeakingLibrarySectionDto` | listening: `{sectionId, passageText, audioUrl, questions: [{questionId, questionText, options}]}`; speaking: `{sectionId, sentences: [{sentenceId, sentenceText, ipa, sampleAudioUrl}]}` | 1:1 with english-service's own section DTO; answers/correct options are never included (withheld server-side) |
 | `SubmitListeningAnswersResponse` / `FinishSpeakingSectionResponse` | `{..., topicPassed/passed, nextTopicId, nextTopicUnlocked, questionResults?}` | 1:1 pass-through of the scoring result; `nextTopicId`/`nextTopicUnlocked` are only populated when the topic was just passed; listening's `questionResults` carries the per-question đúng/sai breakdown |
@@ -142,3 +149,22 @@ flowchart TD
 - The speaking-library sentence-attempt upload follows the exact same multipart-streaming shape as
   the upload proxy above: `FilePart.content()` is re-published via `MultipartBodyBuilder.asyncPart`
   straight to english-service, never buffered fully in bff-service memory.
+
+## Writing & translation proxy (`/api/v1/learners/{userId}/learn/writing/...`)
+
+12 pure pass-through routes to `english-service`'s `writing`/`writing.library` packages - no
+aggregation, no fan-out, no transformation beyond the `ApiResponse<T>` unwrap every other proxy route
+does. Two details worth recording because they are behaviour, not plumbing:
+
+- `POST .../learn/writing/attempts` **overwrites** `userId` on the request body with the path
+  variable before forwarding, so a client cannot submit on another learner's behalf. Same convention
+  as the vocabulary/grammar/listening attempt proxies.
+- There is deliberately **no** `/learn/writing/weak-points` route. Writing mistakes are stored as
+  `grammar`/`vocabulary` weak points by english-service, so they already appear in the existing
+  `GET /api/v1/learners/{userId}/weak-points` fan-out (4 downstream endpoints) - adding a fifth would
+  double-count them.
+
+DTO shapes mirror english-service 1-1 (`WritingPracticeItemDto`, `WritingAttemptResultDto`,
+`WritingCriteriaScoresDto`, `WritingErrorDto`, `WritingSuggestionDto`, `WritingLibraryTopicDto`,
+`WritingLibraryPromptDto`, `SubmitWritingLibraryAnswerResponseDto`, ...) as their own classes in
+`com.remelearning.bff.dto`; `taskType`/`taxonomy` stay `String` here rather than mirroring the enums.

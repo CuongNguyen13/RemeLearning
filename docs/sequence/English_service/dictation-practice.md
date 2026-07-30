@@ -3,7 +3,12 @@
 Covers the redesigned `dictation` package (`com.remelearning.english.dictation`), a fifth package in
 english-service's modular monolith. It isn't Kafka-driven for its request flow — it's triggered
 directly by the FE via bff-service — but the grading flow now **publishes** `learning.gap.analyzed`
-so the existing recommendation pipeline turns dictation misses into study suggestions.
+so the existing recommendation pipeline turns dictation misses into study suggestions. **Dual-write:**
+since a dictation attempt is itself a listening exercise, every missed word now also publishes a
+second `WeakPointPayload` under `category="listening"` (same `itemId`/`label`/`forgettingScore`/
+`recommendation` as its root-cause payload), added to the SAME `weakPoints` list in the same event —
+not a second `publish()` call — so `listening.weakpoint`'s own consumer picks it up alongside
+whichever of vocabulary/grammar/pronunciation the mistake root-caused to (section 1 below).
 
 Two sections share one grading flow:
 
@@ -111,15 +116,22 @@ sequenceDiagram
         end
         An-->>Svc: {errorTable[], rootCauses[], actionAdvice[], practiceSentences[]} (rule-based heuristic on any failure)
         Svc->>DMapper: insertPracticeItem(each practice sentence, source="attempt")
-        Svc->>Pub: publish(recordingId, userId, weakPoints[word->vocabulary], recommendation=actionAdvice[0])
-        Pub->>Kafka: learning.gap.analyzed (snake_case via EventCodec)
+        Svc->>Svc: build 2 WeakPointPayload per missed word: root-cause category<br/>(vocabulary/grammar/pronunciation, via errorTable) + a second one,<br/>same itemId/label/forgettingScore/recommendation, category="listening" (dual-write)
+        Svc->>Pub: publish(recordingId, userId, weakPoints[2 per word], recommendation=actionAdvice[0])
+        Pub->>Kafka: learning.gap.analyzed (ONE event, snake_case via EventCodec)
         Svc-->>Ctrl: DictationAttemptResultDto{referenceText, accuracy, wer, diff[], errorTable[], rootCauses[], actionAdvice[], practiceSentences[]}
     end
 ```
 
 The published `learning.gap.analyzed` is consumed by the **already-built** pipeline —
-recommendation-service (`ExerciseGenerator`), dashboard-service, english-service's own vocabulary
-consumer + `MistakeHistorySeedConsumer` — turning misses into recommendations with no new analyzer.
+recommendation-service (`ExerciseGenerator`), dashboard-service, english-service's own
+vocabulary/grammar/pronunciation consumer (whichever matches each payload's root-cause category) +
+`MistakeHistorySeedConsumer` — turning misses into recommendations with no new analyzer. The
+dual-written `category="listening"` payload is additionally picked up by
+english-service's own `listening.weakpoint` consumer (see
+[english-learning-gap-analyzed-listening.md](english-learning-gap-analyzed-listening.md)), so every
+dictation miss now also counts toward the "listening" weak-point domain, on top of whichever
+vocabulary/grammar/pronunciation category it root-caused to.
 
 ## 2. "Luyện nghe với AI": generate a dialogue passage + synthesize (`POST /dictation/ai-practice/{userId}/generate`)
 
@@ -365,7 +377,7 @@ for the full reasoning.
 | 1 | StorageClient read/write/list | english-service -> local FS (or S3) | library clips + generated TTS audio; provider via `reme.storage.provider` |
 | 2 | HTTPS | english-service -> Gemini API | `LlmDictationDialogueGenerator` (always active for `generateAiPractice`) + `dictation.analyzer.mode=llm` (section 1/2b); both fall back to templates on any failure |
 | 3 | HTTP | english-service -> ai-service `/api/v1/tts/synthesize` | Supertonic TTS (`reme.tts.provider=supertonic`, default); one call per practice item, or one call per dialogue line for `generateAiPractice` (merged into one file by `WavAudioMerger`) |
-| 4 | Kafka produce | english-service -> `learning.gap.analyzed` | dictation misses as vocabulary weak points, feeding the recommendation pipeline |
+| 4 | Kafka produce | english-service -> `learning.gap.analyzed` | dictation misses, dual-written as two payloads per word (root-cause category vocabulary/grammar/pronunciation + a second "listening" payload), one event per attempt, feeding the recommendation pipeline |
 | 5 | Postgres | english-service -> `reme_english` | `dictation_clips`, `dictation_clip_sentences`, `dictation_attempts`, `dictation_misses`, `dictation_practice_items` |
 | 6 | HTTP (multipart) | english-service -> ai-service `/api/v1/dictation/align-sentences` | `SentenceAlignmentClient` (`reme.alignment.ai-service.*`); lazy, triggered from `getClipDetail` only when a sentence is still missing `startMs`/`endMs`; read-timeout defaults to 120s since it transcribes the whole clip synchronously |
 | 7 | Postgres | english-service -> `reme_english` | `dictation_attempts.ai_suggestions` (JSON-encoded `DictationAnalysis` - errorTable/rootCauses/actionAdvice/practiceSentences; column name predates this shape) written by section 1, read back by section 4 |

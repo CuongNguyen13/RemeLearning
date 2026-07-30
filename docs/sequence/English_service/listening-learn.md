@@ -225,18 +225,17 @@ sections (no per-section filter existed to begin with), so no new mapper query w
   in addition to the generate-time Gemini call - vocabulary/grammar/speaking only call Gemini during
   generate.
 - `resolveTargetKeywords`'s fallback (recently-missed KEYWORD answers) is a query over this package's
-  own `listening_practice_items` rows, not a weak-point table - listening has no dedicated
-  weak-point table today (confirmed by the lack of a `listening_weak_points`-shaped migration/mapper).
-- **Confirmed gap, not a diagramming guess:** `WeakPointDispatcherImpl.dispatch` (the component
-  `WeakPointScoringOrchestrator` calls to persist a Java-computed score into the owning domain's
-  weak-point table) only has `switch` cases for `"vocabulary"`/`"grammar"`/`"pronunciation"` -
-  `"listening"` falls through to `default -> log.warn("Unknown category ...")` and is silently
-  dropped. So a listening attempt's `mistake_history` row and the bundled
-  `learning.gap.analysis.requested` re-publish still happen (both are category-agnostic), but no
-  `listening_weak_points`-shaped table gets written directly the way `vocabulary_weak_points`/
-  `grammar_weak_points`/`pronunciation_weak_points` do for their own categories - there is no such
-  table today. The diagram above still shows the `redo`/dispatch call since it executes; it just
-  doesn't result in a persisted weak-point row for this category.
+  own `listening_practice_items` rows, not a weak-point table - unrelated to the `listening_weak_points`
+  table in the new `listening.weakpoint` package below, which is read by the weak-points UI, not by
+  this generator.
+- **Gap fixed (previously noted here):** `WeakPointDispatcherImpl.dispatch` now has a `case
+  "listening" -> listeningWeakPointService.applyJavaComputedScore(update)`, so a listening redo attempt
+  (this package's `submit`) upserts into `listening_weak_points` with `sourceType = COMPREHENSION`,
+  `scoreSource = JAVA_ENGINE`, the same as `vocabulary_weak_points`/`grammar_weak_points`/
+  `pronunciation_weak_points` do for their own categories. See
+  [english-get-listening-weak-points.md](english-get-listening-weak-points.md) and
+  [english-learning-gap-analyzed-listening.md](english-learning-gap-analyzed-listening.md) (the
+  Kafka-side sibling flow, sourced from dictation's dual-write instead, `sourceType = DICTATION`).
 - `generatePracticeForKeywords` (section 3) is the shared generate-and-persist step both
   `generatePracticeFromAttempt` and Listening Library's own `generatePracticeFromSection` delegate
   to (see `listening-library.md` section 3) - there is only one AI-practice destination

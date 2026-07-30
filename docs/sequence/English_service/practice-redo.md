@@ -1,19 +1,19 @@
 # Practice / redo-exercise: seed history, grade a redo, re-trigger analysis
 
 Covers the `practice` package (`com.remelearning.english.practice`), which closes the loop the other
-three domains leave open: when a learner **redoes an exercise**, the system must grade each answer,
+four domains leave open: when a learner **redoes an exercise**, the system must grade each answer,
 re-evaluate how forgotten that item is, and re-propose recommendations. This package doesn't own a
 weak-point table of its own — it maintains `mistake_history` (occurrence count + recency per item,
-across all three domains) and is the first real producer of `learning.gap.analysis.requested`
+across all four domains) and is the first real producer of `learning.gap.analysis.requested`
 (previously only a topic-name constant with no publisher — see
 [../Ai_service/overview.md](../Ai_service/overview.md) for the `handle_analysis_requested` Kafka
 handler that consumes it and runs `RuleBasedAnalyzer`).
 
 ## 1. Seeding `mistake_history` (`MistakeHistorySeedConsumer`)
 
-Runs on its own `groupId` (`english-service-practice`), same topic as the other three domain
-consumers (`english-service`, `english-service-grammar`, `english-service-pronunciation`) — see
-[overview.md](overview.md). Unlike them it does **not** filter by category (same pattern as
+Runs on its own `groupId` (`english-service-practice`), same topic as the other four domain
+consumers (`english-service`, `english-service-grammar`, `english-service-pronunciation`,
+`english-service-listening`) — see [overview.md](overview.md). Unlike them it does **not** filter by category (same pattern as
 recommendation-service/dashboard-service): every weak point, from every domain, seeds history the
 first time it's ever seen.
 
@@ -66,7 +66,7 @@ sequenceDiagram
     participant HMapper as MistakeHistoryMapper (MyBatis)
     participant DMapper as ItemDifficultyStatsMapper (MyBatis)
     participant Engine as common.scoring.WeakPointScoringEngine
-    participant Domain as Vocabulary/Grammar/Pronunciation<br/>WeakPointService
+    participant Domain as Vocabulary/Grammar/Pronunciation/Listening<br/>WeakPointService
     participant DB as reme_english DB
     participant Producer as AnalysisRequestedProducer
     participant Codec as EventCodec (snake_case ObjectMapper)
@@ -94,7 +94,8 @@ sequenceDiagram
         Orch->>HMapper: updateScoringState(easeFactor, halfLifeDays, mastery, leitnerBox, nextReviewAt, weakScore, labelKey)
         Orch->>DMapper: upsertIncrement(category, labelKey, correctDelta, incorrectDelta)
         Orch->>Domain: applyJavaComputedScore({itemId, category, label,<br/>weakScore, masteryLevel, nextReviewAt, scoreSource=JAVA_ENGINE})
-        Domain->>DB: upsert vocabulary/grammar/pronunciation_weak_points<br/>(ON CONFLICT ... WHERE NOT (existing=JAVA_ENGINE AND incoming=PYTHON_LEGACY))
+        Note right of Domain: WeakPointDispatcherImpl routes by category (case-insensitive):<br/>vocabulary/grammar/pronunciation/listening; listening upserts<br/>listening_weak_points with sourceType=COMPREHENSION
+        Domain->>DB: upsert vocabulary/grammar/pronunciation/listening_weak_points<br/>(ON CONFLICT ... WHERE NOT (existing=JAVA_ENGINE AND incoming=PYTHON_LEGACY))
         deactivate Orch
     end
     Note over Svc,DB: @Transactional across the whole batch
@@ -145,7 +146,7 @@ sequenceDiagram
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
 | 1 | Kafka consume `learning.gap.analyzed` | Kafka broker -> english-service (`practice`) | seeds `mistake_history`, no category filter |
-| 2 | Postgres INSERT/UPDATE | english-service -> `reme_english` DB | `practice_attempts` (audit), `mistake_history` (upsert + scoring-state update), `item_difficulty_stats` (upsert), and one of `vocabulary/grammar/pronunciation_weak_points` (guarded upsert) per attempt |
+| 2 | Postgres INSERT/UPDATE | english-service -> `reme_english` DB | `practice_attempts` (audit), `mistake_history` (upsert + scoring-state update), `item_difficulty_stats` (upsert), and one of `vocabulary/grammar/pronunciation/listening_weak_points` (guarded upsert) per attempt |
 | 3 | Kafka produce `learning.gap.analysis.requested` | english-service -> Kafka broker | key = synthetic `recordingId`, snake_case via `EventCodec`, no envelope (same pattern as `RecordingUploadedProducer`) |
 
 ## Notes
@@ -170,6 +171,6 @@ sequenceDiagram
 - What happens after publish is entirely the existing pipeline, unchanged: ai-service's
   `RuleBasedAnalyzer` recomputes `forgettingScore` (still the single-formula Ebbinghaus calculation,
   not yet mirroring the Java engine's combined formula) and republishes `learning.gap.analyzed`,
-  which the three domain consumers, `recommendation-service`, and `dashboard-service` all re-upsert
+  which the four domain consumers, `recommendation-service`, and `dashboard-service` all re-upsert
   by `(user_id, item_id)` — see [overview.md](overview.md) and
   [../Ai_service/overview.md](../Ai_service/overview.md).

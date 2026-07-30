@@ -7,12 +7,12 @@ for the UI, instead of the frontend calling each service directly. See
 `RemeLearning/services/bff-service/src/main/java/com/remelearning/bff/`.
 
 Downstream services it composes: `user-service` (8081), `recording-service` (8082),
-`english-service` (8085 — merged vocabulary/grammar/pronunciation), `recommendation-service` (8086),
-`dashboard-service` (8087).
+`english-service` (8085 — merged vocabulary/grammar/pronunciation/listening), `recommendation-service`
+(8086), `dashboard-service` (8087).
 
 Per-endpoint detail lives in [auth-proxy.md](auth-proxy.md) (thin proxy to user-service's
 register/login), [learner-overview.md](learner-overview.md) (fan-out to dashboard-service +
-recording-service + user-service), [weak-points.md](weak-points.md) (fan-out to english-service x3),
+recording-service + user-service), [weak-points.md](weak-points.md) (fan-out to english-service x4),
 [recording-upload-proxy.md](recording-upload-proxy.md) (multipart streaming proxy), and
 [listening-speaking-library.md](listening-speaking-library.md) (9 thin 1:1 proxies to
 english-service's `listening.library`/`speaking.library` endpoints, including a multipart
@@ -90,6 +90,9 @@ sequenceDiagram
     and
         WeakPointSvc->>EngClient: getPronunciationWeakPoints(userId)
         EngClient->>English: GET /api/v1/pronunciation/weak-points/{userId}
+    and
+        WeakPointSvc->>EngClient: getListeningWeakPoints(userId)
+        EngClient->>English: GET /api/v1/listening/weak-points/{userId}
     end
     WeakPointSvc-->>LrnCtrl: Map<String, List<WeakPointDto>> (Mono.zip, any category defaulted to [] on error)
     LrnCtrl-->>Caller: 200 ApiResponse<Map<String, List<WeakPointDto>>>
@@ -101,6 +104,14 @@ sequenceDiagram
     RecoClient-->>LrnCtrl: Map<String, List<RecommendationDto>> (no fallback - thin proxy, error propagates)
     LrnCtrl-->>Caller: 200 ApiResponse<Map<String, List<RecommendationDto>>>
 ```
+
+- **Writing & translation** (`/{userId}/learn/writing/...`, 12 routes) — pure pass-through to
+  `english-service`'s `writing`/`writing.library` packages: generate a task, hint at the next
+  sentence, grade a submission, browse history, retry from a past attempt's mistakes, plus the four
+  library routes (topics per taxonomy axis, start/resume a prompt in a topic's chain, submit, retry).
+  `submitWritingAttempt` overwrites the body's `userId` from the path. No weak-point route exists for
+  this skill: writing mistakes land in `grammar`/`vocabulary` weak points downstream, so they already
+  show up in the existing `/{userId}/weak-points` fan-out.
 
 ## Notes
 
