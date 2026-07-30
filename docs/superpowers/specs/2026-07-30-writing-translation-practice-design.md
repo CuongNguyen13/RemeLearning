@@ -393,3 +393,25 @@ phần frontend README và `Business.md` tổng kết là ở M4.
   field này; chỉ `WritingAttemptResultDto` và `WritingAttemptDetailDto` mang nó.
 - Chi phí LLM: mỗi lần nộp bài là 1 call chấm; mỗi lần bấm gợi ý là 1 call. Sinh đề 1 call. Không có
   call nền tự động.
+
+## 11. Sai khác giữa thiết kế và bản đã triển khai
+
+Ghi lại để spec không mâu thuẫn với code. Mọi sai khác đều theo hướng bám sát pattern có sẵn trong
+repo, không đổi quyết định thiết kế nào ở mục 2.
+
+| # | Thiết kế ghi | Thực tế | Lý do |
+|---|---|---|---|
+| 1 | Route `POST /generate`, `GET /items?userId=`, `GET /history/{userId}` | `POST /{userId}/generate`, `GET /{userId}/items`, `GET /history/{userId}`, `POST /history/{userId}/{attemptId}/ai-practice` | Khớp đúng convention `ListeningLearnController` đang dùng, thay vì đặt convention thứ hai |
+| 2 | Có sub-package `history/` | Không tạo | `WritingMapper` đã đủ; `listening.history` tồn tại chỉ vì nó gộp lịch sử learn + library, writing chưa cần |
+| 3 | Domain `WritingCriterion` | `WritingCriteriaScores` | Là một object 4–5 điểm, không phải một tiêu chí đơn lẻ |
+| 4 | Cột `criteria_json` / `errors_json` / `target_labels_json` | Cột `criteria` / `errors` / `target_labels` (alias sang field `*Json` trong mapper XML) | Khớp cách `listening_practice_items.questions` alias thành `questions_json` |
+| 5 | (không có) | Thêm `grading/WritingErrorPipeline` | Phát sinh khi làm M3: tab thư viện cần đúng logic đổ weak-point của tab học thường. Trích ra component dùng chung thay vì nhân đôi — đây là phần dễ sai nhất (prefix `itemId`), không được để hai bản |
+| 6 | `library` có `domain/dto/mapper/...` với `WritingTaxonomy` là enum trong domain class | `WritingLibraryTopic.taxonomy` là `String`, convert qua `WritingTaxonomy.fromCode(...)` | Cột lưu chữ thường (`"vocab_theme"`) còn `EnumTypeHandler` mặc định của MyBatis map theo `name()` (chữ hoa) ⇒ sẽ vỡ khi đọc |
+| 7 | Test FE `hooks.test.ts` bằng Vitest + RTL | **Không viết** | `RemeLearning_FE/package.json` chỉ có `dev`/`build`/`lint`/`preview`, không có `vitest`/`@testing-library` — repo chưa wire test runner nào. Đã kiểm tra `tsc -b`, `npm run build`, `npm run lint` thay thế |
+| 8 | `.claude/skills/code-standards/SKILL.md` (theo `CLAUDE.md`) | File không tồn tại (`.claude/skills/` rỗng) | Đã áp checklist ghi trực tiếp trong `CLAUDE.md`; skill `frontend-standards` (ở repo FE) thì có thật và đã chạy |
+| 9 | Số đề mỗi topic thư viện: không nêu | 3–6, suy ra từ `topicId` | Mượn đúng cách `ListeningLibraryServiceImpl.targetSectionCount` làm (không cần thêm cột) |
+| 10 | `ExerciseTemplates` thêm entry `writing` | Thêm `writing` **và** `listening` | `listening` vẫn đang rơi vào template mặc định chung chung; sửa cùng lúc vì cùng một file, cùng một vấn đề |
+
+Kết quả kiểm chứng: `english-service` 365 test, `recommendation-service` 14 test,
+`bff-service` 30 test — tất cả xanh. FE: `tsc -b` sạch, `npm run build` thành công, `npm run lint` chỉ
+còn 3 warning có sẵn ở file shadcn `components/ui/*`.
