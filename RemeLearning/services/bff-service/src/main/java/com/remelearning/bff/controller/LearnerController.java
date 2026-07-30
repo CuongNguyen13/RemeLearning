@@ -37,7 +37,10 @@ import com.remelearning.bff.dto.ListeningLibraryHistoryEntryDto;
 import com.remelearning.bff.dto.ListeningLibrarySectionDto;
 import com.remelearning.bff.dto.ListeningLibraryTopicDto;
 import com.remelearning.bff.dto.ListeningPracticeItemDto;
+import com.remelearning.bff.dto.CompletePracticeExerciseRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
+import com.remelearning.bff.dto.PracticeSessionDto;
+import com.remelearning.bff.dto.StartPracticeSessionRequestDto;
 import com.remelearning.bff.dto.RecommendationDto;
 import com.remelearning.bff.dto.SectionAnswerResultDto;
 import com.remelearning.bff.dto.SectionCardDto;
@@ -109,7 +112,7 @@ public class LearnerController {
 		return learnerOverviewService.getOverview(userId).map(ApiResponse::ok);
 	}
 
-	@Operation(summary = "All of a learner's weak points, merged from english-service's vocabulary/grammar/pronunciation endpoints, keyed by category")
+	@Operation(summary = "All of a learner's weak points, merged from english-service's vocabulary/grammar/pronunciation/listening endpoints, keyed by category")
 	@GetMapping("/{userId}/weak-points")
 	public Mono<ApiResponse<Map<String, List<WeakPointDto>>>> getWeakPoints(@PathVariable String userId) {
 		return weakPointAggregationService.getWeakPoints(userId).map(ApiResponse::ok);
@@ -136,6 +139,38 @@ public class LearnerController {
 	public Mono<ApiResponse<Void>> redoPractice(@PathVariable String userId, @RequestBody PracticeRedoRequestDto request) {
 		request.setUserId(userId);
 		return englishServiceClient.redoPractice(request);
+	}
+
+	@Operation(summary = "Start a Luyện tập session: english-service generates ~4 mixed-skill AI exercises aimed at the learner's top weak points")
+	@PostMapping("/{userId}/practice/sessions")
+	public Mono<ApiResponse<PracticeSessionDto>> startPracticeSession(
+			@PathVariable String userId, @RequestBody(required = false) StartPracticeSessionRequestDto request) {
+		StartPracticeSessionRequestDto body = request == null ? new StartPracticeSessionRequestDto() : request;
+		body.setUserId(userId);
+		return englishServiceClient.startPracticeSession(body).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Read back one of the learner's practice sessions with its exercise slots; thin proxy to english-service")
+	@GetMapping("/{userId}/practice/sessions/{sessionId}")
+	public Mono<ApiResponse<PracticeSessionDto>> getPracticeSession(
+			@PathVariable String userId, @PathVariable Long sessionId) {
+		return englishServiceClient.getPracticeSession(sessionId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "The learner's most recent still-in-progress practice session (for resume), or null; thin proxy to english-service")
+	@GetMapping("/{userId}/practice/sessions/latest")
+	public Mono<ApiResponse<PracticeSessionDto>> getLatestPracticeSession(@PathVariable String userId) {
+		return englishServiceClient.getLatestPracticeSession(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Record one exercise slot's score after the learner submitted it via its domain; completes the session once every slot is done")
+	@PostMapping("/{userId}/practice/sessions/{sessionId}/exercises/{order}/complete")
+	public Mono<ApiResponse<PracticeSessionDto>> completePracticeExercise(
+			@PathVariable String userId,
+			@PathVariable Long sessionId,
+			@PathVariable int order,
+			@RequestBody CompletePracticeExerciseRequestDto request) {
+		return englishServiceClient.completePracticeExercise(sessionId, order, request).map(ApiResponse::ok);
 	}
 
 	@Operation(summary = "The dictation library's filter facets (skill/level/topic/exam-type); thin proxy to english-service")

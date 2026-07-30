@@ -15,4 +15,7 @@ public interface PronunciationWeakPointMapper {
 	/** {@code pronunciationType} is optional (null = no filter); results ordered by forgetting_score desc. */
 	List<PronunciationWeakPoint> findByUserId(
 			@Param("userId") String userId, @Param("pronunciationType") String pronunciationType);
+
+	/** The learner's {@code limit} most-forgotten pronunciation items, ordered by forgetting_score desc. */
+	List<PronunciationWeakPoint> findTopByUserId(@Param("userId") String userId, @Param("limit") int limit);
 }

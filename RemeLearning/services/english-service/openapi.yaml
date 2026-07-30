@@ -151,6 +151,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponsePronunciationWeakPointGrouped"
 
+  /api/v1/listening/weak-points/{userId}:
+    get:
+      tags: [Listening Weak Points]
+      summary: >
+        List a learner's recurring listening weak points, merged from two sources - dictation misses
+        dual-written here (in addition to their own root-cause category) and listening-comprehension
+        redo scoring - optionally filtered by sourceType, sorted by forgetting score desc
+      operationId: getListeningWeakPointsByUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sourceType
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/ListeningSourceType" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningWeakPointList"
+
+  /api/v1/listening/weak-points/{userId}/grouped:
+    get:
+      tags: [Listening Weak Points]
+      summary: Same as GET /{userId}, grouped by source type (DICTATION, COMPREHENSION)
+      operationId: getListeningWeakPointsByUserGrouped
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListeningWeakPointGrouped"
+
   /api/v1/practice/redo:
     post:
       tags: [Practice]
@@ -196,6 +239,96 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseReviewQueueItemList"
+
+  /api/v1/practice/sessions:
+    post:
+      tags: [Practice]
+      summary: >
+        Start a practice session: ranks the four skill categories by the learner's highest weak-point
+        score, then generates ~4 AI exercises (one per slot, random topics) via each owning domain's
+        existing generate() - vocabulary/grammar/listening/speaking mixed. Cold-start (no weak points)
+        spreads evenly across all four skills. This layer only orchestrates generation + tracks
+        progress; grading reuses each domain's own submit endpoint.
+      operationId: startPracticeSession
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartPracticeSessionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/practice/sessions/{sessionId}:
+    get:
+      tags: [Practice]
+      summary: One practice session with its ordered exercise slots
+      operationId: getPracticeSession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/practice/sessions/latest/{userId}:
+    get:
+      tags: [Practice]
+      summary: The learner's most recent still-in-progress session (for resume), or null data if none
+      operationId: getLatestPracticeSession
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/practice/sessions/{sessionId}/exercises/{order}/complete:
+    post:
+      tags: [Practice]
+      summary: >
+        Record one exercise slot's score after the learner submitted it via its domain endpoint;
+        marks the slot DONE and completes the session once every slot is done
+      operationId: completePracticeExercise
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: order
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompletePracticeExerciseRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
 
   /api/v1/dictation/facets:
     get:
@@ -1860,6 +1993,13 @@ components:
       type: string
       enum: [VOWEL, CONSONANT, STRESS, INTONATION, LINKING, RHYTHM, OTHER]
 
+    ListeningSourceType:
+      type: string
+      enum: [DICTATION, COMPREHENSION]
+      description: >
+        DICTATION = dual-written from a dictation miss (in addition to its own root-cause category);
+        COMPREHENSION = scored by the practice/redo flow's Java engine for listening-comprehension items.
+
     TranscriptSegment:
       type: object
       properties:
@@ -1929,6 +2069,22 @@ components:
         scoreSource: { type: string, enum: [PYTHON_LEGACY, JAVA_ENGINE] }
         updatedAt: { type: string, format: date-time }
 
+    ListeningWeakPoint:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        recordingId: { type: string }
+        userId: { type: string }
+        itemId: { type: string }
+        label: { type: string }
+        sourceType: { $ref: "#/components/schemas/ListeningSourceType" }
+        forgettingScore: { type: number, format: double }
+        recommendation: { type: string }
+        masteryLevel: { type: number, format: double, nullable: true, description: "BKT mastery probability [0,1]; null until the Java engine has scored this item at least once" }
+        nextReviewAt: { type: string, format: date-time, nullable: true }
+        scoreSource: { type: string, enum: [PYTHON_LEGACY, JAVA_ENGINE] }
+        updatedAt: { type: string, format: date-time }
+
     ApiResponseTranscriptResponse:
       allOf:
         - $ref: "#/components/schemas/ApiResponseBase"
@@ -1984,6 +2140,26 @@ components:
             data:
               type: array
               items: { $ref: "#/components/schemas/PronunciationWeakPoint" }
+
+    ApiResponseListeningWeakPointList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/ListeningWeakPoint" }
+
+    ApiResponseListeningWeakPointGrouped:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/ListeningWeakPoint" }
 
     ApiResponsePronunciationWeakPointGrouped:
       allOf:
@@ -2054,6 +2230,49 @@ components:
             data:
               type: array
               items: { $ref: "#/components/schemas/ReviewQueueItem" }
+
+    StartPracticeSessionRequest:
+      type: object
+      description: Body for starting a practice session; userId comes from the caller/path.
+      properties:
+        userId: { type: string }
+        exerciseCount: { type: integer, nullable: true, description: "defaults to 4, clamped to 1..8" }
+
+    CompletePracticeExerciseRequest:
+      type: object
+      required: [score]
+      properties:
+        score: { type: number, format: double, description: "0..1 accuracy/overall for the graded slot" }
+
+    PracticeSessionExercise:
+      type: object
+      description: One exercise slot in a session - a reference to the domain practice item to run.
+      properties:
+        order: { type: integer }
+        category: { type: string, description: "vocabulary | grammar | listening | speaking" }
+        practiceItemId: { type: integer, format: int64 }
+        topic: { type: string, nullable: true }
+        status: { type: string, description: "PENDING | DONE" }
+        score: { type: number, format: double, nullable: true }
+
+    PracticeSession:
+      type: object
+      properties:
+        sessionId: { type: integer, format: int64 }
+        status: { type: string, description: "IN_PROGRESS | COMPLETED" }
+        totalExercises: { type: integer }
+        exercises:
+          type: array
+          items: { $ref: "#/components/schemas/PracticeSessionExercise" }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponsePracticeSession:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/PracticeSession" }
 
     DictationFacets:
       type: object

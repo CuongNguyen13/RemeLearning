@@ -34,4 +34,13 @@
         ORDER BY forgetting_score DESC
     </select>
 
+    <select id="findTopByUserId" resultType="com.remelearning.english.pronunciation.domain.PronunciationWeakPoint">
+        SELECT id, recording_id, user_id, item_id, label, pronunciation_type, forgetting_score, recommendation,
+               mastery_level, next_review_at, score_source, updated_at
+        FROM pronunciation_weak_points
+        WHERE user_id = #{userId}
+        ORDER BY forgetting_score DESC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

@@ -1,9 +1,12 @@
 # english-service
 
-Modular monolith covering the three English-skill analysis domains — vocabulary, grammar,
-pronunciation — each its own package (`com.remelearning.english.<domain>`). Merges what used to be
-three separate services (`vocabulary-service`, `grammar-service`, `pronunciation-service`) since all
-three just analyze different `category` values of the same `learning.gap.analyzed` event.
+Modular monolith covering the four English-skill analysis domains — vocabulary, grammar,
+pronunciation, listening (`listening.weakpoint` package) — each its own package
+(`com.remelearning.english.<domain>`). Merges what used to be three separate services
+(`vocabulary-service`, `grammar-service`, `pronunciation-service`) since all of them just analyze
+different `category` values of the same `learning.gap.analyzed` event; `listening.weakpoint` was
+added later as the fourth, once dictation started dual-writing a `"listening"` payload per missed
+word and the practice/redo flow gained a matching dispatch case.
 
 On top of the three analysis domains, four "Học & Luyện tập với AI" **learn** skills now generate and
 grade practice content on demand: `vocabulary.learn`, `grammar.learn` (both under their existing
@@ -20,10 +23,21 @@ Full spec: [`openapi.yaml`](openapi.yaml) / `/swagger-ui.html` when running. Det
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/transcripts/{recordingId}` | shared across all 3 domains, `404` if not found |
+| GET | `/api/v1/transcripts/{recordingId}` | shared across all 4 domains, `404` if not found |
 | GET | `/api/v1/vocabulary/weak-points/{userId}[/grouped]` | optional `?type=` filter (ungrouped only) |
 | GET | `/api/v1/grammar/weak-points/{userId}[/grouped]` | optional `?type=` filter (ungrouped only) |
 | GET | `/api/v1/pronunciation/weak-points/{userId}[/grouped]` | optional `?type=` filter (ungrouped only) |
+| GET | `/api/v1/listening/weak-points/{userId}[/grouped]` | optional `?sourceType=` filter (ungrouped only); merges dictation's dual-write (`DICTATION`) + practice/redo Java-scored listening comprehension (`COMPREHENSION`) |
+
+**Practice session** (`practice.session` package — the refactored "Luyện tập" feature): `POST
+/api/v1/practice/sessions` starts a session of ~4 AI exercises (random topics) across all four skills,
+aimed at the learner's highest-scoring weak points; `GET /api/v1/practice/sessions/{sessionId}`, `GET
+/api/v1/practice/sessions/latest/{userId}` (resume), and `POST
+/api/v1/practice/sessions/{sessionId}/exercises/{order}/complete` track progress. This layer only
+orchestrates: it reuses each domain's `generate()` to build a slot and each domain's own `submit`
+endpoint to grade one (weak points still feed back via `PracticeService.redo`). Adds
+`PronunciationWeakPointService.getTopWeakPoints(...)` and tables `practice_sessions` /
+`practice_session_exercises` (migration `V25`).
 
 Also present (own `dictation` package — listen-and-type dictation over a fixed real-audio library +
 an AI-practice section): facet/session browsing, folder → file browsing (rev 2 —
@@ -31,7 +45,10 @@ an AI-practice section): facet/session browsing, folder → file browsing (rev 2
 detail — this last one also accepts an optional `?translationLang=`, see below), grading
 (`POST /api/v1/dictation/attempts`, whose AI feedback is a root-cause-classified mistake analysis —
 Vocabulary/Grammar/Phonology, via `DictationAnalyzer`/`dictation.analyzer.mode` below — not a flat
-suggestions list), history (including full per-attempt detail via
+suggestions list; grading now also **dual-writes**: every missed word publishes both its root-cause
+category payload AND a second `category="listening"` payload, same event, feeding
+`listening_weak_points` alongside whichever of vocabulary/grammar/pronunciation it root-caused to),
+history (including full per-attempt detail via
 `GET .../history/{userId}/{attemptId}`, and a `practiceType` field so the UI can badge each row
 LIBRARY vs AI_PRACTICE), and AI-practice generation/audio — either aggregate
 (`POST .../ai-practice/{userId}/generate`, from the learner's still-unsynthesized practice items, or
@@ -140,11 +157,13 @@ Per-skill notes:
   (`GET /items/{itemId}/audio`) stay hidden from the practice-item response until the attempt is
   submitted. Three question shapes (`ListeningQuestionType`): `MCQ` (main idea/detail/attitude, 4
   options), `KEYWORD` (fill the missed word/phrase, scored by WER like dictation), `OPEN` (free-text,
-  LLM-graded 0..1 against a model answer). Because no english-service Kafka consumer persists a
-  per-domain "listening" weak-point row today (category `listening` still just flows through the
-  existing `learning.gap.analyzed` pipeline with no dedicated table), regeneration target-keyword
-  selection reads this skill's own attempt history instead — the same pattern dictation uses for its
-  own miss table. `POST /history/{userId}/{attemptId}/ai-practice` ("Luyện tập với AI" from a history
+  LLM-graded 0..1 against a model answer). A submitted attempt's `PracticeService.redo(...)` call now
+  persists into `listening_weak_points` (`sourceType = COMPREHENSION`) via `WeakPointDispatcherImpl`'s
+  `"listening"` case (see the `listening.weakpoint` package below) - previously this fell through to a
+  `default -> log.warn(...)` with nowhere to persist. Regeneration target-keyword selection still reads
+  this skill's own attempt history (`listening_attempts`/`listening_practice_items`), unrelated to
+  which weak-point domain the mistake feeds - the same pattern dictation uses for its own miss table.
+  `POST /history/{userId}/{attemptId}/ai-practice` ("Luyện tập với AI" from a history
   row) diffs one past attempt's persisted `resultsJson` via the pure
   `ListeningMistakeAnalyzer.extractMissedTopics` (already-graded, not re-scored — `resultsJson` carries
   no per-question topic/skill tag of its own, so each wrong question's own `correctAnswer` stands in as
@@ -290,8 +309,9 @@ Migration: `V19__listening_library.sql` (`listening_library_topics`, `listening_
 `listening_library_attempt_answers` (one row per submitted answer within an attempt, feeding the
 mistake-analysis above). Unlike every other library/learn skill, scoring here does **not** call
 `PracticeService.redo(...)` — it only writes `listening_library_attempts`/`listening_topic_progress`,
-consistent with the pre-existing gap that category `listening` has no dedicated weak-point table
-anywhere in the service (see [Learn skills](#learn-skills-học--luyện-tập-với-ai) above). `bff-service`
+a deliberate scope cut for this library flow specifically (`listening_weak_points` does exist now -
+see [Learn skills](#learn-skills-học--luyện-tập-với-ai) above and the `listening.weakpoint` package
+below - it's just not fed from here). `bff-service`
 proxies the first four of these endpoints (via `EnglishServiceClient`/`LearnerController`), same as
 Vocabulary/Grammar Library — the new `ai-practice` endpoint is not yet proxied, same as Grammar
 Library's own `ai-practice` endpoint. See
@@ -359,13 +379,17 @@ and [`docs/flow/english-service-data-flow.md`](../../../docs/flow/english-servic
 ## Kafka
 
 - `TranscriptReadyConsumer` (`vocabulary` domain only) — consumes `transcript.ready`, persists
-  `transcripts`/`transcript_segments` (shared across all 3 domains — `grammar`/`pronunciation` read it
-  back via the REST endpoint above instead of re-ingesting).
+  `transcripts`/`transcript_segments` (shared across all 4 domains — `grammar`/`pronunciation`/
+  `listening.weakpoint` read it back via the REST endpoint above instead of re-ingesting).
 - `LearningGapAnalyzedConsumer` — **one per domain**, each with its own `groupId`
-  (`english-service`, `english-service-grammar`, `english-service-pronunciation`) consuming the same
-  `learning.gap.analyzed` topic, each filtering to its own `category` and classifying the label via a
-  rule-based or LLM classifier (`vocabulary.classifier.mode`/`grammar.classifier.mode`/
-  `pronunciation.classifier.mode` in `application.yml`, default `rule-based`).
+  (`english-service`, `english-service-grammar`, `english-service-pronunciation`,
+  `english-service-listening`) consuming the same `learning.gap.analyzed` topic, each filtering to its
+  own `category`. `vocabulary`/`grammar`/`pronunciation` classify the label via a rule-based or LLM
+  classifier (`vocabulary.classifier.mode`/`grammar.classifier.mode`/`pronunciation.classifier.mode` in
+  `application.yml`, default `rule-based`); `listening.weakpoint` has no classifier - it hard-codes
+  `sourceType = DICTATION` instead, since this Kafka path only ever carries dictation's dual-write for
+  that category (the other source, listening-comprehension redo scoring, arrives via
+  `WeakPointDispatcherImpl` directly, not this consumer).
 
 See [`docs/API.md` §8](../../../docs/API.md#8-kafka--english-service-consumer).
 
@@ -388,6 +412,11 @@ or `ZEN_API_KEY`/`ZEN_MODEL` (zen, opencode.ai's OpenAI-compatible endpoint, def
 - `vocabulary` was built first and is the reference layout for `grammar`/`pronunciation` (and for the
   other single-domain services in this repo) — see `CLAUDE.md` for the full package-by-package
   breakdown.
+- `listening.weakpoint` (not to be confused with the `listening` learn-skill package, or with
+  `listening.mapper`, which belongs to that learn skill) is the fourth weak-point domain, deliberately
+  simpler than the other three: no classifier, just a `source_type` column
+  (`DICTATION`/`COMPREHENSION`) set directly by whichever of its two producers wrote the row - dictation's
+  Kafka dual-write, or the practice/redo flow's `WeakPointDispatcherImpl` case.
 - The four "Learn" skills (`vocabulary.learn`, `grammar.learn`, `listening`, `speaking`) are additive
   on top of that layout: `vocabulary.learn`/`grammar.learn` nest inside their existing domain package,
   while `listening`/`speaking` are new sibling domain packages that clone the same

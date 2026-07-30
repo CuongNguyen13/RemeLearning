@@ -23,8 +23,10 @@ import org.springframework.context.annotation.ComponentScan;
 		"com.remelearning.english.grammar.library.mapper",
 		"com.remelearning.english.pronunciation.mapper",
 		"com.remelearning.english.practice.mapper",
+		"com.remelearning.english.practice.session.mapper",
 		"com.remelearning.english.dictation.mapper",
 		"com.remelearning.english.listening.mapper",
+		"com.remelearning.english.listening.weakpoint.mapper",
 		"com.remelearning.english.listening.library.mapper",
 		"com.remelearning.english.speaking.mapper",
 		"com.remelearning.english.speaking.library.mapper"

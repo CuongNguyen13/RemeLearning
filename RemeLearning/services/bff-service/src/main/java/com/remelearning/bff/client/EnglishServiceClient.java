@@ -14,7 +14,10 @@ import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
 import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
+import com.remelearning.bff.dto.CompletePracticeExerciseRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
+import com.remelearning.bff.dto.PracticeSessionDto;
+import com.remelearning.bff.dto.StartPracticeSessionRequestDto;
 import com.remelearning.bff.dto.GenerateGrammarPracticeRequestDto;
 import com.remelearning.bff.dto.GenerateVocabPracticeRequestDto;
 import com.remelearning.bff.dto.GrammarAttemptDetailDto;
@@ -82,10 +85,11 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 /**
- * Thin wrapper around english-service's REST API (vocabulary/grammar/pronunciation weak points -
- * all three domains live in the one merged english-service on port 8085). Each method stamps its
- * own literal "category" onto the returned DTOs since english-service's per-domain JSON doesn't
- * carry a shared category field (it uses vocabularyType/grammarType/pronunciationType instead).
+ * Thin wrapper around english-service's REST API (vocabulary/grammar/pronunciation/listening weak
+ * points - all four domains live in the one merged english-service on port 8085). Each method
+ * stamps its own literal "category" onto the returned DTOs since english-service's per-domain JSON
+ * doesn't carry a shared category field (it uses vocabularyType/grammarType/pronunciationType/
+ * sourceType instead).
  */
 @Slf4j
 @Component
@@ -112,6 +116,12 @@ public class EnglishServiceClient {
 		return fetchWeakPoints("/api/v1/pronunciation/weak-points/{userId}", userId, "pronunciation");
 	}
 
+	/** Fetches a learner's listening weak points (dictation dual-write + comprehension redo scoring)
+	 * and tags each one with category="listening". */
+	public Mono<List<WeakPointDto>> getListeningWeakPoints(String userId) {
+		return fetchWeakPoints("/api/v1/listening/weak-points/{userId}", userId, "listening");
+	}
+
 	/** Proxies a graded redo-exercise submission straight through to english-service's practice endpoint. */
 	public Mono<ApiResponse<Void>> redoPractice(PracticeRedoRequestDto request) {
 		return englishServiceClient.post()
@@ -121,6 +131,50 @@ public class EnglishServiceClient {
 				.retrieve()
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<Void>>() {})
 				.doOnError(ex -> log.error("Failed to proxy practice redo for userId={}", request.getUserId(), ex));
+	}
+
+	/** Starts a new practice session (english-service generates ~4 mixed-skill AI exercises). */
+	public Mono<PracticeSessionDto> startPracticeSession(StartPracticeSessionRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/practice/sessions")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<PracticeSessionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start practice session for userId={}", request.getUserId(), ex));
+	}
+
+	/** Reads back one practice session with its exercise slots. */
+	public Mono<PracticeSessionDto> getPracticeSession(Long sessionId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/practice/sessions/{sessionId}", sessionId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<PracticeSessionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch practice session for sessionId={}", sessionId, ex));
+	}
+
+	/** Fetches the learner's most recent still-in-progress practice session (for resume), or null. */
+	public Mono<PracticeSessionDto> getLatestPracticeSession(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/practice/sessions/latest/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<PracticeSessionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch latest practice session for userId={}", userId, ex));
+	}
+
+	/** Records one exercise slot's score; english-service completes the session once all slots are done. */
+	public Mono<PracticeSessionDto> completePracticeExercise(Long sessionId, int order, CompletePracticeExerciseRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/practice/sessions/{sessionId}/exercises/{order}/complete", sessionId, order)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<PracticeSessionDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to complete practice exercise for sessionId={}, order={}", sessionId, order, ex));
 	}
 
 	/** Fetches the dictation-library filter facets from english-service. */
@@ -894,7 +948,7 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to get speaking merged history for userId={}", userId, ex));
 	}
 
-	// Shared GET + unwrap + category-stamp logic for the three (near-identical) domain endpoints above.
+	// Shared GET + unwrap + category-stamp logic for the four (near-identical) domain endpoints above.
 	private Mono<List<WeakPointDto>> fetchWeakPoints(String uriTemplate, String userId, String category) {
 		return englishServiceClient.get()
 				.uri(uriTemplate, userId)

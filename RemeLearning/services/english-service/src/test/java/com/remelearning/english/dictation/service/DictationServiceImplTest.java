@@ -143,8 +143,11 @@ class DictationServiceImplTest {
 		verify(dictationMapper).insertPracticeItem(any(DictationPracticeItem.class));
 		ArgumentCaptor<List<WeakPointPayload>> weakCaptor = ArgumentCaptor.forClass(List.class);
 		verify(gapEventPublisher).publish(eq("dictation-clip-42"), eq("user-1"), weakCaptor.capture());
-		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getLabel).contains("reluctant");
-		assertThat(weakCaptor.getValue().get(0).getCategory()).isEqualTo("vocabulary");
+		// Dual-write: one word now yields two payloads - its root-cause category (vocabulary here)
+		// plus a second "listening" payload, in the same event.
+		assertThat(weakCaptor.getValue()).hasSize(2);
+		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getLabel).containsExactly("reluctant", "reluctant");
+		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getCategory).containsExactly("vocabulary", "listening");
 	}
 
 	@Test
@@ -170,7 +173,8 @@ class DictationServiceImplTest {
 
 		ArgumentCaptor<List<WeakPointPayload>> weakCaptor = ArgumentCaptor.forClass(List.class);
 		verify(gapEventPublisher).publish(eq("dictation-clip-42"), eq("user-1"), weakCaptor.capture());
-		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getCategory).containsExactly("pronunciation");
+		// Dual-write: root-cause category (pronunciation here) plus the "listening" duplicate.
+		assertThat(weakCaptor.getValue()).extracting(WeakPointPayload::getCategory).containsExactly("pronunciation", "listening");
 	}
 
 	@Test

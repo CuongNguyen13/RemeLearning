@@ -56,6 +56,13 @@ public class PronunciationWeakPointServiceImpl implements PronunciationWeakPoint
 		return mapper.findByUserId(userId, type == null ? null : type.name());
 	}
 
+	// Reads back the learner's most-forgotten pronunciation items (highest forgetting_score first),
+	// used by the practice-session orchestrator to pick focus items for a speaking slot.
+	@Override
+	public List<PronunciationWeakPoint> getTopWeakPoints(String userId, int limit) {
+		return mapper.findTopByUserId(userId, limit);
+	}
+
 	// Same upsert path as saveWeakPoints, but sourced from the practice/redo flow's Java scoring
 	// engine instead of ai-service's Kafka event - marked JAVA_ENGINE so the guarded upsert (see
 	// this mapper's XML) keeps a stale PYTHON_LEGACY recompute from clobbering it afterwards.

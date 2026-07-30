@@ -1,6 +1,7 @@
 package com.remelearning.english.practice.scoring.impl;
 
 import com.remelearning.english.grammar.service.GrammarWeakPointService;
+import com.remelearning.english.listening.weakpoint.service.ListeningWeakPointService;
 import com.remelearning.english.practice.scoring.WeakPointDispatcher;
 import com.remelearning.english.practice.scoring.WeakPointScoreUpdate;
 import com.remelearning.english.pronunciation.service.PronunciationWeakPointService;
@@ -17,6 +18,7 @@ public class WeakPointDispatcherImpl implements WeakPointDispatcher {
 	private final VocabularyWeakPointService vocabularyWeakPointService;
 	private final GrammarWeakPointService grammarWeakPointService;
 	private final PronunciationWeakPointService pronunciationWeakPointService;
+	private final ListeningWeakPointService listeningWeakPointService;
 
 	// Routes by category (case-insensitive), same convention each domain's own Kafka consumer uses.
 	@Override
@@ -25,6 +27,7 @@ public class WeakPointDispatcherImpl implements WeakPointDispatcher {
 			case "vocabulary" -> vocabularyWeakPointService.applyJavaComputedScore(update);
 			case "grammar" -> grammarWeakPointService.applyJavaComputedScore(update);
 			case "pronunciation" -> pronunciationWeakPointService.applyJavaComputedScore(update);
+			case "listening" -> listeningWeakPointService.applyJavaComputedScore(update);
 			default -> log.warn("Unknown category '{}' for item {} - no domain to dispatch the Java-computed score to",
 					update.getCategory(), update.getItemId());
 		}

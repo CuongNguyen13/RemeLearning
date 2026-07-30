@@ -1,6 +1,9 @@
 package com.remelearning.bff.client;
 
+import com.remelearning.bff.dto.CompletePracticeExerciseRequestDto;
 import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
+import com.remelearning.bff.dto.PracticeSessionDto;
+import com.remelearning.bff.dto.StartPracticeSessionRequestDto;
 import com.remelearning.bff.dto.GrammarHistoryEntryDto;
 import com.remelearning.bff.dto.GrammarPracticeItemDto;
 import com.remelearning.bff.dto.ListeningAnswerItemDto;
@@ -351,6 +354,73 @@ class EnglishServiceClientTest {
 					assertThat(history).hasSize(2);
 					assertThat(history.get(1).getSectionId()).isEqualTo(200L);
 				})
+				.verifyComplete();
+	}
+
+	@Test
+	void startPracticeSessionPostsToSessionsRouteAndDecodesSessionWithExercises() {
+		String json = "{\"success\":true,\"data\":{\"sessionId\":500,\"status\":\"IN_PROGRESS\",\"totalExercises\":4,"
+				+ "\"exercises\":[{\"order\":1,\"category\":\"vocabulary\",\"practiceItemId\":10,\"topic\":\"Travel\","
+				+ "\"status\":\"PENDING\"}]}}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/practice/sessions");
+		}, json);
+
+		StartPracticeSessionRequestDto req = new StartPracticeSessionRequestDto();
+		req.setUserId("user-1");
+		req.setExerciseCount(4);
+
+		StepVerifier.create(client.startPracticeSession(req))
+				.assertNext((PracticeSessionDto session) -> {
+					assertThat(session.getSessionId()).isEqualTo(500L);
+					assertThat(session.getStatus()).isEqualTo("IN_PROGRESS");
+					assertThat(session.getExercises()).hasSize(1);
+					assertThat(session.getExercises().get(0).getCategory()).isEqualTo("vocabulary");
+					assertThat(session.getExercises().get(0).getPracticeItemId()).isEqualTo(10L);
+				})
+				.verifyComplete();
+	}
+
+	@Test
+	void getPracticeSessionGetsFromSessionsRoute() {
+		String json = "{\"success\":true,\"data\":{\"sessionId\":500,\"status\":\"IN_PROGRESS\",\"totalExercises\":4,\"exercises\":[]}}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.GET);
+			assertThat(request.url().toString()).endsWith("/api/v1/practice/sessions/500");
+		}, json);
+
+		StepVerifier.create(client.getPracticeSession(500L))
+				.assertNext(session -> assertThat(session.getSessionId()).isEqualTo(500L))
+				.verifyComplete();
+	}
+
+	@Test
+	void getLatestPracticeSessionGetsFromLatestRoute() {
+		String json = "{\"success\":true,\"data\":{\"sessionId\":501,\"status\":\"IN_PROGRESS\",\"totalExercises\":4,\"exercises\":[]}}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.GET);
+			assertThat(request.url().toString()).endsWith("/api/v1/practice/sessions/latest/user-1");
+		}, json);
+
+		StepVerifier.create(client.getLatestPracticeSession("user-1"))
+				.assertNext(session -> assertThat(session.getSessionId()).isEqualTo(501L))
+				.verifyComplete();
+	}
+
+	@Test
+	void completePracticeExercisePostsToCompleteRouteAndDecodesRefreshedSession() {
+		String json = "{\"success\":true,\"data\":{\"sessionId\":500,\"status\":\"COMPLETED\",\"totalExercises\":4,\"exercises\":[]}}";
+		EnglishServiceClient client = clientReturning(request -> {
+			assertThat(request.method()).isEqualTo(HttpMethod.POST);
+			assertThat(request.url().toString()).endsWith("/api/v1/practice/sessions/500/exercises/4/complete");
+		}, json);
+
+		CompletePracticeExerciseRequestDto req = new CompletePracticeExerciseRequestDto();
+		req.setScore(88.0);
+
+		StepVerifier.create(client.completePracticeExercise(500L, 4, req))
+				.assertNext(session -> assertThat(session.getStatus()).isEqualTo("COMPLETED"))
 				.verifyComplete();
 	}
 

@@ -19,6 +19,9 @@ public interface PronunciationWeakPointService {
 
 	List<PronunciationWeakPoint> getWeakPoints(String userId, PronunciationType type);
 
+	/** The learner's {@code limit} most-forgotten pronunciation items, for the practice-session feature. */
+	List<PronunciationWeakPoint> getTopWeakPoints(String userId, int limit);
+
 	/**
 	 * Persists a score computed directly by the practice/redo flow's Java scoring engine, bypassing
 	 * the ai-service/Kafka round-trip. No-op for updates whose category isn't "pronunciation".

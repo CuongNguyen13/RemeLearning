@@ -580,6 +580,13 @@ public class DictationServiceImpl implements DictationService {
 	// data instead of everything landing under vocabulary. Words with no errorTable entry (e.g. from
 	// a sentence-mode retry, which isn't run through the analyzer) default to vocabulary. The
 	// forgetting score saturates with the learner's running miss count for that word.
+	//
+	// Dual-write: a dictation clip is itself a listening exercise, so every missed word ALSO gets a
+	// second payload under category="listening" (same itemId/label/forgettingScore/recommendation as
+	// its root-cause payload above), regardless of whether the root cause was lexical/grammatical/
+	// phonological - both payloads are added to the SAME weakPoints list and published in one Kafka
+	// event, so english-service's listening consumer (filtering to category="listening") picks up
+	// dictation misses with no separate publish call or analyzer.
 	private void publishWeakPoints(String recordingId, String userId, List<String> missedWords,
 			List<String> actionAdvice, List<DictationErrorEntry> errorTable) {
 		String recommendation = actionAdvice.isEmpty() ? null : actionAdvice.get(0);
@@ -591,13 +598,24 @@ public class DictationServiceImpl implements DictationService {
 		List<WeakPointPayload> weakPoints = new ArrayList<>();
 		for (String word : missedWords) {
 			int missCount = dictationMapper.countMissesForWord(userId, word);
+			String itemId = WEAK_POINT_ITEM_PREFIX + word;
+			double forgettingScore = (double) missCount / (missCount + 2.0);
+
 			WeakPointPayload payload = new WeakPointPayload();
-			payload.setItemId(WEAK_POINT_ITEM_PREFIX + word);
+			payload.setItemId(itemId);
 			payload.setCategory(toLearningCategory(categoryByWord.get(word)));
 			payload.setLabel(word);
-			payload.setForgettingScore((double) missCount / (missCount + 2.0));
+			payload.setForgettingScore(forgettingScore);
 			payload.setRecommendation(recommendation);
 			weakPoints.add(payload);
+
+			WeakPointPayload listeningPayload = new WeakPointPayload();
+			listeningPayload.setItemId(itemId);
+			listeningPayload.setCategory(LearningCategories.LISTENING);
+			listeningPayload.setLabel(word);
+			listeningPayload.setForgettingScore(forgettingScore);
+			listeningPayload.setRecommendation(recommendation);
+			weakPoints.add(listeningPayload);
 		}
 		gapEventPublisher.publish(recordingId, userId, weakPoints);
 	}

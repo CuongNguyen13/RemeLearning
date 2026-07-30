@@ -1,6 +1,7 @@
 package com.remelearning.english.practice.scoring.impl;
 
 import com.remelearning.english.grammar.service.GrammarWeakPointService;
+import com.remelearning.english.listening.weakpoint.service.ListeningWeakPointService;
 import com.remelearning.english.practice.scoring.WeakPointScoreUpdate;
 import com.remelearning.english.pronunciation.service.PronunciationWeakPointService;
 import com.remelearning.english.vocabulary.service.VocabularyWeakPointService;
@@ -16,8 +17,9 @@ class WeakPointDispatcherImplTest {
 	private final VocabularyWeakPointService vocabularyWeakPointService = mock(VocabularyWeakPointService.class);
 	private final GrammarWeakPointService grammarWeakPointService = mock(GrammarWeakPointService.class);
 	private final PronunciationWeakPointService pronunciationWeakPointService = mock(PronunciationWeakPointService.class);
+	private final ListeningWeakPointService listeningWeakPointService = mock(ListeningWeakPointService.class);
 	private final WeakPointDispatcherImpl dispatcher = new WeakPointDispatcherImpl(
-			vocabularyWeakPointService, grammarWeakPointService, pronunciationWeakPointService);
+			vocabularyWeakPointService, grammarWeakPointService, pronunciationWeakPointService, listeningWeakPointService);
 
 	@Test
 	void dispatchesVocabularyUpdatesToVocabularyServiceOnly() {
@@ -54,12 +56,23 @@ class WeakPointDispatcherImplTest {
 	}
 
 	@Test
-	void unknownCategoryDoesNotDispatchToAnyDomainOrThrow() {
+	void dispatchesListeningUpdatesToListeningServiceOnly() {
 		dispatcher.dispatch(update("listening"));
+
+		verify(listeningWeakPointService).applyJavaComputedScore(any());
+		verify(vocabularyWeakPointService, never()).applyJavaComputedScore(any());
+		verify(grammarWeakPointService, never()).applyJavaComputedScore(any());
+		verify(pronunciationWeakPointService, never()).applyJavaComputedScore(any());
+	}
+
+	@Test
+	void unknownCategoryDoesNotDispatchToAnyDomainOrThrow() {
+		dispatcher.dispatch(update("unknown_domain"));
 
 		verify(vocabularyWeakPointService, never()).applyJavaComputedScore(any());
 		verify(grammarWeakPointService, never()).applyJavaComputedScore(any());
 		verify(pronunciationWeakPointService, never()).applyJavaComputedScore(any());
+		verify(listeningWeakPointService, never()).applyJavaComputedScore(any());
 	}
 
 	private WeakPointScoreUpdate update(String category) {

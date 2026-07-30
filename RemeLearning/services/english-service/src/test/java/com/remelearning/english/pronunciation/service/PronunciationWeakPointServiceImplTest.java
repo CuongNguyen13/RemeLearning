@@ -73,6 +73,17 @@ class PronunciationWeakPointServiceImplTest {
 	}
 
 	@Test
+	void getTopWeakPointsDelegatesToMapperWithLimit() {
+		List<PronunciationWeakPoint> expected = List.of(
+				PronunciationWeakPoint.builder().userId("user-1").label("th sound").forgettingScore(0.9).build());
+		when(mapper.findTopByUserId("user-1", 3)).thenReturn(expected);
+
+		List<PronunciationWeakPoint> actual = service.getTopWeakPoints("user-1", 3);
+
+		assertThat(actual).isEqualTo(expected);
+	}
+
+	@Test
 	void applyJavaComputedScoreUpsertsWithJavaEngineSourceForPronunciationCategory() {
 		when(classifier.classify("word stress")).thenReturn(PronunciationType.STRESS);
 		Instant nextReviewAt = Instant.now().plusSeconds(3600);

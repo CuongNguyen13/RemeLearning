@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.practice.session.mapper.PracticeSessionMapper">
+
+    <insert id="insertSession" parameterType="com.remelearning.english.practice.session.domain.PracticeSession"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO practice_sessions (user_id, status, total_exercises)
+        VALUES (#{userId}, #{status}, #{totalExercises})
+    </insert>
+
+    <insert id="insertExercise" parameterType="com.remelearning.english.practice.session.domain.PracticeSessionExercise"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO practice_session_exercises
+            (session_id, exercise_order, category, practice_item_id, topic, status, score)
+        VALUES
+            (#{sessionId}, #{exerciseOrder}, #{category}, #{practiceItemId}, #{topic}, #{status}, #{score})
+    </insert>
+
+    <select id="findSessionById" resultType="com.remelearning.english.practice.session.domain.PracticeSession">
+        SELECT id, user_id, status, total_exercises, created_at, completed_at
+        FROM practice_sessions WHERE id = #{id}
+    </select>
+
+    <select id="findLatestInProgressByUserId" resultType="com.remelearning.english.practice.session.domain.PracticeSession">
+        SELECT id, user_id, status, total_exercises, created_at, completed_at
+        FROM practice_sessions
+        WHERE user_id = #{userId} AND status = 'IN_PROGRESS'
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="findExercisesBySessionId" resultType="com.remelearning.english.practice.session.domain.PracticeSessionExercise">
+        SELECT id, session_id, exercise_order, category, practice_item_id, topic, status, score, completed_at
+        FROM practice_session_exercises
+        WHERE session_id = #{sessionId}
+        ORDER BY exercise_order
+    </select>
+
+    <!-- Guarded so re-submitting an already-DONE slot doesn't overwrite its score or re-close it. -->
+    <update id="markExerciseDone">
+        UPDATE practice_session_exercises
+        SET status = 'DONE', score = #{score}, completed_at = now()
+        WHERE session_id = #{sessionId} AND exercise_order = #{exerciseOrder} AND status = 'PENDING'
+    </update>
+
+    <select id="countPendingBySessionId" resultType="int">
+        SELECT count(*) FROM practice_session_exercises
+        WHERE session_id = #{sessionId} AND status = 'PENDING'
+    </select>
+
+    <update id="completeSession">
+        UPDATE practice_sessions
+        SET status = 'COMPLETED', completed_at = now()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

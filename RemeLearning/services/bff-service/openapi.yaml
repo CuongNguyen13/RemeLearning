@@ -139,7 +139,7 @@ paths:
   /api/v1/learners/{userId}/weak-points:
     get:
       tags: [Learners]
-      summary: All of a learner's weak points, merged from english-service's vocabulary/grammar/pronunciation endpoints, keyed by category
+      summary: All of a learner's weak points, merged from english-service's vocabulary/grammar/pronunciation/listening endpoints, keyed by category
       operationId: getLearnerWeakPoints
       parameters:
         - name: userId
@@ -171,6 +171,83 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponseRecommendationsByCategory"
+
+  /api/v1/learners/{userId}/practice/sessions:
+    post:
+      tags: [Learners]
+      summary: >
+        Start a practice session (~4 AI exercises across random topics aimed at the learner's
+        highest-scoring weak points, mixing all four skills); thin proxy to english-service
+      operationId: startPracticeSession
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartPracticeSessionRequestDto"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/learners/{userId}/practice/sessions/latest:
+    get:
+      tags: [Learners]
+      summary: The learner's most recent still-in-progress practice session (for resume), or null; thin proxy to english-service
+      operationId: getLatestPracticeSession
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/learners/{userId}/practice/sessions/{sessionId}:
+    get:
+      tags: [Learners]
+      summary: Read back one practice session with its exercise slots; thin proxy to english-service
+      operationId: getPracticeSession
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: sessionId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
+
+  /api/v1/learners/{userId}/practice/sessions/{sessionId}/exercises/{order}/complete:
+    post:
+      tags: [Learners]
+      summary: Record one exercise slot's score after it was graded via its domain endpoint; thin proxy to english-service
+      operationId: completePracticeExercise
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: sessionId, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: order, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompletePracticeExerciseRequestDto"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePracticeSession"
 
   /api/v1/learners/{userId}/dictation/facets:
     get:
@@ -1814,18 +1891,63 @@ components:
       properties:
         name: { type: string }
 
+    StartPracticeSessionRequestDto:
+      type: object
+      description: Body for starting a practice session; userId is stamped from the path.
+      properties:
+        userId: { type: string }
+        exerciseCount: { type: integer, nullable: true, description: "defaults to 4, clamped to 1..8" }
+
+    CompletePracticeExerciseRequestDto:
+      type: object
+      required: [score]
+      properties:
+        score: { type: number, format: double, description: "0..1 accuracy/overall for the graded slot" }
+
+    PracticeSessionExerciseDto:
+      type: object
+      description: One exercise slot in a session - a reference to the domain practice item to run.
+      properties:
+        order: { type: integer }
+        category: { type: string, description: "vocabulary | grammar | listening | speaking" }
+        practiceItemId: { type: integer, format: int64 }
+        topic: { type: string, nullable: true }
+        status: { type: string, description: "PENDING | DONE" }
+        score: { type: number, format: double, nullable: true }
+
+    PracticeSessionDto:
+      type: object
+      properties:
+        sessionId: { type: integer, format: int64 }
+        status: { type: string, description: "IN_PROGRESS | COMPLETED" }
+        totalExercises: { type: integer }
+        exercises:
+          type: array
+          items: { $ref: "#/components/schemas/PracticeSessionExerciseDto" }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    ApiResponsePracticeSession:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/PracticeSessionDto" }
+
     WeakPoint:
       type: object
       description: >
-        Merged shape across english-service's three domain endpoints. category is stamped by
-        bff-service itself (a literal "vocabulary"/"grammar"/"pronunciation") since each domain's
-        own JSON carries a domain-specific type field instead of a shared category.
+        Merged shape across english-service's four domain endpoints. category is stamped by
+        bff-service itself (a literal "vocabulary"/"grammar"/"pronunciation"/"listening") since each
+        domain's own JSON carries a domain-specific type field instead of a shared category.
+        sourceType is only populated when category is "listening" (DICTATION or COMPREHENSION).
       properties:
         itemId: { type: string }
         label: { type: string }
-        category: { type: string, enum: [vocabulary, grammar, pronunciation] }
+        category: { type: string, enum: [vocabulary, grammar, pronunciation, listening] }
         forgettingScore: { type: number, format: double }
         recommendation: { type: string }
+        sourceType: { type: string, enum: [DICTATION, COMPREHENSION], nullable: true }
 
     Recording:
       type: object
