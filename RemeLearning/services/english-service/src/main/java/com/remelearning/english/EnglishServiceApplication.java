@@ -30,7 +30,8 @@ import org.springframework.context.annotation.ComponentScan;
 		"com.remelearning.english.listening.library.mapper",
 		"com.remelearning.english.speaking.mapper",
 		"com.remelearning.english.speaking.library.mapper",
-		"com.remelearning.english.writing.mapper"
+		"com.remelearning.english.writing.mapper",
+		"com.remelearning.english.writing.library.mapper"
 })
 public class EnglishServiceApplication {
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.writing.library.mapper.WritingLibraryAttemptMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.writing.library.domain.WritingLibraryAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO writing_library_attempts
+            (user_id, prompt_id, submitted_text, corrected_text, score, criteria, errors, feedback,
+             started_at, completed_at)
+        VALUES
+            (#{userId}, #{promptId}, #{submittedText}, #{correctedText}, #{score}, #{criteriaJson},
+             #{errorsJson}, #{feedback}, #{startedAt}, #{completedAt})
+    </insert>
+
+    <select id="findByUserId" resultType="com.remelearning.english.writing.library.domain.WritingLibraryAttempt">
+        SELECT id, user_id, prompt_id, submitted_text, corrected_text, score,
+               criteria AS criteria_json, errors AS errors_json, feedback, started_at, completed_at
+        FROM writing_library_attempts WHERE user_id = #{userId}
+        ORDER BY completed_at DESC
+    </select>
+
+    <select id="findByIdAndUserId" resultType="com.remelearning.english.writing.library.domain.WritingLibraryAttempt">
+        SELECT id, user_id, prompt_id, submitted_text, corrected_text, score,
+               criteria AS criteria_json, errors AS errors_json, feedback, started_at, completed_at
+        FROM writing_library_attempts WHERE id = #{attemptId} AND user_id = #{userId}
+    </select>
+
+</mapper>

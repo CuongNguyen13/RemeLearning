@@ -3,13 +3,9 @@ package com.remelearning.english.writing.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.remelearning.common.constants.LearningCategories;
 import com.remelearning.common.exception.BusinessException;
 import com.remelearning.english.grammar.domain.GrammarWeakPoint;
 import com.remelearning.english.grammar.service.GrammarWeakPointService;
-import com.remelearning.english.practice.dto.PracticeAttemptRequest;
-import com.remelearning.english.practice.dto.PracticeRedoRequest;
-import com.remelearning.english.practice.service.PracticeService;
 import com.remelearning.english.vocabulary.domain.VocabularyWeakPoint;
 import com.remelearning.english.vocabulary.service.VocabularyWeakPointService;
 import com.remelearning.english.writing.domain.WritingAttempt;
@@ -29,59 +25,45 @@ import com.remelearning.english.writing.dto.WritingPracticeItemDto;
 import com.remelearning.english.writing.generator.GeneratedWritingPractice;
 import com.remelearning.english.writing.generator.WritingMistakeAnalyzer;
 import com.remelearning.english.writing.generator.WritingPracticeGenerator;
+import com.remelearning.english.writing.grading.WritingErrorPipeline;
 import com.remelearning.english.writing.grading.WritingGrade;
 import com.remelearning.english.writing.grading.WritingGrader;
 import com.remelearning.english.writing.mapper.WritingMapper;
 import com.remelearning.english.writing.suggestion.NextSentenceSuggester;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
  * Orchestrates the writing/translation skill, structurally mirroring
  * {@code ListeningLearnServiceImpl}: generate an AI prompt from the learner's weak points, grade the
  * submission, then feed each graded mistake back into the existing weak-point/spaced-repetition
- * pipeline via {@link PracticeService#redo}.
+ * pipeline via {@code PracticeService#redo}.
  *
  * <p>The one structural difference from every other skill: this domain has no weak-point table of
  * its own. Each error the grader reports already carries the category it belongs to, so errors are
  * routed into {@code grammar_weak_points}/{@code vocabulary_weak_points} instead - which is what
  * makes a "past perfect" slip while writing add to the same label already accumulated from
- * dictation/listening, rather than starting a parallel tally.
+ * dictation/listening, rather than starting a parallel tally. That routing lives in
+ * {@link WritingErrorPipeline}, shared with the library tab.
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WritingLearnServiceImpl implements WritingLearnService {
 
 	private static final int DEFAULT_FOCUS_LIMIT = 8;
 
-	/**
-	 * The {@code itemId} prefix each category's weak points are already keyed under. These are NOT
-	 * simply the category names - vocabulary's existing rows use {@code "vocab:"} (see
-	 * {@code VocabLearnServiceImpl}/{@code VocabularyLibraryServiceImpl}), so deriving the prefix
-	 * from the category string would key writing mistakes under {@code "vocabulary:"} and quietly
-	 * build a second, parallel set of rows instead of merging into the learner's real ones.
-	 */
-	private static final Map<String, String> ITEM_ID_PREFIXES = Map.of(
-			LearningCategories.GRAMMAR, "grammar:",
-			LearningCategories.VOCABULARY, "vocab:");
-
 	private final WritingMapper writingMapper;
 	private final WritingPracticeGenerator generator;
 	private final WritingGrader grader;
 	private final NextSentenceSuggester suggester;
+	private final WritingErrorPipeline errorPipeline;
 	private final GrammarWeakPointService grammarWeakPointService;
 	private final VocabularyWeakPointService vocabularyWeakPointService;
-	private final PracticeService practiceService;
 	private final ObjectMapper objectMapper;
 
 	@Override
@@ -119,7 +101,7 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 		WritingGrade grade = grader.grade(
 				item.getTaskType(), item.getPromptText(), item.getReferenceAnswer(), request.getSubmittedText());
 
-		double overallScore = averageCriteria(grade.criteria());
+		double overallScore = errorPipeline.averageCriteria(grade.criteria());
 		WritingAttempt attempt = WritingAttempt.builder()
 				.practiceItemId(item.getId())
 				.userId(request.getUserId())
@@ -132,7 +114,7 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 				.build();
 		writingMapper.insertAttempt(attempt);
 
-		feedWeakPoints(request.getUserId(), grade.errors());
+		errorPipeline.feedWeakPoints(request.getUserId(), grade.errors());
 
 		return WritingAttemptResultDto.builder()
 				.attemptId(attempt.getId())
@@ -142,7 +124,7 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 				.errors(grade.errors())
 				.feedback(grade.feedbackVi())
 				.referenceAnswer(item.getReferenceAnswer())
-				.actionAdvice(buildActionAdvice(grade.errors()))
+				.actionAdvice(errorPipeline.buildActionAdvice(grade.errors()))
 				.build();
 	}
 
@@ -246,75 +228,6 @@ public class WritingLearnServiceImpl implements WritingLearnService {
 				.distinct()
 				.limit(DEFAULT_FOCUS_LIMIT)
 				.toList();
-	}
-
-	// Turns each labelled error into one PracticeAttemptRequest and submits them as a single redo
-	// batch. That one call is what wires this skill into everything else: the dispatcher updates the
-	// owning domain's weak-point row, mistake_history's Leitner schedule surfaces the label in the
-	// review queue, and the learning.gap.analysis.requested event it publishes lets
-	// recommendation-service/dashboard-service catch up.
-	//
-	// Deduped by (category, label) so repeating the same mistake three times in one text counts as
-	// one weak point, not three. An error with no routable prefix is skipped - the grader already
-	// filters those out, this is a second guard for the persisted-history path.
-	private void feedWeakPoints(String userId, List<WritingErrorItem> errors) {
-		List<PracticeAttemptRequest> attempts = new ArrayList<>();
-		Set<String> seenLabels = new LinkedHashSet<>();
-		for (WritingErrorItem error : errors) {
-			String prefix = ITEM_ID_PREFIXES.get(error.getCategory());
-			if (prefix == null || error.getLabel() == null || error.getLabel().isBlank()) {
-				log.warn("Skipping writing error with category '{}' - no weak-point domain to route it to",
-						error.getCategory());
-				continue;
-			}
-			String normalizedLabel = error.getLabel().trim().toLowerCase();
-			if (!seenLabels.add(error.getCategory() + "|" + normalizedLabel)) {
-				continue;
-			}
-			PracticeAttemptRequest attempt = new PracticeAttemptRequest();
-			attempt.setItemId(prefix + normalizedLabel);
-			attempt.setCategory(error.getCategory());
-			attempt.setLabel(error.getLabel().trim());
-			attempt.setCorrect(false);
-			attempts.add(attempt);
-		}
-		if (attempts.isEmpty()) {
-			return;
-		}
-		PracticeRedoRequest request = new PracticeRedoRequest();
-		request.setUserId(userId);
-		request.setAttempts(attempts);
-		practiceService.redo(request);
-	}
-
-	// Mean of the criteria that are actually populated for this task type. Computed here rather than
-	// taken from the LLM, which routinely reports an overall figure inconsistent with the very
-	// criteria it just scored.
-	private double averageCriteria(WritingCriteriaScores criteria) {
-		List<Double> scores = Stream.of(
-						criteria.getGrammar(), criteria.getVocabulary(), criteria.getCoherence(),
-						criteria.getAccuracy(), criteria.getTaskResponse())
-				.filter(score -> score != null)
-				.toList();
-		if (scores.isEmpty()) {
-			return 0.0;
-		}
-		return scores.stream().mapToDouble(Double::doubleValue).sum() / scores.size();
-	}
-
-	// Short Vietnamese next-steps, one per distinct error label, same idea as listening's
-	// actionAdvice - gives the learner something to do beyond reading the corrections.
-	private List<String> buildActionAdvice(List<WritingErrorItem> errors) {
-		Set<String> advice = new LinkedHashSet<>();
-		for (WritingErrorItem error : errors) {
-			if (error.getLabel() == null || error.getLabel().isBlank()) {
-				continue;
-			}
-			advice.add(LearningCategories.VOCABULARY.equals(error.getCategory())
-					? "Ôn lại cách dùng \"%s\" và đặt thêm 3 câu với nó.".formatted(error.getLabel())
-					: "Ôn lại quy tắc \"%s\" rồi viết lại 3 câu cho đúng.".formatted(error.getLabel()));
-		}
-		return new ArrayList<>(advice);
 	}
 
 	private WritingPracticeItemDto toItemDto(WritingPracticeItem item) {

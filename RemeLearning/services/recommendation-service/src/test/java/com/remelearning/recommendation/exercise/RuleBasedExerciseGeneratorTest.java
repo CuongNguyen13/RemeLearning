@@ -39,10 +39,20 @@ class RuleBasedExerciseGeneratorTest {
 
 	@Test
 	void fallsBackToDefaultTemplateForUnknownCategory() {
-		List<String> exercises = generator.generate("listening", "note-taking", 0.5);
+		// Deliberately a category no skill produces - "listening" and "writing" now have their own
+		// templates, so using either here would silently stop testing the fallback path.
+		List<String> exercises = generator.generate("kinaesthetics", "note-taking", 0.5);
 
 		assertThat(exercises).hasSize(1);
 		assertThat(exercises.get(0)).contains("note-taking");
+	}
+
+	@Test
+	void hasDedicatedTemplatesForEverySkillCategoryThatProducesWeakPoints() {
+		// Every category a producer of learning.gap.analyzed can emit must have real templates rather
+		// than the generic "Ôn lại nội dung" default, or the recommendation is useless to the learner.
+		assertThat(generator.generate("listening", "airport announcements", 0.5)).hasSizeGreaterThan(1);
+		assertThat(generator.generate("writing", "past perfect", 0.5)).hasSizeGreaterThan(1);
 	}
 
 	@Test

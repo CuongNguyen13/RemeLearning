@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.writing.library.mapper.WritingLibraryPromptMapper">
+
+    <insert id="insert" parameterType="com.remelearning.english.writing.library.domain.WritingLibraryPrompt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO writing_library_prompts
+            (topic_id, task_type, prompt_text, reference_answer, min_words, explanation, created_at)
+        VALUES
+            (#{topicId}, #{taskType}, #{promptText}, #{referenceAnswer}, #{minWords}, #{explanation}, now())
+    </insert>
+
+    <select id="findById" resultType="com.remelearning.english.writing.library.domain.WritingLibraryPrompt">
+        SELECT id, topic_id, task_type, prompt_text, reference_answer, min_words, explanation, created_at
+        FROM writing_library_prompts WHERE id = #{promptId}
+    </select>
+
+    <select id="findByTopicId" resultType="com.remelearning.english.writing.library.domain.WritingLibraryPrompt">
+        SELECT id, topic_id, task_type, prompt_text, reference_answer, min_words, explanation, created_at
+        FROM writing_library_prompts WHERE topic_id = #{topicId}
+        ORDER BY id
+    </select>
+
+</mapper>

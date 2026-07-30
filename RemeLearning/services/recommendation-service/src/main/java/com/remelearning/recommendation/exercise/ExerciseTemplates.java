@@ -24,7 +24,15 @@ final class ExerciseTemplates {
 			"pronunciation", List.of(
 					"Nghe mẫu phát âm chuẩn của \"%s\" 3 lần rồi nhại lại (shadowing).",
 					"Ghi âm bản thân đọc \"%s\" và so sánh với bản mẫu.",
-					"Luyện đọc to 5 câu có chứa \"%s\" trước gương trong 5 phút."));
+					"Luyện đọc to 5 câu có chứa \"%s\" trước gương trong 5 phút."),
+			"listening", List.of(
+					"Nghe lại một đoạn hội thoại có \"%s\" và ghi ra những gì bạn nghe được.",
+					"Luyện nghe chép chính tả (dictation) một đoạn ngắn chứa \"%s\".",
+					"Nghe rồi nhắc lại (shadowing) 3 câu có \"%s\" để quen với cách nói tự nhiên."),
+			"writing", List.of(
+					"Viết một đoạn văn ngắn buộc phải dùng \"%s\" ít nhất ba lần.",
+					"Dịch 5 câu tiếng Việt sang tiếng Anh sao cho câu nào cũng cần đến \"%s\".",
+					"Viết lại những câu bạn từng sai về \"%s\" cho đúng, rồi tự so với bản sửa của AI."));
 
 	private static final List<String> DEFAULT_TEMPLATE = List.of("Ôn lại nội dung: \"%s\".");
 

@@ -23,6 +23,7 @@ import com.remelearning.english.writing.dto.WritingAttemptResultDto;
 import com.remelearning.english.writing.dto.WritingPracticeItemDto;
 import com.remelearning.english.writing.generator.GeneratedWritingPractice;
 import com.remelearning.english.writing.generator.WritingPracticeGenerator;
+import com.remelearning.english.writing.grading.WritingErrorPipeline;
 import com.remelearning.english.writing.grading.WritingGrade;
 import com.remelearning.english.writing.grading.WritingGrader;
 import com.remelearning.english.writing.mapper.WritingMapper;
@@ -52,9 +53,12 @@ class WritingLearnServiceImplTest {
 	private final VocabularyWeakPointService vocabularyWeakPointService = mock(VocabularyWeakPointService.class);
 	private final PracticeService practiceService = mock(PracticeService.class);
 	private final ObjectMapper objectMapper = new ObjectMapper();
+	// The real pipeline, not a mock: the weak-point routing (item-id prefixes, dedupe, skipping
+	// unroutable categories) is the subtle part of this flow and is worth exercising for real here.
+	private final WritingErrorPipeline errorPipeline = new WritingErrorPipeline(practiceService);
 	private final WritingLearnServiceImpl service = new WritingLearnServiceImpl(
-			mapper, generator, grader, suggester, grammarWeakPointService, vocabularyWeakPointService,
-			practiceService, objectMapper);
+			mapper, generator, grader, suggester, errorPipeline, grammarWeakPointService,
+			vocabularyWeakPointService, objectMapper);
 
 	@Test
 	void generateFallsBackToBothGrammarAndVocabularyWeakPointsWhenNoFocusItemsGiven() {

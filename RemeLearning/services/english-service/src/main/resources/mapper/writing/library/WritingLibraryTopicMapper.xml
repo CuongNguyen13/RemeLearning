@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.writing.library.mapper.WritingLibraryTopicMapper">
+
+    <select id="findById" resultType="com.remelearning.english.writing.library.domain.WritingLibraryTopic">
+        SELECT id, taxonomy, code, name, description, level, sequence_order, created_at
+        FROM writing_library_topics WHERE id = #{topicId}
+    </select>
+
+    <select id="findByTaxonomy" resultType="com.remelearning.english.writing.library.domain.WritingLibraryTopic">
+        SELECT id, taxonomy, code, name, description, level, sequence_order, created_at
+        FROM writing_library_topics WHERE taxonomy = #{taxonomy}
+        ORDER BY sequence_order
+    </select>
+
+    <!-- Axis-scoped lookup: sequence_order is unique per taxonomy only, so omitting the taxonomy
+         here would let "unlock the next topic" jump onto a different axis. -->
+    <select id="findByTaxonomyAndSequenceOrder" resultType="com.remelearning.english.writing.library.domain.WritingLibraryTopic">
+        SELECT id, taxonomy, code, name, description, level, sequence_order, created_at
+        FROM writing_library_topics
+        WHERE taxonomy = #{taxonomy} AND sequence_order = #{sequenceOrder}
+    </select>
+
+</mapper>
