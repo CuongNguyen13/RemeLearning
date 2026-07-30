@@ -17,4 +17,11 @@ public final class LearningCategories {
 	public static final String GRAMMAR = "grammar";
 	public static final String PRONUNCIATION = "pronunciation";
 	public static final String LISTENING = "listening";
+	/**
+	 * The writing/translation skill. Unlike the others this is NOT used as a weak-point category:
+	 * every mistake the writing grader reports is already labelled {@code grammar} or
+	 * {@code vocabulary} and is routed there, so a writing slip merges with the same label from other
+	 * skills. This constant marks the skill itself (recommendation exercise templates, UI routing).
+	 */
+	public static final String WRITING = "writing";
 }

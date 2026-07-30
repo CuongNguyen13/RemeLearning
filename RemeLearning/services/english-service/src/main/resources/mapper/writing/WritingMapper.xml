@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.remelearning.english.writing.mapper.WritingMapper">
+
+    <insert id="insertItem" parameterType="com.remelearning.english.writing.domain.WritingPracticeItem"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO writing_practice_items
+            (user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang,
+             reference_answer, target_labels, created_at)
+        VALUES
+            (#{userId}, #{taskType}, #{level}, #{examType}, #{topic}, #{promptText}, #{sourceLang},
+             #{targetLang}, #{referenceAnswer}, #{targetLabelsJson}, now())
+    </insert>
+
+    <select id="findItemById" resultType="com.remelearning.english.writing.domain.WritingPracticeItem">
+        SELECT id, user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang,
+               reference_answer, target_labels AS target_labels_json, created_at
+        FROM writing_practice_items
+        WHERE id = #{itemId}
+    </select>
+
+    <select id="findItemsByUserId" resultType="com.remelearning.english.writing.domain.WritingPracticeItem">
+        SELECT id, user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang,
+               reference_answer, target_labels AS target_labels_json, created_at
+        FROM writing_practice_items
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+    <insert id="insertAttempt" parameterType="com.remelearning.english.writing.domain.WritingAttempt"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO writing_attempts
+            (practice_item_id, user_id, submitted_text, corrected_text, overall_score, criteria,
+             errors, feedback, created_at)
+        VALUES
+            (#{practiceItemId}, #{userId}, #{submittedText}, #{correctedText}, #{overallScore},
+             #{criteriaJson}, #{errorsJson}, #{feedback}, now())
+    </insert>
+
+    <select id="findHistoryByUserId" resultType="com.remelearning.english.writing.domain.WritingAttemptHistoryRow">
+        SELECT a.id AS attempt_id, a.practice_item_id AS practice_item_id,
+               i.task_type AS task_type, i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               a.overall_score AS score, a.created_at AS created_at
+        FROM writing_attempts a
+        JOIN writing_practice_items i ON i.id = a.practice_item_id
+        WHERE a.user_id = #{userId}
+        ORDER BY a.created_at DESC
+    </select>
+
+    <select id="findAttemptDetailByIdAndUserId" resultType="com.remelearning.english.writing.domain.WritingAttemptDetailRow">
+        SELECT a.id AS attempt_id, a.practice_item_id AS practice_item_id,
+               i.task_type AS task_type, i.level AS level, i.exam_type AS exam_type, i.topic AS topic,
+               i.prompt_text AS prompt_text, i.reference_answer AS reference_answer,
+               a.submitted_text AS submitted_text, a.corrected_text AS corrected_text,
+               a.overall_score AS overall_score, a.criteria AS criteria_json,
+               a.errors AS errors_json, a.feedback AS feedback, a.created_at AS created_at
+        FROM writing_attempts a
+        JOIN writing_practice_items i ON i.id = a.practice_item_id
+        WHERE a.id = #{attemptId} AND a.user_id = #{userId}
+    </select>
+
+</mapper>

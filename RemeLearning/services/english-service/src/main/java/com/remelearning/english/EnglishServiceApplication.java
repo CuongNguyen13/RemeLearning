@@ -29,7 +29,8 @@ import org.springframework.context.annotation.ComponentScan;
 		"com.remelearning.english.listening.weakpoint.mapper",
 		"com.remelearning.english.listening.library.mapper",
 		"com.remelearning.english.speaking.mapper",
-		"com.remelearning.english.speaking.library.mapper"
+		"com.remelearning.english.speaking.library.mapper",
+		"com.remelearning.english.writing.mapper"
 })
 public class EnglishServiceApplication {
 
