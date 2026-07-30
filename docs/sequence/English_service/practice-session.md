@@ -112,3 +112,26 @@ A `GET /api/v1/practice/sessions/{sessionId}` (one session) and `GET /api/v1/pra
   empty focus so its generator self-falls-back to recently-missed keywords.
 - Generation is sequential (each domain `generate` is `@Transactional`, and listening/speaking
   synthesize TTS), so `POST /practice/sessions` can be slow — the FE shows a generating state.
+
+## Update: five skills and a per-session exam style
+
+Two changes to `startSession`:
+
+**1. `writing` joined the rotation** (five skills, not four). It is the only category that cannot be
+ranked off its own weak-point table, because by design it has none - a writing mistake is stored as a
+`grammar` or `vocabulary` weak point (see [writing-learn.md](writing-learn.md)). So it borrows both:
+
+- **Ranking score:** `max(grammar top score, vocabulary top score)`. It participates whenever either of
+  those two has any weak point at all.
+- **Focus items:** the grammar labels *and* the vocabulary labels, concatenated - writing is the one
+  exercise that drills both at once, so narrowing it to one domain would waste that.
+- **Task type:** one of `COMPOSE`/`TRANSLATE_VI_EN`/`TRANSLATE_EN_VI` at random per slot, so a
+  multi-exercise session doesn't serve the same writing mode twice. Unlike the other domains' optional
+  facets, `taskType` is *required* by the writing generator, which is why the session picks one.
+
+Cold start (no weak points anywhere) now spreads one exercise across all five skills.
+
+**2. `examType` on the request** (`TOEIC`/`IELTS`/`TOEFL`/`VSTEP`/`General`, optional). Normalized once
+via `ExamTypes.normalize` and passed to **every** domain generator, so a whole session is generated for
+one consistent exam style rather than each slot defaulting independently. Omitted means no exam in
+mind, which is what the session did unconditionally before this field existed.

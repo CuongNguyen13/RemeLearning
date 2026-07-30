@@ -132,6 +132,7 @@ Three LLM-backed components, all with the "never throws" contract the other skil
 
 - `generator.LlmWritingPracticeGenerator` — one Gemini call producing the prompt + its reference
   answer, built around the learner's weakest labels. Falls back to a per-task-type static template.
+  Driven by `generator.WritingExamProfile` (see below).
 - `grading.LlmWritingGrader` — one Gemini call returning per-criterion scores plus a list of
   **labelled** errors. Falls back to a neutral 0.5 with an empty error list, so a grading outage never
   writes anything bogus into the learner's weak points.
@@ -146,6 +147,26 @@ error the grader reports already carries `category` = `"grammar"` or `"vocabular
 `grading.WritingErrorPipeline` routes it into those domains' existing rows via
 `PracticeService.redo(...)`. That is what makes a "past perfect" slip while writing add to the same
 weak-point row dictation/listening already built up, instead of starting a parallel tally.
+
+**`WritingExamProfile` — why the exam style is not just a prompt label.** Each exam implies a
+genuinely different task, so the profile enum turns `examType` into concrete choices *made in Java*
+and handed to the model as instructions:
+
+| Exam | Sentences | Subject pool | Register | COMPOSE format |
+|---|---|---|---|---|
+| TOEIC | 2–4 | workplace/commercial | practical, businesslike | email, internal notice, complaint reply, short report |
+| IELTS | 4–6 | academic/social | formal, academic | opinion/discussion/problem-solution essay, Task 1 data description |
+| TOEFL | 3–5 | campus/science | conversational-academic | independent essay, reading+lecture summary, email to a professor |
+| VSTEP | 3–5 | Vietnam-context | semi-formal | situational letter, opinion essay |
+| GENERAL (also: blank/unknown) | 3–5 | everyday | natural everyday | narrative, description, opinion paragraph |
+
+The sentence count is drawn **fresh per generation** from the range, so ten TOEIC translations differ
+in length. Before this, the count was hardcoded "3-5" in the prompt and only the label varied, which
+produced near-identical passages whatever the learner was preparing for. `ExamTypes.normalize`
+(module `common`) canonicalizes the value first so `"toeic"` and `"TOEIC"` don't become two stored
+variants, and an unrecognised label reaches the model verbatim while length/register fall back to
+GENERAL. The library generator uses the same profile, and the retry endpoints accept an `examType`
+query param that overrides the original attempt's.
 
 **Gotcha — item-id prefixes.** The pipeline maps `grammar` → `"grammar:"` and `vocabulary` →
 **`"vocab:"`**, matching what `VocabLearnServiceImpl`/`VocabularyLibraryServiceImpl` already write.

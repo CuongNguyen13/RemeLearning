@@ -752,7 +752,8 @@ flowchart TD
 
 | Stage | Format | Notes |
 |---|---|---|
-| `GenerateWritingPracticeRequest` | `{taskType, level?, examType?, focusItems?}` | only `taskType` required; empty `focusItems` ⇒ top weak points of **both** grammar and vocabulary, merged and capped at 8 |
+| `GenerateWritingPracticeRequest` | `{taskType, level?, examType?, focusItems?}` | only `taskType` required; empty `focusItems` ⇒ top weak points of **both** grammar and vocabulary, merged and capped at 8; `examType` normalized via `ExamTypes.normalize` before being stored/used |
+| `WritingExamProfile` (in-memory) | enum `TOEIC, IELTS, TOEFL, VSTEP, GENERAL` → `{minSentences, maxSentences, topics[], registerHint, composeFormats[]}` | resolved from `examType` (unknown/blank ⇒ `GENERAL`). The **sentence count is drawn randomly from the range on every generation**, so repeated tasks differ in length instead of all coming out the same shape; TOEIC 2-4 workplace sentences vs IELTS 4-6 academic ones. Chosen in Java and handed to the model as instructions - passing only the label produced near-identical passages for every exam |
 | `WritingTaskType` | enum `COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI` | carries its own `sourceLang`/`targetLang`, so those are derived server-side rather than sent by the client |
 | `GeneratedWritingPractice` (in-memory) | `{topic, promptText, referenceAnswer}` | `promptText` = Vietnamese brief (COMPOSE) or source passage (TRANSLATE_*), always prefixed with a Vietnamese instruction line — including in the offline fallback |
 | `writing_practice_items` row | `{id, user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang, reference_answer, target_labels, created_at}` | `reference_answer` never leaves the service before a submission — `WritingPracticeItemDto` has no field for it |
@@ -786,6 +787,11 @@ flowchart TD
   falling through to the generic default).
 - Both tabs share `WritingGrader` and `WritingErrorPipeline`, so scoring and weak-point routing cannot
   drift between "học thường" and "Thư viện".
+- `examType` now flows in from three places, all optional and all normalized the same way: the generate
+  request, the retry query param (overriding the original attempt's), and the library start-prompt query
+  param (affecting newly generated prompts only). `practice.session` also passes one exam style to every
+  domain generator for a whole session, and its rotation now includes a `writing` slot ranked by
+  `max(grammar, vocabulary)` - writing has no weak-point table of its own to rank by.
 
 ## Data shape at each stage
 

@@ -415,3 +415,46 @@ repo, không đổi quyết định thiết kế nào ở mục 2.
 Kết quả kiểm chứng: `english-service` 365 test, `recommendation-service` 14 test,
 `bff-service` 30 test — tất cả xanh. FE: `tsc -b` sạch, `npm run build` thành công, `npm run lint` chỉ
 còn 3 warning có sẵn ở file shadcn `components/ui/*`.
+
+## 12. Bổ sung sau khi triển khai: dạng đề quyết định hình dạng bài tập
+
+Yêu cầu bổ sung của người dùng, làm sau khi bản đầu đã xong:
+
+> - việt-anh thêm đoạn văn tiếng việt viết người dùng dịch sang tiếng anh. nếu chọn mục tiếng anh - việt
+>   thì đưa ra đoạn văn tiếng anh để dịch sang tiếng việt. (số lượng câu sẽ được random theo chủ đề của
+>   toeic hoặc ielts)
+> - phần viết theo đề sẽ cho chọn toeic hoặc ielts. mục luyện tập với AI sẽ cho chọn theo dạng đề
+
+Đã làm rõ với người dùng: "mục luyện tập với AI" là **cả ba** chỗ (nút "Tạo bài luyện" ở trang Luyện
+viết, nút "Luyện lại những lỗi này", và trang Luyện tập `/practice`), và dạng đề gồm **các dạng phổ
+biến** chứ không chỉ TOEIC/IELTS.
+
+### Đã làm
+
+| # | Thay đổi | Ghi chú |
+|---|---|---|
+| 1 | `common/ExamTypes` | Bộ dạng đề phổ biến (TOEIC, IELTS, TOEFL, VSTEP, General) + `normalize()`. Trước đó `examType` là chuỗi tự do, nên `"toeic"`/`"TOEIC"` lưu thành hai giá trị khác nhau và lookup profile trượt một trong hai |
+| 2 | `writing/generator/WritingExamProfile` | Mỗi dạng đề → khoảng số câu, bộ chủ đề, văn phong, và (cho `COMPOSE`) các thể loại văn bản. TOEIC 2–4 câu/chủ đề công việc; IELTS 4–6 câu/chủ đề học thuật; TOEFL/VSTEP/General 3–5 |
+| 3 | Số câu **random mỗi lần sinh** trong khoảng của dạng đề | Trước đó prompt ghi cứng "3-5 sentences" nên mọi đoạn văn đều cùng độ dài |
+| 4 | Số câu/chủ đề/văn phong do **Java quyết định** rồi truyền xuống prompt dưới dạng chỉ thị | Chỉ đưa nhãn "TOEIC" thì mô hình trả về đoạn văn gần như giống nhau cho mọi dạng đề — đây là lý do tồn tại của `WritingExamProfile` |
+| 5 | `LlmWritingLibraryContentGenerator` nhận `examType` | Trước đó bỏ qua hoàn toàn, nên bài thư viện không phản ánh dạng đề |
+| 6 | Retry (`/ai-practice`, cả learn và library) nhận query param `examType` | Ghi đè dạng đề của bài cũ; bỏ trống thì giữ nguyên |
+| 7 | `practice.session`: thêm kỹ năng `writing` | Không có bảng weak-point riêng nên xếp hạng theo `max(grammar, vocabulary)` và nhận nhãn của **cả hai**; `taskType` random 1 trong 3 mode; cold start trải đều **5** kỹ năng |
+| 8 | `practice.session`: `examType` trong request body | Chuẩn hóa một lần, truyền xuống **mọi** domain generator để cả buổi nhất quán |
+| 9 | FE: `GenerateDialog` thêm prop `examTypeOptions` | Có prop ⇒ render `Select` các dạng đề; không có ⇒ giữ ô text tự do như cũ, nên 4 skill kia không bị đổi hành vi |
+| 10 | FE: trang Luyện viết dùng `GenerateDialog` | Trước đó bấm "Tạo bài luyện" là sinh luôn, không cho chọn trình độ/dạng đề. Dạng đề vừa chọn được nhớ lại và dùng cho tab Thư viện + retry |
+| 11 | FE: trang `/practice` thêm picker dạng đề trước nút bắt đầu | |
+
+### Sai khác so với mục 11 (ghi chú triển khai bản đầu)
+
+- Mục 11 ghi retry "giữ nguyên `taskType`/`level`/`examType` của bài cũ" — nay `examType` **có thể**
+  ghi đè qua query param, `taskType`/`level` vẫn giữ nguyên.
+- `WritingLibraryContentGenerator.generatePrompt` và `WritingLibraryService.startOrResumePrompt` đổi
+  signature (thêm `examType`); `PracticeSessionService.startSession` cũng vậy.
+
+### Kiểm chứng
+
+`english-service` 380 test, `bff-service` 30 test, `recommendation-service` 14 test — tất cả xanh
+(27 test mới/cập nhật, trong đó `WritingExamProfileTest` giữ cho khoảng số câu TOEIC luôn ngắn hơn
+IELTS và cho số câu thật sự thay đổi giữa các lần sinh). FE: `tsc -b` sạch, `npm run build` thành
+công, `npm run lint` chỉ còn 3 warning có sẵn ở `components/ui/*`.

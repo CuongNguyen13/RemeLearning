@@ -399,6 +399,18 @@ chấm điểm vẫn dùng **endpoint submit sẵn có của từng domain** —
 - **Response `data`** — `PracticeSession` (xem shape dưới). Sinh bài đồng bộ; slot listening/speaking
   tổng hợp audio nên phản hồi có thể chậm.
 
+**Cập nhật:** body nhận thêm `examType` (tùy chọn, `TOEIC`/`IELTS`/`TOEFL`/`VSTEP`/`General`) — dạng đề
+áp cho **toàn bộ** bài trong buổi luyện, chuẩn hóa một lần nên cả buổi nhất quán; truyền xuống mọi
+domain generator (`vocabulary`/`grammar`/`listening`/`speaking`/`writing`).
+
+**Kỹ năng `writing` nay cũng tham gia buổi luyện** (5 kỹ năng, không còn 4). Vì writing **không có bảng
+weak-point riêng**, nó không thể được xếp hạng theo bảng của mình như 4 kỹ năng kia — nên nó *vay* cả
+hai: xếp hạng theo `max(top score của grammar, top score của vocabulary)`, và nhận **cả hai** bộ nhãn
+làm focus items (writing là bài duy nhất luyện đồng thời ngữ pháp và từ vựng). Slot writing chọn ngẫu
+nhiên 1 trong 3 `taskType` để một buổi nhiều bài không lặp lại cùng một dạng. Cold start (chưa có weak
+point nào) giờ trải đều 5 kỹ năng.
+
+
 #### GET `/api/v1/practice/sessions/{sessionId}`
 - **Response `data`** — `PracticeSession`.
 
@@ -1286,6 +1298,33 @@ dictation/listening, thay vì tạo một bảng thống kê song song.
 `prompt_text` **luôn** có dòng chỉ dẫn tiếng Việt (kể cả bản fallback khi LLM lỗi), theo quy tắc chung
 của dự án: mọi bài luyện tập phải hiển thị yêu cầu bằng tiếng Việt.
 
+#### Dạng đề (`examType`) quyết định gì
+
+`examType` **không phải** chỉ là một nhãn dán vào prompt. Nó được resolve thành một
+`WritingExamProfile`, và profile đó quyết định **cụ thể** (do Java chọn, rồi mới truyền xuống LLM
+dưới dạng chỉ thị):
+
+| Dạng đề | Số câu đoạn nguồn | Chủ đề | Văn phong | Thể loại (chỉ `COMPOSE`) |
+|---|---|---|---|---|
+| `TOEIC` | 2–4 | công việc/thương mại: email xác nhận họp, thông báo nội bộ, đơn hàng, khiếu nại khách hàng, báo cáo bán hàng... | thực dụng như thư từ công sở thật | email cho đồng nghiệp/khách, thông báo nội bộ, trả lời khiếu nại, báo cáo ngắn |
+| `IELTS` | 4–6 | học thuật/xã hội: công nghệ & học tập, giao thông đô thị, môi trường, giáo dục, y tế công, du lịch... | trang trọng, học thuật kiểu IELTS Writing | luận nêu quan điểm, luận thảo luận, luận vấn đề–giải pháp, mô tả số liệu (Task 1) |
+| `TOEFL` | 3–5 | campus/khoa học: thông báo trường, tóm tắt bài giảng, chọn giữa hai phương án học... | học thuật nhưng đối thoại hơn | luận độc lập, tóm tắt bài đọc + bài giảng, email cho giáo sư |
+| `VSTEP` | 3–5 | bối cảnh Việt Nam: thi cử, giao thông, lễ hội/ẩm thực, chọn nghề... | bán trang trọng | thư/email theo tình huống (Task 1), luận nêu ý kiến (Task 2) |
+| `General` (hoặc không chọn / giá trị lạ) | 3–5 | đời thường | tự nhiên | kể chuyện ngắn, miêu tả, đoạn nêu ý kiến |
+
+Hai điểm quan trọng:
+
+- **Số câu được random trong khoảng ở MỖI lần sinh.** Làm 10 bài dịch TOEIC sẽ ra 10 độ dài khác nhau
+  trong khoảng 2–4 câu, chứ không phải 10 đoạn cùng hình dạng. Trước đây số câu cố định "3-5" ghi cứng
+  trong prompt nên mọi đoạn văn đều dài như nhau bất kể đang ôn thi gì.
+- **Java quyết định rồi mới bảo LLM, không để LLM tự suy từ chữ "TOEIC".** Đây là lý do có
+  `WritingExamProfile`: khi chỉ đưa nhãn, mô hình trả về đoạn văn gần như giống nhau cho mọi dạng đề.
+
+Khi có `focusItems`/nhãn weak point, **nhãn thắng** — chủ đề của profile chỉ còn là bối cảnh. Chuẩn hóa
+`examType` (`"toeic"` → `"TOEIC"`) diễn ra một lần khi lưu, nên cột `exam_type` không có hai biến thể
+của cùng một dạng đề. Giá trị lạ (dạng đề FE thêm trước BE) được truyền nguyên xuống prompt nhưng
+độ dài/văn phong dùng profile `General` — không làm fail request.
+
 ### POST `/api/v1/learn/writing/{userId}/generate`
 
 Sinh 1 đề. Body: `{ "taskType": "COMPOSE", "level": "B1", "examType": "IELTS", "focusItems": ["past perfect"] }`
@@ -1401,8 +1440,12 @@ LLM và luôn hiện đúng thứ người học đã thấy. 404 nếu attempt 
 
 "Luyện lại những lỗi này": đọc `errors` của bài cũ, rút danh sách nhãn lỗi (qua
 `WritingMistakeAnalyzer` — hàm thuần, không LLM/DB), rồi gọi lại **đúng** pipeline sinh đề mà
-`/generate` dùng với cùng `taskType`/`level`/`examType`. Đề mới vào cùng bank `writing_practice_items`.
-Trả về danh sách đề đã cập nhật.
+`/generate` dùng với cùng `taskType`/`level`. Đề mới vào cùng bank `writing_practice_items`. Trả về
+danh sách đề đã cập nhật.
+
+Query param `examType` (tùy chọn) **ghi đè** dạng đề của bài cũ, cho phép luyện lại đúng những lỗi đó
+nhưng ở dạng đề khác ("mình sai mấy lỗi này ở bài General, cho mình làm lại theo văn phong IELTS").
+Bỏ trống thì giữ dạng đề gốc — đây là trường hợp thường gặp.
 
 ### Writing Library — thư viện đề viết/dịch theo 3 trục taxonomy (package `writing.library`)
 
@@ -1430,11 +1473,14 @@ Danh sách topic của **một trục** kèm trạng thái gating của người
 (`passedPromptCount`/`targetPromptCount`). Tự mở topic đầu tiên **của trục đó** cho người học mới.
 `taxonomy` lạ ⇒ **400**, không phải danh sách rỗng (rỗng sẽ trông như catalogue bị thiếu).
 
-### POST `/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts?taskType=COMPOSE`
+### POST `/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts?taskType=COMPOSE&examType=IELTS`
 
 Lấy đề tiếp theo trong chuỗi: đề đầu tiên chưa đạt, hoặc sinh mới nếu chuỗi chưa đủ độ dài; khi đã
 đạt hết thì trả đề cuối để xem lại. Topic `LOCKED` ⇒ **403**. Response `WritingLibraryPrompt` có
 `position`/`targetPromptCount` để hiện "bài 3/6", `minWords`, và **không** có `referenceAnswer`.
+
+`examType` (tùy chọn) chỉ ảnh hưởng đề **sinh mới** — đề đang làm dở được resume nguyên trạng vì nó đã
+sinh xong rồi. Nhờ vậy cùng một chủ điểm thư viện đọc khác nhau giữa người ôn TOEIC và người ôn IELTS.
 
 ### POST `/api/v1/learn/writing/library/{userId}/prompts/{promptId}/submit`
 

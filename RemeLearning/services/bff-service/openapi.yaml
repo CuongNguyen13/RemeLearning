@@ -2036,6 +2036,15 @@ paths:
           in: path
           required: true
           schema: { type: integer, format: int64 }
+        - name: examType
+          in: query
+          required: false
+          schema: { type: string, enum: [TOEIC, IELTS, TOEFL, VSTEP, General] }
+          description: >
+            Exam style to shape the generated task. Decides the source passage's sentence count
+            (drawn randomly from that exam's range per generation), its subject area and its register -
+            TOEIC is a short practical workplace text, IELTS a longer academic passage. Omitted keeps
+            the original attempt's exam style; an unrecognised value degrades to everyday English.
       responses:
         "200":
           description: OK
@@ -2088,6 +2097,14 @@ paths:
           in: query
           required: true
           schema: { type: string, enum: [COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI] }
+        - name: examType
+          in: query
+          required: false
+          schema: { type: string, enum: [TOEIC, IELTS, TOEFL, VSTEP, General] }
+          description: >
+            Exam style for a NEWLY generated prompt (ignored when an existing prompt is resumed -
+            that one was already generated). Decides sentence count and register, so the same library
+            topic reads differently for TOEIC than for IELTS.
       responses:
         "200":
           description: OK
@@ -2142,6 +2159,15 @@ paths:
           in: path
           required: true
           schema: { type: integer, format: int64 }
+        - name: examType
+          in: query
+          required: false
+          schema: { type: string, enum: [TOEIC, IELTS, TOEFL, VSTEP, General] }
+          description: >
+            Exam style to shape the generated task. Decides the source passage's sentence count
+            (drawn randomly from that exam's range per generation), its subject area and its register -
+            TOEIC is a short practical workplace text, IELTS a longer academic passage. Omitted keeps
+            the original attempt's exam style; an unrecognised value degrades to everyday English.
       responses:
         "200":
           description: OK
@@ -2193,6 +2219,14 @@ components:
       properties:
         userId: { type: string }
         exerciseCount: { type: integer, nullable: true, description: "defaults to 4, clamped to 1..8" }
+        examType:
+          type: string
+          nullable: true
+          enum: [TOEIC, IELTS, TOEFL, VSTEP, General]
+          description: >
+            Exam style EVERY exercise in the session is generated for, normalized once so the whole
+            session is consistent. Optional - omitted means no exam in mind, which is what the session
+            did unconditionally before this field existed.
 
     CompletePracticeExerciseRequestDto:
       type: object
@@ -3701,7 +3735,19 @@ components:
       properties:
         taskType: { $ref: "#/components/schemas/WritingTaskType" }
         level: { type: string, nullable: true, example: B1, description: CEFR target }
-        examType: { type: string, nullable: true, example: IELTS }
+        examType:
+          type: string
+          nullable: true
+          enum: [TOEIC, IELTS, TOEFL, VSTEP, General]
+          example: IELTS
+          description: >
+            Decides the generated task's shape, not just a label pasted into the prompt: the source
+            passage's sentence count is drawn randomly from that exam's range per generation (TOEIC
+            2-4, IELTS 4-6, TOEFL/VSTEP/General 3-5), and its subject area and register come from the
+            same profile. For COMPOSE it also picks which kind of text the brief asks for (a TOEIC
+            brief asks for an email or short report, an IELTS one for a Task 2 essay). Case-insensitive;
+            an unrecognised value is passed through to the model but falls back to everyday-English
+            length/register.
         focusItems:
           type: array
           nullable: true

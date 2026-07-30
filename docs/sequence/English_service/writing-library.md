@@ -91,8 +91,9 @@ sequenceDiagram
     alt a prompt in the chain is not yet passed
         Svc->>Svc: serve that one (resume)
     else chain shorter than targetPromptCount
-        Svc->>Gen: generatePrompt(topic, taskType)
-        Gen->>Ai: completeJson(systemPrompt with the topic's AXIS, temp=0.6, maxTokens=1400)
+        Svc->>Gen: generatePrompt(topic, taskType, examType)
+        Gen->>Gen: WritingExamProfile.fromExamType(examType) -> sentence count (drawn per call) + register
+        Gen->>Ai: completeJson(systemPrompt with the topic's AXIS + count + register, temp=0.6, maxTokens=1400)
         Ai->>Gemini: LlmClient.complete(...)
         Gemini-->>Ai: {promptText, referenceAnswer, minWords, explanation}
         alt LLM/parse failure, or blank promptText
@@ -111,6 +112,13 @@ sequenceDiagram
 
 The axis is part of the generation prompt, so a `grammar` topic forces its structure, a `genre` topic
 produces a real piece of that text type, and a `vocab_theme` topic pushes that theme's vocabulary.
+
+The optional `examType` query param shapes a **newly generated** prompt's length and register via the
+same `WritingExamProfile` the learn tab uses (see
+[writing-learn.md](writing-learn.md) for the per-exam table) — so the same library topic reads
+differently for someone preparing for TOEIC than for IELTS. It is ignored when an existing prompt is
+resumed: that one was generated already, and re-generating it would lose the learner's place in the
+chain.
 
 ## 3. Submit + advance (`POST .../prompts/{promptId}/submit`)
 
@@ -160,7 +168,8 @@ Mirrors `ListeningLibraryServiceImpl#generatePracticeFromSection`: verifies the 
 this learner, extracts its error labels via the pure `WritingMistakeAnalyzer`, then delegates to
 `WritingLearnService#generatePracticeForLabels` so the regenerated task lands in the same
 `writing_practice_items` bank the learn tab uses. An attempt with no mistakes returns an empty list
-rather than generating something unrelated.
+rather than generating something unrelated. The optional `examType` query param decides the retry
+task's length/register, same as on the learn tab.
 
 ## External calls
 

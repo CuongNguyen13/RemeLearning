@@ -28,6 +28,7 @@ sequenceDiagram
     participant GWP as GrammarWeakPointService
     participant VWP as VocabularyWeakPointService
     participant Gen as LlmWritingPracticeGenerator
+    participant Profile as WritingExamProfile
     participant Ai as AiContentClient (common.ai.LlmClient)
     participant Gemini as Gemini API
     participant WMapper as WritingMapper
@@ -44,7 +45,11 @@ sequenceDiagram
         VWP->>DB: SELECT vocabulary_weak_points ORDER BY forgetting_score DESC
         Svc->>Svc: concat both, distinct, limit 8<br/>(writing is the one skill exercising grammar AND vocabulary at once;<br/>empty list is fine - the generator picks its own topic)
     end
+    Svc->>Svc: ExamTypes.normalize(examType) - "toeic"/"TOEIC" collapse to one stored value
     Svc->>Gen: generate(taskType, targetLabels, level, examType)
+    Gen->>Profile: WritingExamProfile.fromExamType(examType)<br/>(unknown/blank -> GENERAL, never fails)
+    Profile-->>Gen: randomSentenceCount() in that exam's range,<br/>randomTopic(), registerHint(), randomComposeFormat() (COMPOSE only)
+    Note over Gen,Profile: These are decided in JAVA and handed to the model as instructions.<br/>Passing only the label "TOEIC" produced passages that were all the same<br/>length and register regardless of the exam.
     Gen->>Ai: completeJson(systemPrompt, userPrompt, temp=0.6, maxTokens=1400)
     Ai->>Gemini: LlmClient.complete(...) -> generateContent REST call
     Gemini-->>Ai: raw text (code-fence stripped)
@@ -63,6 +68,26 @@ sequenceDiagram
 not sent by the client. `promptText` always begins with a Vietnamese instruction line — including in
 the offline fallback — per the project rule that every practice item states its requirement in
 Vietnamese.
+
+### What the exam style actually decides
+
+`examType` is resolved to a `WritingExamProfile`, and the profile's concrete implications are chosen in
+Java before the prompt is built:
+
+| Exam | Source-passage sentences | Subject pool | Register | COMPOSE text format |
+|---|---|---|---|---|
+| TOEIC | 2–4 | workplace/commercial | practical, businesslike | email, internal notice, complaint reply, short report |
+| IELTS | 4–6 | academic/social issues | formal, academic | opinion / discussion / problem-solution essay, Task 1 data description |
+| TOEFL | 3–5 | campus/science | conversational-academic | independent essay, reading+lecture summary, email to a professor |
+| VSTEP | 3–5 | Vietnam-context everyday | semi-formal | situational letter (Task 1), opinion essay (Task 2) |
+| General (also: absent/unknown) | 3–5 | everyday | natural everyday | narrative, description, opinion paragraph |
+
+The sentence count is **drawn fresh per generation** from that range, so ten TOEIC translations produce
+ten different lengths rather than ten identically-shaped passages. When `targetLabels` are present they
+win and the profile's subject pool is only a backdrop; the sentence count and register always apply.
+
+An unrecognised exam label is passed through to the model verbatim (so a style the frontend adds first
+still reaches it) while length/register fall back to the GENERAL profile — never a failed request.
 
 ## 2. Suggest next sentence (`POST /api/v1/learn/writing/suggest`)
 
@@ -188,8 +213,9 @@ sequenceDiagram
     end
     Svc->>Analyzer: extractMistakeLabels(errorsJson)
     Analyzer-->>Svc: distinct labels in reported order<br/>(malformed/empty JSON -> empty list, never throws)
-    Svc->>Gen: generate(sameTaskType, mistakeLabels, sameLevel, sameExamType)
-    Note over Svc,Gen: reuses the exact generate-and-persist pipeline from section 1,<br/>so the retry task lands in the same writing_practice_items bank
+    Svc->>Svc: examType param present ? normalize(it) : attempt's own examType
+    Svc->>Gen: generate(sameTaskType, mistakeLabels, sameLevel, resolvedExamType)
+    Note over Svc,Gen: reuses the exact generate-and-persist pipeline from section 1,<br/>so the retry task lands in the same writing_practice_items bank.<br/>The examType override lets the learner re-target the same mistakes<br/>at a different exam; omitting it keeps the original.
     Svc-->>Ctrl: refreshed List<WritingPracticeItemDto>
 ```
 
