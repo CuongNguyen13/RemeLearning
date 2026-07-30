@@ -1854,6 +1854,302 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiResponseSpeakingHistoryEntryList"
 
+  # --- Luyện viết & Luyện dịch (writing skill) - thin 1-1 proxies to english-service ---
+
+  /api/v1/learners/{userId}/learn/writing/generate:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate one AI writing brief or translation passage (COMPOSE / TRANSLATE_VI_EN /
+        TRANSLATE_EN_VI), targeting the given focus items or the learner's own weakest
+        grammar/vocabulary labels; thin proxy to english-service
+      operationId: generateWritingPractice
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateWritingPracticeRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingPracticeItem"
+
+  /api/v1/learners/{userId}/learn/writing/items:
+    get:
+      tags: [Learners]
+      summary: A learner's generated writing prompts, newest first; thin proxy to english-service
+      operationId: listWritingPracticeItems
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/writing/items/{itemId}:
+    get:
+      tags: [Learners]
+      summary: One writing prompt, without its reference answer; thin proxy to english-service
+      operationId: getWritingPracticeItem
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingPracticeItem"
+
+  /api/v1/learners/{userId}/learn/writing/suggest:
+    post:
+      tags: [Learners]
+      summary: >
+        2-3 hints for what to write next (Vietnamese idea + English structure/phrases, never a
+        ready-made sentence; for translation tasks the reference answer is never used); thin proxy to
+        english-service
+      operationId: suggestNextSentence
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuggestNextSentenceRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingSuggestionList"
+
+  /api/v1/learners/{userId}/learn/writing/attempts:
+    post:
+      tags: [Learners]
+      summary: >
+        Grade a submitted writing/translation text per criterion, reveal the reference answer, and
+        feed every labelled error into the learner's grammar/vocabulary weak points; thin proxy to
+        english-service
+      description: >
+        userId is taken from the path and overwrites any userId in the body, so a client cannot submit
+        on another learner's behalf.
+      operationId: submitWritingAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitWritingAttemptRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingAttemptResult"
+
+  /api/v1/learners/{userId}/learn/writing/history:
+    get:
+      tags: [Learners]
+      summary: A learner's past writing attempts, newest first; thin proxy to english-service
+      operationId: getWritingHistory
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingAttemptHistoryEntryList"
+
+  /api/v1/learners/{userId}/learn/writing/history/{attemptId}:
+    get:
+      tags: [Learners]
+      summary: Full detail for one of a learner's own past writing attempts; thin proxy to english-service
+      operationId: getWritingAttemptDetail
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingAttemptDetail"
+
+  /api/v1/learners/{userId}/learn/writing/history/{attemptId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate practice targeted at one past writing attempt's own mistakes (the "Luyện lại những
+        lỗi này" action); thin proxy to english-service
+      operationId: generateWritingPracticeFromAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingPracticeItemList"
+
+  /api/v1/learners/{userId}/learn/writing/library/topics:
+    get:
+      tags: [Learners]
+      summary: >
+        Writing-library topics on one taxonomy axis (grammar | genre | vocab_theme) with this
+        learner's gating status and chain progress; thin proxy to english-service
+      operationId: getWritingLibraryTopics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: taxonomy
+          in: query
+          required: true
+          schema: { type: string, enum: [grammar, genre, vocab_theme] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingLibraryTopicList"
+
+  /api/v1/learners/{userId}/learn/writing/library/topics/{topicId}/prompts:
+    post:
+      tags: [Learners]
+      summary: >
+        Start (or resume) the next prompt in a writing-library topic's chain (topic must not be
+        LOCKED); thin proxy to english-service
+      operationId: startOrResumeWritingLibraryPrompt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: topicId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: taskType
+          in: query
+          required: true
+          schema: { type: string, enum: [COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingLibraryPrompt"
+
+  /api/v1/learners/{userId}/learn/writing/library/prompts/{promptId}/submit:
+    post:
+      tags: [Learners]
+      summary: >
+        Grade a submitted writing-library text and advance the topic chain, unlocking the next topic
+        on the same axis once the whole chain is passed; thin proxy to english-service
+      operationId: submitWritingLibraryAnswer
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: promptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitWritingLibraryAnswerRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseSubmitWritingLibraryAnswerResponse"
+
+  /api/v1/learners/{userId}/learn/writing/library/attempts/{attemptId}/ai-practice:
+    post:
+      tags: [Learners]
+      summary: >
+        Generate "học thường" practice targeted at one writing-library attempt's own mistakes; thin
+        proxy to english-service
+      operationId: generateWritingPracticeFromLibraryAttempt
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWritingPracticeItemList"
+
 components:
   schemas:
     User:
@@ -3388,3 +3684,312 @@ components:
         - type: object
           properties:
             data: { type: array, items: { $ref: "#/components/schemas/SpeakingHistoryEntry" } }
+
+    # --- Luyện viết & Luyện dịch (writing skill) ---
+
+    WritingTaskType:
+      type: string
+      enum: [COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI]
+      description: >
+        COMPOSE - learner writes English from a Vietnamese brief; TRANSLATE_VI_EN / TRANSLATE_EN_VI -
+        learner translates the given source passage. Decides what promptText means and which fourth
+        criterion is scored (taskResponse vs accuracy).
+
+    GenerateWritingPracticeRequest:
+      type: object
+      required: [taskType]
+      properties:
+        taskType: { $ref: "#/components/schemas/WritingTaskType" }
+        level: { type: string, nullable: true, example: B1, description: CEFR target }
+        examType: { type: string, nullable: true, example: IELTS }
+        focusItems:
+          type: array
+          nullable: true
+          description: >
+            Weak-point labels to build the task around. Empty/omitted falls back to the learner's own
+            top grammar AND vocabulary weak points combined.
+          items: { type: string }
+
+    WritingPracticeItem:
+      type: object
+      description: >
+        One writing/translation prompt. Deliberately has NO referenceAnswer field - the model answer
+        must not reach the client before the learner submits.
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        taskType: { $ref: "#/components/schemas/WritingTaskType" }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        promptText:
+          type: string
+          description: >
+            The task brief (COMPOSE) or the source passage to translate (TRANSLATE_*). Always carries
+            a Vietnamese instruction line, per the project rule that every practice item states its
+            requirement in Vietnamese.
+        sourceLang: { type: string, example: vi }
+        targetLang: { type: string, example: en }
+        targetLabels:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    SuggestNextSentenceRequest:
+      type: object
+      required: [practiceItemId]
+      properties:
+        practiceItemId: { type: integer, format: int64 }
+        draftText:
+          type: string
+          nullable: true
+          description: What the learner has written so far; blank means they need help starting.
+
+    WritingSuggestion:
+      type: object
+      description: A hint, never a finished sentence - the learner still has to compose it.
+      properties:
+        ideaVi: { type: string, description: What to develop next, in Vietnamese }
+        structureHint: { type: string, nullable: true, example: "Although + clause, + main clause" }
+        usefulPhrases:
+          type: array
+          description: English words/collocations that fit, never a full sentence.
+          items: { type: string }
+
+    WritingCriteriaScores:
+      type: object
+      description: >
+        Per-criterion scores in [0, 1]. Only the fourth criterion relevant to the task type is
+        populated - accuracy for the TRANSLATE_* types, taskResponse for COMPOSE - so the other stays
+        null.
+      properties:
+        grammar: { type: number, format: double, nullable: true }
+        vocabulary: { type: number, format: double, nullable: true }
+        coherence: { type: number, format: double, nullable: true }
+        accuracy: { type: number, format: double, nullable: true }
+        taskResponse: { type: number, format: double, nullable: true }
+
+    WritingError:
+      type: object
+      description: >
+        One labelled mistake. The label + category pair is the point of this object: it is what gets
+        routed into the learner's existing grammar/vocabulary weak points, review queue and
+        recommendations.
+      properties:
+        wrong: { type: string, nullable: true, description: The incorrect span, quoted from the learner's own text }
+        corrected: { type: string, nullable: true }
+        label:
+          type: string
+          description: >
+            A short, reusable name for the underlying weakness (e.g. "past perfect",
+            "collocation: make/do") - not a description of this one sentence.
+          example: past perfect
+        category:
+          type: string
+          enum: [grammar, vocabulary]
+          description: Anything else is dropped rather than routed, since no domain owns it.
+        explanationVi: { type: string, nullable: true }
+        severity: { type: string, nullable: true, enum: [minor, major] }
+
+    SubmitWritingAttemptRequest:
+      type: object
+      required: [userId, practiceItemId, submittedText]
+      properties:
+        userId: { type: string }
+        practiceItemId: { type: integer, format: int64 }
+        submittedText: { type: string }
+
+    WritingAttemptResult:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        overallScore:
+          type: number
+          format: double
+          description: Mean of the populated criteria, computed server-side rather than taken from the LLM.
+        criteria: { $ref: "#/components/schemas/WritingCriteriaScores" }
+        correctedText: { type: string, nullable: true }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/WritingError" }
+        feedback: { type: string, nullable: true, description: Overall remarks in Vietnamese }
+        referenceAnswer:
+          type: string
+          nullable: true
+          description: Only revealed here, now that the learner has submitted.
+        actionAdvice:
+          type: array
+          items: { type: string }
+
+    WritingAttemptHistoryEntry:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        taskType: { $ref: "#/components/schemas/WritingTaskType" }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        score: { type: number, format: double }
+        attemptedAt: { type: string, format: date-time }
+
+    WritingAttemptDetail:
+      type: object
+      properties:
+        attemptId: { type: integer, format: int64 }
+        practiceItemId: { type: integer, format: int64 }
+        taskType: { $ref: "#/components/schemas/WritingTaskType" }
+        level: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        topic: { type: string, nullable: true }
+        promptText: { type: string }
+        submittedText: { type: string }
+        correctedText: { type: string, nullable: true }
+        overallScore: { type: number, format: double }
+        criteria: { $ref: "#/components/schemas/WritingCriteriaScores" }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/WritingError" }
+        feedback: { type: string, nullable: true }
+        referenceAnswer: { type: string, nullable: true }
+        attemptedAt: { type: string, format: date-time }
+
+    WritingLibraryTopic:
+      type: object
+      properties:
+        topicId: { type: integer, format: int64 }
+        taxonomy: { type: string, enum: [grammar, genre, vocab_theme] }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        level: { type: string }
+        sequenceOrder:
+          type: integer
+          description: Unique within this topic's taxonomy only; each axis restarts at 1.
+        status: { type: string, enum: [LOCKED, UNLOCKED, IN_PROGRESS, PASSED] }
+        passedPromptCount: { type: integer }
+        targetPromptCount:
+          type: integer
+          description: How many prompts the chain holds once fully generated (3-6, derived per topic).
+
+    WritingLibraryPrompt:
+      type: object
+      description: Like WritingPracticeItem, carries no reference answer before submission.
+      properties:
+        promptId: { type: integer, format: int64 }
+        topicId: { type: integer, format: int64 }
+        topicName: { type: string }
+        taskType: { $ref: "#/components/schemas/WritingTaskType" }
+        promptText: { type: string }
+        sourceLang: { type: string }
+        targetLang: { type: string }
+        minWords: { type: integer, nullable: true }
+        position: { type: integer, description: 1-based position in the topic's chain }
+        targetPromptCount: { type: integer }
+
+    SubmitWritingLibraryAnswerRequest:
+      type: object
+      required: [submittedText]
+      properties:
+        submittedText: { type: string }
+
+    SubmitWritingLibraryAnswerResponse:
+      type: object
+      description: >
+        A superset of WritingAttemptResult - the same grader fields, plus how the submission moved the
+        learner through the topic chain.
+      properties:
+        attemptId: { type: integer, format: int64 }
+        score: { type: number, format: double }
+        passed: { type: boolean, description: score >= 0.7 }
+        criteria: { $ref: "#/components/schemas/WritingCriteriaScores" }
+        correctedText: { type: string, nullable: true }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/WritingError" }
+        feedback: { type: string, nullable: true }
+        referenceAnswer: { type: string, nullable: true }
+        actionAdvice:
+          type: array
+          items: { type: string }
+        passedPromptCount: { type: integer }
+        targetPromptCount: { type: integer }
+        topicPassed:
+          type: boolean
+          description: True once the whole chain is passed and the topic itself flipped to PASSED.
+        nextTopicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: The next topic on the SAME axis, if passing this topic just unlocked it.
+        nextTopicUnlocked: { type: boolean }
+
+    ApiResponseWritingPracticeItem:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/WritingPracticeItem" }
+
+    ApiResponseWritingPracticeItemList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/WritingPracticeItem" }
+
+    ApiResponseWritingSuggestionList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/WritingSuggestion" }
+
+    ApiResponseWritingAttemptResult:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/WritingAttemptResult" }
+
+    ApiResponseWritingAttemptHistoryEntryList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/WritingAttemptHistoryEntry" }
+
+    ApiResponseWritingAttemptDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/WritingAttemptDetail" }
+
+    ApiResponseWritingLibraryTopicList:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/WritingLibraryTopic" }
+
+    ApiResponseWritingLibraryPrompt:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/WritingLibraryPrompt" }
+
+    ApiResponseSubmitWritingLibraryAnswerResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponseBase"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/SubmitWritingLibraryAnswerResponse" }

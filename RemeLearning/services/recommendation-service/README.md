@@ -28,6 +28,18 @@ Full spec: [`openapi.yaml`](openapi.yaml) / `/swagger-ui.html` when running. Det
 
 See [`docs/API.md` §10](../../../docs/API.md#10-kafka--recommendation-service-consumerproducer).
 
+## Exercise templates per category
+
+`RuleBasedExerciseGenerator` (and `LlmExerciseGenerator`'s failure fallback) both read
+`ExerciseTemplates`, a static map from weak-point `category` to a few concrete, actionable exercises
+in Vietnamese. Categories covered: `grammar`, `vocabulary`, `pronunciation`, `listening`, `writing`.
+Anything unrecognised (or a `null` category from a malformed `learning.gap.analyzed` payload) falls
+through to a single generic `"Ôn lại nội dung: \"%s\"."` template.
+
+Note `listening` and `writing` were added together: `listening` had been silently falling through to
+that generic default since the listening skill shipped. When a new weak-point category appears
+upstream, add its templates here too — the fallback is a safety net, not an acceptable end state.
+
 ## Run locally
 
 ```bash

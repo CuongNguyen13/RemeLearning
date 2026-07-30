@@ -90,8 +90,8 @@ learner made along the way — scored the same way as the main transcript and fo
 
 ## Learn skills ("Học & Luyện tập với AI")
 
-Four skills — vocabulary, grammar, listening, speaking — generate one AI practice item on demand and
-grade the learner's attempt against it. `vocabulary`/`grammar` live inside their existing domain
+Five skills — vocabulary, grammar, listening, speaking, writing — generate one AI practice item on
+demand and grade the learner's attempt against it. `vocabulary`/`grammar` live inside their existing domain
 package as a `learn` sub-package; `listening`/`speaking` are brand-new top-level domain packages
 (`com.remelearning.english.listening`, `com.remelearning.english.speaking`), following the same
 controller/service/mapper/domain/dto/generator/scoring layout as the analysis domains. All four reuse
@@ -104,6 +104,7 @@ existing pipeline — there is no separate "weak-point feeder" per skill.
 | Grammar | `english.grammar.learn` | `V13__grammar_practice.sql` (`grammar_practice_items`, `grammar_practice_attempts`) | `GrammarLearnController` | `/api/v1/learn/grammar` |
 | Listening | `english.listening` (new domain) | `V14__listening_practice.sql` (`listening_practice_items`, `listening_attempts`) | `ListeningLearnController` | `/api/v1/learn/listening` |
 | Speaking | `english.speaking` (new domain) | `V15__speaking_practice.sql` (`speaking_practice_items`, `speaking_attempts`) | `SpeakingLearnController` | `/api/v1/learn/speaking` |
+| Writing | `english.writing` (new domain) | `V26__writing_practice.sql` (`writing_practice_items`, `writing_attempts`) + `V27__writing_library.sql` | `WritingLearnController`, `WritingLibraryController` | `/api/v1/learn/writing` |
 
 Shared backbone, in the new `english.learn.common` package (used by all four generators/scorers):
 - `AiContentClient` — thin wrapper around `common`'s `LlmClient`: strips Gemini's occasional
@@ -116,6 +117,68 @@ Shared backbone, in the new `english.learn.common` package (used by all four gen
   existing `WavAudioMerger`) for any learn skill that needs voiced audio; currently used by
   `listening`. Dictation deliberately keeps its own already-tested, separate TTS/dialogue code path
   rather than being migrated onto this shared version.
+
+### Writing & translation (`english.writing`) — the one skill with no weak-point table of its own
+
+One domain covers three task types, chosen per request via `taskType`:
+
+| `taskType` | `promptText` is | Learner writes in | 4th criterion |
+|---|---|---|---|
+| `COMPOSE` | a Vietnamese brief (min word count + structures to use) | English | `taskResponse` |
+| `TRANSLATE_VI_EN` | a Vietnamese source passage | English | `accuracy` |
+| `TRANSLATE_EN_VI` | an English source passage | Vietnamese | `accuracy` |
+
+Three LLM-backed components, all with the "never throws" contract the other skills use:
+
+- `generator.LlmWritingPracticeGenerator` — one Gemini call producing the prompt + its reference
+  answer, built around the learner's weakest labels. Falls back to a per-task-type static template.
+- `grading.LlmWritingGrader` — one Gemini call returning per-criterion scores plus a list of
+  **labelled** errors. Falls back to a neutral 0.5 with an empty error list, so a grading outage never
+  writes anything bogus into the learner's weak points.
+- `suggestion.LlmNextSentenceSuggester` — the "Gợi ý câu tiếp theo" button. One call per press: no
+  debounce, no ghost-text, no background polling, so a learner who never asks costs nothing. It uses a
+  **separate, hard-restricted prompt** for the two translation modes (may only name the required
+  structure and gloss at most two words) and is **never given the reference answer** — its interface
+  has no parameter for it, since an unconstrained hint there would simply be the answer.
+
+Why there is no `writing_weak_points` table and no `"writing"` case in `WeakPointDispatcher`: every
+error the grader reports already carries `category` = `"grammar"` or `"vocabulary"`, so
+`grading.WritingErrorPipeline` routes it into those domains' existing rows via
+`PracticeService.redo(...)`. That is what makes a "past perfect" slip while writing add to the same
+weak-point row dictation/listening already built up, instead of starting a parallel tally.
+
+**Gotcha — item-id prefixes.** The pipeline maps `grammar` → `"grammar:"` and `vocabulary` →
+**`"vocab:"`**, matching what `VocabLearnServiceImpl`/`VocabularyLibraryServiceImpl` already write.
+These are NOT the category names: deriving a prefix from `category` would key writing mistakes under
+`"vocabulary:"` and quietly build a second, parallel set of weak points. Errors are also deduped by
+`(category, label)` per submission, and a flawless submission makes no `redo` call at all.
+
+`overallScore` is computed in Java as the mean of the populated criteria — the LLM's own overall
+figure is ignored, because it routinely contradicts the criteria it just scored. Each criterion is
+clamped to `[0, 1]`, and a criterion the model omitted scores 0 (with a `log.warn`) rather than being
+skipped, which would inflate the result.
+
+### Writing library (`english.writing.library`) — three independent taxonomy axes
+
+The only library with more than one axis. `writing_library_topics.taxonomy` is `grammar` (the same
+60-topic taxonomy as the grammar/listening libraries), `genre` (12 real-world text types) or
+`vocab_theme` (the `vocabulary_topics` themes). `UNIQUE(taxonomy, code)` and
+`UNIQUE(taxonomy, sequence_order)` — `sequence_order` restarts at 1 on each axis, and unlocking the
+next topic only ever looks **within the same axis**, so the three progressions are fully independent.
+That is why `WritingLibraryTopicMapper.findByTaxonomyAndSequenceOrder` takes the axis as part of the
+key, unlike the other libraries' global `findBySequenceOrder`.
+
+Each topic is a chain of 3–6 prompts (`targetPromptCount`, derived deterministically from `topicId` so
+it needs no column). The catalogue ships topics, not content: each prompt is generated by
+`LlmWritingLibraryContentGenerator` the first time a learner reaches that position and then persisted.
+A topic only flips to `PASSED` once the chain is at full length **and** every prompt is passed
+(≥ 0.7). Grading and weak-point routing go through the very same `WritingGrader`/
+`WritingErrorPipeline` the learn tab uses, so the two tabs cannot drift apart.
+
+**Gotcha — `taxonomy` is a `String` in the domain class, not the `WritingTaxonomy` enum.** The column
+stores lower-case codes (`"vocab_theme"`), while MyBatis' default enum handler maps by `name()`
+(upper-case) and would fail to read the rows. Convert with `WritingTaxonomy.fromCode(...)` at the
+service layer.
 
 **Client-side grading (contract change):** the practice-item question DTOs now ship the correct answer
 so the FE can grade each question locally for instant feedback. `VocabQuestionDto`/`GrammarQuestionDto`

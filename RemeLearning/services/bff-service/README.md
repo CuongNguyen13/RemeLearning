@@ -39,6 +39,25 @@ skills. Contract note: the practice-item responses now proxy through the new ans
 `OPEN` questions) — so the FE can grade each question locally for instant feedback. The authoritative
 score still comes only from the submit-attempt endpoint.
 
+### Writing & translation proxy (`/api/v1/learners/{userId}/learn/writing/...`)
+
+12 pure pass-through routes to `english-service`'s `writing`/`writing.library` packages — 8 for the
+"học thường" flow (generate, list/get a prompt, suggest the next sentence, submit, history, attempt
+detail, retry-from-mistakes) and 4 for the library (topics per taxonomy axis, start/resume a prompt in
+a topic's chain, submit, retry). DTOs are bff's own classes in `com.remelearning.bff.dto`, field-for-
+field mirrors; `taskType`/`taxonomy` stay `String` here rather than duplicating english-service's
+enums.
+
+Two behavioural notes:
+
+- `POST .../learn/writing/attempts` overwrites the body's `userId` with the path variable before
+  forwarding, so a client cannot submit on another learner's behalf (same convention as the
+  vocabulary/grammar/listening attempt proxies).
+- There is deliberately **no** writing weak-point route. english-service stores writing mistakes as
+  `grammar`/`vocabulary` weak points, so they already appear in the existing
+  `GET /api/v1/learners/{userId}/weak-points` fan-out — a fifth downstream call would double-count
+  them.
+
 ## Run locally
 
 ```bash
