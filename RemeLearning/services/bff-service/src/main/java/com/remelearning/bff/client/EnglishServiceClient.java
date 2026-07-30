@@ -14,6 +14,18 @@ import com.remelearning.bff.dto.DictationPracticeItemDto;
 import com.remelearning.bff.dto.FinishGrammarLibrarySessionResponseDto;
 import com.remelearning.bff.dto.FinishSpeakingSectionResponse;
 import com.remelearning.bff.dto.GenerateAiPracticeRequestDto;
+import com.remelearning.bff.dto.GenerateWritingPracticeRequestDto;
+import com.remelearning.bff.dto.SubmitWritingAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitWritingLibraryAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitWritingLibraryAnswerResponseDto;
+import com.remelearning.bff.dto.SuggestNextSentenceRequestDto;
+import com.remelearning.bff.dto.WritingAttemptDetailDto;
+import com.remelearning.bff.dto.WritingAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.WritingAttemptResultDto;
+import com.remelearning.bff.dto.WritingLibraryPromptDto;
+import com.remelearning.bff.dto.WritingLibraryTopicDto;
+import com.remelearning.bff.dto.WritingPracticeItemDto;
+import com.remelearning.bff.dto.WritingSuggestionDto;
 import com.remelearning.bff.dto.CompletePracticeExerciseRequestDto;
 import com.remelearning.bff.dto.PracticeRedoRequestDto;
 import com.remelearning.bff.dto.PracticeSessionDto;
@@ -946,6 +958,143 @@ public class EnglishServiceClient {
 				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<SpeakingHistoryEntryDto>>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to get speaking merged history for userId={}", userId, ex));
+	}
+
+	// --- Luyện viết & Luyện dịch (writing skill) ---
+
+	/** Generates one AI writing brief or translation passage, targeting the given focus items or the learner's own weakest grammar/vocabulary labels. */
+	public Mono<WritingPracticeItemDto> generateWritingPractice(String userId, GenerateWritingPracticeRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/{userId}/generate", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate writing practice for userId={}", userId, ex));
+	}
+
+	/** Fetches one writing prompt (never its reference answer) from english-service. */
+	public Mono<WritingPracticeItemDto> getWritingPracticeItem(Long itemId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/writing/items/{itemId}", itemId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingPracticeItemDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch writing practice item for itemId={}", itemId, ex));
+	}
+
+	/** Fetches a learner's generated writing prompts, newest first. */
+	public Mono<List<WritingPracticeItemDto>> listWritingPracticeItems(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/writing/{userId}/items", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to list writing practice items for userId={}", userId, ex));
+	}
+
+	/** Asks english-service for 2-3 hints on the learner's next sentence. */
+	public Mono<List<WritingSuggestionDto>> suggestNextSentence(SuggestNextSentenceRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/suggest")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingSuggestionDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch next-sentence suggestions for practiceItemId={}", request.getPracticeItemId(), ex));
+	}
+
+	/** Proxies a writing submission straight through to english-service for AI grading. */
+	public Mono<WritingAttemptResultDto> submitWritingAttempt(SubmitWritingAttemptRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/attempts")
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingAttemptResultDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit writing attempt for userId={}", request.getUserId(), ex));
+	}
+
+	/** Fetches a learner's past writing attempts, newest first. */
+	public Mono<List<WritingAttemptHistoryEntryDto>> getWritingHistory(String userId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/writing/history/{userId}", userId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingAttemptHistoryEntryDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch writing history for userId={}", userId, ex));
+	}
+
+	/** Fetches full detail for one of a learner's own past writing attempts. */
+	public Mono<WritingAttemptDetailDto> getWritingAttemptDetail(String userId, Long attemptId) {
+		return englishServiceClient.get()
+				.uri("/api/v1/learn/writing/history/{userId}/{attemptId}", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingAttemptDetailDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch writing attempt detail for userId={}, attemptId={}", userId, attemptId, ex));
+	}
+
+	/** Asks english-service to generate practice targeted at one past writing attempt's own mistakes. */
+	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromAttempt(String userId, Long attemptId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/history/{userId}/{attemptId}/ai-practice", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate writing practice from attemptId={} for userId={}", attemptId, userId, ex));
+	}
+
+	/** Fetches writing-library topics on one taxonomy axis with this learner's progress. */
+	public Mono<List<WritingLibraryTopicDto>> getWritingLibraryTopics(String userId, String taxonomy) {
+		return englishServiceClient.get()
+				.uri(uriBuilder -> uriBuilder
+						.path("/api/v1/learn/writing/library/{userId}/topics")
+						.queryParam("taxonomy", taxonomy)
+						.build(userId))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingLibraryTopicDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to fetch writing library topics for userId={}, taxonomy={}", userId, taxonomy, ex));
+	}
+
+	/** Starts or resumes the next prompt in a writing-library topic's chain. */
+	public Mono<WritingLibraryPromptDto> startOrResumeWritingLibraryPrompt(String userId, Long topicId, String taskType) {
+		return englishServiceClient.post()
+				.uri(uriBuilder -> uriBuilder
+						.path("/api/v1/learn/writing/library/{userId}/topics/{topicId}/prompts")
+						.queryParam("taskType", taskType)
+						.build(userId, topicId))
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<WritingLibraryPromptDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to start writing library prompt for userId={}, topicId={}", userId, topicId, ex));
+	}
+
+	/** Proxies a writing-library submission through to english-service for grading and progression. */
+	public Mono<SubmitWritingLibraryAnswerResponseDto> submitWritingLibraryAnswer(
+			String userId, Long promptId, SubmitWritingLibraryAnswerRequestDto request) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/library/{userId}/prompts/{promptId}/submit", userId, promptId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.bodyValue(request)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<SubmitWritingLibraryAnswerResponseDto>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to submit writing library answer for userId={}, promptId={}", userId, promptId, ex));
+	}
+
+	/** Asks english-service to generate practice targeted at one writing-library attempt's mistakes. */
+	public Mono<List<WritingPracticeItemDto>> generateWritingPracticeFromLibraryAttempt(String userId, Long attemptId) {
+		return englishServiceClient.post()
+				.uri("/api/v1/learn/writing/library/{userId}/attempts/{attemptId}/ai-practice", userId, attemptId)
+				.retrieve()
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<WritingPracticeItemDto>>>() {})
+				.map(ApiResponse::getData)
+				.doOnError(ex -> log.error("Failed to generate writing practice from library attemptId={} for userId={}", attemptId, userId, ex));
 	}
 
 	// Shared GET + unwrap + category-stamp logic for the four (near-identical) domain endpoints above.

@@ -71,6 +71,18 @@ import com.remelearning.bff.dto.VocabAttemptHistoryEntryDto;
 import com.remelearning.bff.dto.VocabAttemptResultDto;
 import com.remelearning.bff.dto.VocabPracticeItemDto;
 import com.remelearning.bff.dto.WeakPointDto;
+import com.remelearning.bff.dto.GenerateWritingPracticeRequestDto;
+import com.remelearning.bff.dto.SubmitWritingAttemptRequestDto;
+import com.remelearning.bff.dto.SubmitWritingLibraryAnswerRequestDto;
+import com.remelearning.bff.dto.SubmitWritingLibraryAnswerResponseDto;
+import com.remelearning.bff.dto.SuggestNextSentenceRequestDto;
+import com.remelearning.bff.dto.WritingAttemptDetailDto;
+import com.remelearning.bff.dto.WritingAttemptHistoryEntryDto;
+import com.remelearning.bff.dto.WritingAttemptResultDto;
+import com.remelearning.bff.dto.WritingLibraryPromptDto;
+import com.remelearning.bff.dto.WritingLibraryTopicDto;
+import com.remelearning.bff.dto.WritingPracticeItemDto;
+import com.remelearning.bff.dto.WritingSuggestionDto;
 import com.remelearning.bff.service.LearnerOverviewService;
 import com.remelearning.bff.service.WeakPointAggregationService;
 import com.remelearning.common.response.ApiResponse;
@@ -674,5 +686,99 @@ public class LearnerController {
 	@GetMapping("/{userId}/learn/speaking/merged-history")
 	public Mono<ApiResponse<List<SpeakingHistoryEntryDto>>> getSpeakingMergedHistory(@PathVariable String userId) {
 		return englishServiceClient.getSpeakingMergedHistory(userId).map(ApiResponse::ok);
+	}
+
+	// --- Luyện viết & Luyện dịch (writing skill) ---
+
+	@Operation(summary = "Generate one AI writing brief or translation passage (COMPOSE / TRANSLATE_VI_EN / TRANSLATE_EN_VI), "
+			+ "targeting the given focus items or the learner's own weakest grammar/vocabulary labels; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/generate")
+	public Mono<ApiResponse<WritingPracticeItemDto>> generateWritingPractice(
+			@PathVariable String userId, @RequestBody GenerateWritingPracticeRequestDto request) {
+		return englishServiceClient.generateWritingPractice(userId, request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's generated writing prompts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/writing/items")
+	public Mono<ApiResponse<List<WritingPracticeItemDto>>> listWritingPracticeItems(@PathVariable String userId) {
+		return englishServiceClient.listWritingPracticeItems(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "One writing prompt, without its reference answer; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/writing/items/{itemId}")
+	public Mono<ApiResponse<WritingPracticeItemDto>> getWritingPracticeItem(
+			@PathVariable String userId, @PathVariable Long itemId) {
+		return englishServiceClient.getWritingPracticeItem(itemId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "2-3 hints for what to write next (Vietnamese idea + English structure/phrases, never a ready-made "
+			+ "sentence; for translation tasks the reference answer is never used); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/suggest")
+	public Mono<ApiResponse<List<WritingSuggestionDto>>> suggestNextSentence(
+			@PathVariable String userId, @RequestBody SuggestNextSentenceRequestDto request) {
+		return englishServiceClient.suggestNextSentence(request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade a submitted writing/translation text per criterion, reveal the reference answer, and feed "
+			+ "every labelled error into the learner's grammar/vocabulary weak points; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/attempts")
+	public Mono<ApiResponse<WritingAttemptResultDto>> submitWritingAttempt(
+			@PathVariable String userId, @RequestBody SubmitWritingAttemptRequestDto request) {
+		request.setUserId(userId);
+		return englishServiceClient.submitWritingAttempt(request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "A learner's past writing attempts, newest first; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/writing/history")
+	public Mono<ApiResponse<List<WritingAttemptHistoryEntryDto>>> getWritingHistory(@PathVariable String userId) {
+		return englishServiceClient.getWritingHistory(userId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Full detail for one of a learner's own past writing attempts; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/writing/history/{attemptId}")
+	public Mono<ApiResponse<WritingAttemptDetailDto>> getWritingAttemptDetail(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.getWritingAttemptDetail(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate practice targeted at one past writing attempt's own mistakes (the \"Luyện lại những lỗi "
+			+ "này\" action); thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/history/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<WritingPracticeItemDto>>> generateWritingPracticeFromAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.generateWritingPracticeFromAttempt(userId, attemptId).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Writing-library topics on one taxonomy axis (grammar | genre | vocab_theme) with this learner's "
+			+ "gating status and chain progress; thin proxy to english-service")
+	@GetMapping("/{userId}/learn/writing/library/topics")
+	public Mono<ApiResponse<List<WritingLibraryTopicDto>>> getWritingLibraryTopics(
+			@PathVariable String userId, @RequestParam String taxonomy) {
+		return englishServiceClient.getWritingLibraryTopics(userId, taxonomy).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Start (or resume) the next prompt in a writing-library topic's chain (topic must not be LOCKED); "
+			+ "thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/library/topics/{topicId}/prompts")
+	public Mono<ApiResponse<WritingLibraryPromptDto>> startOrResumeWritingLibraryPrompt(
+			@PathVariable String userId, @PathVariable Long topicId, @RequestParam String taskType) {
+		return englishServiceClient.startOrResumeWritingLibraryPrompt(userId, topicId, taskType).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Grade a submitted writing-library text and advance the topic chain, unlocking the next topic on "
+			+ "the same axis once the whole chain is passed; thin proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/library/prompts/{promptId}/submit")
+	public Mono<ApiResponse<SubmitWritingLibraryAnswerResponseDto>> submitWritingLibraryAnswer(
+			@PathVariable String userId, @PathVariable Long promptId,
+			@RequestBody SubmitWritingLibraryAnswerRequestDto request) {
+		return englishServiceClient.submitWritingLibraryAnswer(userId, promptId, request).map(ApiResponse::ok);
+	}
+
+	@Operation(summary = "Generate \"học thường\" practice targeted at one writing-library attempt's own mistakes; thin "
+			+ "proxy to english-service")
+	@PostMapping("/{userId}/learn/writing/library/attempts/{attemptId}/ai-practice")
+	public Mono<ApiResponse<List<WritingPracticeItemDto>>> generateWritingPracticeFromLibraryAttempt(
+			@PathVariable String userId, @PathVariable Long attemptId) {
+		return englishServiceClient.generateWritingPracticeFromLibraryAttempt(userId, attemptId).map(ApiResponse::ok);
 	}
 }
