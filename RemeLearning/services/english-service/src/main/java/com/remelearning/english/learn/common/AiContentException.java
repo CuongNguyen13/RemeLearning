@@ -2,8 +2,8 @@ package com.remelearning.english.learn.common;
 
 /**
  * Wraps any failure from {@link AiContentClient} (LLM call, empty/unparsable response) behind one
- * unchecked type, so every "learn" generator/scorer can degrade to its own fallback with a single
- * catch clause instead of juggling {@code JsonProcessingException}/{@code RestClientException}.
+ * unchecked type. Generators/scorers do not catch it: AI content has no template fallback anywhere
+ * in this service, so it propagates to the caller as a real error.
  */
 public class AiContentException extends RuntimeException {
 

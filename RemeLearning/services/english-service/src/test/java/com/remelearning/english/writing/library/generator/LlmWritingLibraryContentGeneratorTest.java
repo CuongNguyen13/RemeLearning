@@ -11,12 +11,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,7 +28,7 @@ class LlmWritingLibraryContentGeneratorTest {
 	private final AiContentClient aiContentClient = mock(AiContentClient.class);
 	private final WritingLibraryPromptMapper promptMapper = mock(WritingLibraryPromptMapper.class);
 	private final LlmWritingLibraryContentGenerator generator =
-			new LlmWritingLibraryContentGenerator(aiContentClient, promptMapper);
+			new LlmWritingLibraryContentGenerator(aiContentClient, promptMapper, 1400);
 
 	@Test
 	void generatesAndPersistsThePromptSoItBecomesPartOfTheTopicChain() {
@@ -68,69 +71,27 @@ class LlmWritingLibraryContentGeneratorTest {
 	}
 
 	@Test
-	void fallsBackToATopicDerivedTemplateWhenTheLlmFails() {
+	void throwsAndPersistsNothingWhenTheLlmFails() {
 		when(aiContentClient.completeJson(
 				anyString(), anyString(), anyDouble(), anyInt(),
 				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
 				.thenThrow(new AiContentException("boom"));
 
-		WritingLibraryPrompt prompt = generator.generatePrompt(
-				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null);
-
-		// Offline, the task must still name the topic and state its requirement in Vietnamese.
-		assertThat(prompt.getPromptText())
-				.contains("Past Perfect")
-				.contains("dùng cấu trúc");
-		verify(promptMapper).insert(prompt);
+		assertThatThrownBy(() -> generator.generatePrompt(
+				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null))
+				.isInstanceOf(AiContentException.class);
+		verify(promptMapper, never()).insert(any());
 	}
 
 	@Test
-	void theFallbackRequirementReflectsTheAxis() {
-		when(aiContentClient.completeJson(
-				anyString(), anyString(), anyDouble(), anyInt(),
-				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
-				.thenThrow(new AiContentException("boom"));
-
-		assertThat(generator.generatePrompt(topic(10L, "genre", "Báo cáo ngắn"), WritingTaskType.COMPOSE, null)
-				.getPromptText()).contains("đúng thể loại");
-		assertThat(generator.generatePrompt(topic(10L, "vocab_theme", "Travel"), WritingTaskType.COMPOSE, null)
-				.getPromptText()).contains("từ/cụm từ thuộc chủ đề");
-	}
-
-	@Test
-	void anUnknownAxisFallsBackToAGenericRequirementInsteadOfThrowing() {
-		when(aiContentClient.completeJson(
-				anyString(), anyString(), anyDouble(), anyInt(),
-				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
-				.thenThrow(new AiContentException("boom"));
-
-		// A row with a taxonomy this build doesn't know must not break the learner's session.
-		assertThat(generator.generatePrompt(topic(10L, "phonics", "Weird"), WritingTaskType.COMPOSE, null)
-				.getPromptText()).contains("viết mạch lạc");
-	}
-
-	@Test
-	void translationFallbacksStillCarryTheirVietnameseInstruction() {
-		when(aiContentClient.completeJson(
-				anyString(), anyString(), anyDouble(), anyInt(),
-				eq(LlmWritingLibraryContentGenerator.LlmPayload.class)))
-				.thenThrow(new AiContentException("boom"));
-
-		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_VI_EN, null)
-				.getPromptText()).startsWith("Dịch đoạn văn sau sang tiếng Anh:");
-		assertThat(generator.generatePrompt(topic(10L, "grammar", "Past Perfect"), WritingTaskType.TRANSLATE_EN_VI, null)
-				.getPromptText()).startsWith("Dịch đoạn văn sau sang tiếng Việt:");
-	}
-
-	@Test
-	void fallsBackWhenTheModelReturnsNoPromptText() {
+	void throwsWhenTheModelReturnsNoPromptText() {
 		stubLlm("""
 				{"promptText": "  ", "referenceAnswer": "r"}""");
 
-		WritingLibraryPrompt prompt = generator.generatePrompt(
-				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null);
-
-		assertThat(prompt.getPromptText()).contains("Past Perfect");
+		assertThatThrownBy(() -> generator.generatePrompt(
+				topic(10L, "grammar", "Past Perfect"), WritingTaskType.COMPOSE, null))
+				.isInstanceOf(AiContentException.class);
+		verify(promptMapper, never()).insert(any());
 	}
 
 	@Test

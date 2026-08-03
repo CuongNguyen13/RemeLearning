@@ -6,9 +6,9 @@ import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.vocabulary.learn.domain.VocabQuestionItem;
 import com.remelearning.english.vocabulary.learn.domain.VocabQuestionType;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,12 +16,12 @@ import java.util.List;
 
 /**
  * The only {@link VocabPracticeGenerator}: this skill is AI-only (Phần 2 of the "Học &amp; Luyện
- * tập với AI" plan) - there's no switchable rule-based mode, only a static-template fallback for
- * when the LLM call/parse fails, so generating a practice set never breaks.
+ * tập với AI" plan) - there's no switchable rule-based mode and no static-template fallback: any
+ * LLM call/parse failure propagates as {@link AiContentException} so the caller sees a real error
+ * instead of templated filler content.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmVocabPracticeGenerator implements VocabPracticeGenerator {
 
 	private static final String SYSTEM_PROMPT = """
@@ -44,24 +44,29 @@ public class LlmVocabPracticeGenerator implements VocabPracticeGenerator {
 			- Keep sentences natural, 6-16 words, appropriate for the requested level/exam style.""";
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokens;
 
+	public LlmVocabPracticeGenerator(
+			AiContentClient aiContentClient,
+			@Value("${vocabulary.practice.max-output-tokens:1200}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// One LLM call, no fallback: a failed/empty generation surfaces as AiContentException.
 	@Override
 	public GeneratedVocabPractice generate(List<String> targetWords, String level, String examType) {
-		try {
-			String userPrompt = "Target words: %s\nLevel: %s\nExam style: %s".formatted(
-					targetWords.isEmpty() ? "(none - please choose suitable words yourself)" : targetWords,
-					level == null ? "(unspecified)" : level,
-					examType == null ? "(unspecified)" : examType);
-			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1200, LlmPayload.class);
-			GeneratedVocabPractice result = toResult(payload);
-			if (result.items().isEmpty()) {
-				throw new AiContentException("LLM returned no vocabulary items");
-			}
-			return result;
-		} catch (AiContentException ex) {
-			log.warn("LLM vocabulary practice generation failed, falling back to templates", ex);
-			return fallback(targetWords, level);
+		String userPrompt = "Target words: %s\nLevel: %s\nExam style: %s".formatted(
+				targetWords.isEmpty() ? "(none - please choose suitable words yourself)" : targetWords,
+				level == null ? "(unspecified)" : level,
+				examType == null ? "(unspecified)" : examType);
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokens, LlmPayload.class);
+		GeneratedVocabPractice result = toResult(payload);
+		if (result.items().isEmpty()) {
+			log.warn("LLM returned no vocabulary items for words={} level={}", targetWords, level);
+			throw new AiContentException("LLM returned no vocabulary items");
 		}
+		return result;
 	}
 
 	private GeneratedVocabPractice toResult(LlmPayload payload) {
@@ -89,22 +94,6 @@ public class LlmVocabPracticeGenerator implements VocabPracticeGenerator {
 			log.warn("Unrecognized vocab question type '{}', defaulting to CLOZE", raw);
 			return VocabQuestionType.CLOZE;
 		}
-	}
-
-	// One templated cloze item per target word (or one generic "practice" item if none were given),
-	// so generating a set never fails even with the LLM unreachable.
-	private GeneratedVocabPractice fallback(List<String> targetWords, String level) {
-		List<String> words = targetWords.isEmpty() ? List.of("practice") : targetWords;
-		List<VocabQuestionItem> items = words.stream()
-				.map(word -> VocabQuestionItem.builder()
-						.targetWord(word)
-						.type(VocabQuestionType.CLOZE)
-						.prompt("Please use the word \"____\" in a sentence of your own (target: " + word + ").")
-						.answer(word)
-						.translation(null)
-						.build())
-				.toList();
-		return new GeneratedVocabPractice(level == null ? "Vocabulary practice" : level + " vocabulary practice", items);
 	}
 
 	private static <T> List<T> nullToEmpty(List<T> list) {

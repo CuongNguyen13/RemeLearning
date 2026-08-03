@@ -62,6 +62,7 @@ public class LlmSpeakingLibraryGenerator {
 	private final SpeakingLibrarySectionMapper sectionMapper;
 	private final SpeakingLibrarySentenceMapper sentenceMapper;
 	private final String ttsLang;
+	private final int maxOutputTokens;
 
 	public LlmSpeakingLibraryGenerator(
 			AiContentClient aiContentClient,
@@ -69,13 +70,15 @@ public class LlmSpeakingLibraryGenerator {
 			StorageClient storageClient,
 			SpeakingLibrarySectionMapper sectionMapper,
 			SpeakingLibrarySentenceMapper sentenceMapper,
-			@Value("${speaking.tts.lang:en}") String ttsLang) {
+			@Value("${speaking.tts.lang:en}") String ttsLang,
+			@Value("${speaking.library.max-output-tokens:1200}") int maxOutputTokens) {
 		this.aiContentClient = aiContentClient;
 		this.audioSynthesizer = audioSynthesizer;
 		this.storageClient = storageClient;
 		this.sectionMapper = sectionMapper;
 		this.sentenceMapper = sentenceMapper;
 		this.ttsLang = ttsLang;
+		this.maxOutputTokens = maxOutputTokens;
 	}
 
 	/**
@@ -87,7 +90,7 @@ public class LlmSpeakingLibraryGenerator {
 	public SpeakingLibrarySection generateSection(SpeakingLibraryTopic topic) {
 		String userPrompt = "Topic: %s\nLevel: %s".formatted(
 				topic.getName(), topic.getLevel() == null || topic.getLevel().isBlank() ? "(unspecified)" : topic.getLevel());
-		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1200, LlmPayload.class);
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokens, LlmPayload.class);
 
 		List<LlmSentence> rawSentences = nullToEmpty(payload.sentences);
 		if (rawSentences.isEmpty()) {

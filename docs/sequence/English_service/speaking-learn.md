@@ -49,7 +49,7 @@ sequenceDiagram
     Gemini-->>Ai: raw text (code-fence stripped)
     Ai-->>Gen: parsed JSON {topic, targetText, translation}
     alt LLM call fails, or parse fails, or targetText blank
-        Gen->>Gen: fallback() - fixed template sentence, or one naming the target words
+        Gen-->>Svc: AiContentException - no template sentence, nothing persisted
     end
     Gen-->>Svc: GeneratedSpeakingPractice{topic, targetText, translation}
     Svc->>SMapper: insertItem({userId, level, examType, topic, targetText, translation})
@@ -191,7 +191,7 @@ attempt, not rolled up per section (unlike Listening Library, which scores a who
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmSpeakingPracticeGenerator` via `AiContentClient`/`LlmClient`; falls back to a template on any failure |
+| 1 | HTTPS | english-service -> Gemini API | `LlmSpeakingPracticeGenerator` via `AiContentClient`/`LlmClient`; no template fallback - `AiContentException` propagates on any failure |
 | 2 | HTTP | english-service -> ai-service `/api/v1/tts/synthesize` | Supertonic TTS, one fixed voice (`speaking.tts.voice`, default `F1`), single call (no per-speaker/per-line split like listening's dialogue) |
 | 3 | HTTP (multipart) | english-service -> ai-service `/api/v1/pronunciation/score` | `AiServicePronunciationScoringClient` (`PronunciationScoringClient`); wav2vec2 GOP scoring against `item.targetText` |
 | 4 | StorageClient write/read | english-service -> local FS (or S3) | both the Supertonic sample audio (generate/regenerate) and the learner's uploaded recording (submit) |

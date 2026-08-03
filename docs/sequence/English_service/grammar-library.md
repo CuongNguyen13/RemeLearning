@@ -163,7 +163,7 @@ sequenceDiagram
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmGrammarLibraryContentGenerator` via `AiContentClient`, both for first-read topic content and for per-question RETRY generation; falls back to a static template on failure so neither call ever hard-fails |
+| 1 | HTTPS | english-service -> Gemini API | `LlmGrammarLibraryContentGenerator` via `AiContentClient`, both for first-read topic content and for per-question RETRY generation; no static template - `AiContentException` propagates on failure and nothing is persisted |
 | 2 | In-process | english-service -> `PracticeService#redo` | fired once per `finishSession` call, one attempt per question in the session (not deduped), same mechanism as `vocabulary-library.md` §2 |
 | 3 | Postgres | english-service -> `reme_english` | `grammar_library_topics`, `grammar_library_contents`, `grammar_library_questions`, `grammar_topic_progress`, `grammar_library_sessions`, `grammar_library_session_answers` |
 | 4 | In-process | english-service -> `GrammarLearnService#generatePracticeForRules` | fired only by flow 3 (generate-from-session); delegates the actual generate-and-persist step to `grammar.learn` so both flows feed the same `grammar_practice_items` bank |

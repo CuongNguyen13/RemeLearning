@@ -264,7 +264,11 @@ public class PracticeSessionServiceImpl implements PracticeSessionService {
 				GenerateListeningPracticeRequest request = new GenerateListeningPracticeRequest();
 				request.setFocusItems(focusItems);
 				request.setExamType(examType);
-				ListeningPracticeItemDto item = listeningLearnService.generate(userId, request);
+				// Listening generates a whole 5-10 passage session per call (one LLM round trip, audio
+				// synthesized lazily on first play). This slot takes the first passage; the rest stay in
+				// the learner's "Bài đã tạo, chưa làm xong" list instead of being thrown away.
+				List<ListeningPracticeItemDto> items = listeningLearnService.generate(userId, request);
+				ListeningPracticeItemDto item = items.get(0);
 				return new GeneratedSlot(item.getPracticeItemId(), item.getTopic());
 			}
 			case CATEGORY_SPEAKING -> {

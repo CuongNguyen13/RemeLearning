@@ -4,11 +4,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Static, category-agnostic fallback exercise lists - the pluralized equivalent of ai-service's
- * {@code rule_based_analyzer.py}'s {@code _RECOMMENDATION_TEMPLATES}. Kept as a plain static
- * helper (not a Spring bean) so both {@link RuleBasedExerciseGenerator} and
- * {@link LlmExerciseGenerator}'s failure-fallback path can reuse the same content without ever
- * registering two beans for {@link ExerciseGenerator} at once.
+ * Static, category-agnostic exercise lists - the pluralized equivalent of ai-service's
+ * {@code rule_based_analyzer.py}'s {@code _RECOMMENDATION_TEMPLATES}. Backs
+ * {@link RuleBasedExerciseGenerator}, the generator active unless
+ * {@code recommendation.exercise-generator.mode=llm}; kept as a plain static helper (not a Spring
+ * bean) so it never registers a second {@link ExerciseGenerator} bean. Not a failure fallback:
+ * {@link LlmExerciseGenerator} propagates its own failures instead of borrowing these.
  */
 final class ExerciseTemplates {
 

@@ -14,4 +14,7 @@ public interface GoogleDriveClient {
 
 	/** Lists the immediate, non-trashed children (folders and files) of the folder identified by {@code folderId}. */
 	List<DriveItem> listChildren(String folderId);
+
+	/** Size in bytes of the file identified by {@code fileId}. */
+	long fileSize(String fileId);
 }

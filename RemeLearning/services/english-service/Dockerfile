@@ -22,5 +22,7 @@ RUN chmod +x mvnw && ./mvnw -pl services/english-service -am clean package -Dski
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /workspace/services/english-service/target/english-service-*.jar app.jar
+COPY services/english-service/entrypoint.sh entrypoint.sh
+RUN chmod +x entrypoint.sh
 EXPOSE 8085
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["./entrypoint.sh"]

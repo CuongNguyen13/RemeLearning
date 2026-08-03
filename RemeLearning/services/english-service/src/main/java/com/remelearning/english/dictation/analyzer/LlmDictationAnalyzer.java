@@ -5,14 +5,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import com.remelearning.english.dictation.dto.WordDiffDto;
 import com.remelearning.english.dictation.dto.WordDiffTag;
+import com.remelearning.english.learn.common.AiContentException;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
@@ -27,12 +29,11 @@ import java.util.Map;
  * today), acting as a listening coach that classifies each mistake by root cause (vocabulary,
  * grammar, or connected-speech phonology) instead of giving generic tips. Enabled with
  * {@code dictation.analyzer.mode=llm}; otherwise {@link RuleBasedDictationAnalyzer} stays active.
- * Every call falls back to the static templates on any LLM/parse failure, honoring the interface's
- * never-throw contract.
+ * Any LLM/parse failure propagates as {@link AiContentException} - no silent degradation to the
+ * rule-based heuristic or to static templates.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "dictation.analyzer", name = "mode", havingValue = "llm")
 public class LlmDictationAnalyzer implements DictationAnalyzer {
 
@@ -63,9 +64,21 @@ public class LlmDictationAnalyzer implements DictationAnalyzer {
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 
 	private final LlmClient llmClient;
+	private final int maxOutputTokensAnalyze;
+	private final int maxOutputTokensPractice;
 
-	// Asks the LLM to classify the diff's mismatches by root cause and give advice; any failure/empty
-	// parse falls back to the rule-based heuristic so grading an attempt never breaks.
+	public LlmDictationAnalyzer(
+			LlmClient llmClient,
+			@Value("${dictation.analyzer.max-output-tokens-analyze:700}") int maxOutputTokensAnalyze,
+			@Value("${dictation.analyzer.max-output-tokens-practice:400}") int maxOutputTokensPractice) {
+		this.llmClient = llmClient;
+		this.maxOutputTokensAnalyze = maxOutputTokensAnalyze;
+		this.maxOutputTokensPractice = maxOutputTokensPractice;
+	}
+
+	// Asks the LLM to classify the diff's mismatches by root cause and give advice; any failure or
+	// empty parse is rethrown as AiContentException instead of being papered over with a heuristic
+	// analysis the learner would read as the AI's verdict.
 	@Override
 	public DictationAnalysis analyzeAttempt(String referenceText, String userTranscript, List<WordDiffDto> diff) {
 		try {
@@ -74,40 +87,41 @@ public class LlmDictationAnalyzer implements DictationAnalyzer {
 					.userPrompt("Reference text:\n%s\n\nLearner's transcript:\n%s\n\nWord mismatches: %s"
 							.formatted(referenceText, userTranscript, describeMismatches(diff)))
 					.temperature(0.4)
-					.maxOutputTokens(700)
+					.maxOutputTokens(maxOutputTokensAnalyze)
 					.build();
 			LlmResponse response = llmClient.complete(request);
 			LlmAnalysisPayload payload = MAPPER.readValue(stripCodeFences(response.getContent()), LlmAnalysisPayload.class);
 			DictationAnalysis analysis = toAnalysis(payload);
 			if (analysis.getErrorTable().isEmpty() && analysis.getActionAdvice().isEmpty()) {
-				throw new IllegalStateException("LLM returned an empty analysis");
+				throw new AiContentException("LLM returned an empty dictation analysis");
 			}
 			return analysis;
-		} catch (JsonProcessingException | IllegalStateException | RestClientException ex) {
-			log.warn("LLM dictation analysis failed, falling back to rule-based heuristic", ex);
-			return new RuleBasedDictationAnalyzer().analyzeAttempt(referenceText, userTranscript, diff);
+		} catch (JsonProcessingException | LlmException | RestClientException ex) {
+			log.warn("LLM dictation analysis failed", ex);
+			throw new AiContentException("LLM dictation analysis failed", ex);
 		}
 	}
 
-	// Asks the LLM for a JSON array of practice sentences; falls back to templates on any failure.
+	// Asks the LLM for a JSON array of practice sentences; no template fallback, the failure
+	// propagates as AiContentException.
 	@Override
 	public List<String> generatePracticeSentences(List<String> missedWords) {
 		LlmRequest request = LlmRequest.builder()
 				.systemPrompt(PRACTICE_SYSTEM_PROMPT)
 				.userPrompt("Hard-to-hear words: " + missedWords)
 				.temperature(0.5)
-				.maxOutputTokens(400)
+				.maxOutputTokens(maxOutputTokensPractice)
 				.build();
 		try {
 			LlmResponse response = llmClient.complete(request);
 			List<String> sentences = MAPPER.readValue(stripCodeFences(response.getContent()), new TypeReference<List<String>>() { });
 			if (sentences == null || sentences.isEmpty()) {
-				throw new IllegalStateException("LLM returned no practice sentences");
+				throw new AiContentException("LLM returned no practice sentences");
 			}
 			return sentences;
-		} catch (JsonProcessingException | IllegalStateException | RestClientException ex) {
-			log.warn("LLM practice-sentence generation failed, falling back to templates", ex);
-			return DictationAnalysisTemplates.practiceSentencesFor(missedWords);
+		} catch (JsonProcessingException | LlmException | RestClientException ex) {
+			log.warn("LLM practice-sentence generation failed for words={}", missedWords, ex);
+			throw new AiContentException("LLM practice-sentence generation failed", ex);
 		}
 	}
 

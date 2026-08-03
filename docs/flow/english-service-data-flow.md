@@ -56,19 +56,19 @@ flowchart TD
         Decode2V["EventCodec decode (vocabulary)<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
         FilterV{"category == vocabulary?"}
         DiscardV["skip<br/>(owned by grammar's/pronunciation's own consumer)"]
-        ClassifyV["VocabularyClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) with<br/>fallback to OTHER on failure"]
+        ClassifyV["VocabularyClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) -<br/>LlmException propagates on failure (never OTHER)"]
         UpsertV["upsert keyed on (user_id, item_id)"]
 
         Decode2G["EventCodec decode (grammar)<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
         FilterG{"category == grammar?"}
         DiscardG["skip<br/>(owned by vocabulary's/pronunciation's own consumer)"]
-        ClassifyG["GrammarClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) with<br/>fallback to OTHER on failure"]
+        ClassifyG["GrammarClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) -<br/>LlmException propagates on failure (never OTHER)"]
         UpsertG["upsert keyed on (user_id, item_id)"]
 
         Decode2P["EventCodec decode (pronunciation)<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
         FilterP{"category == pronunciation?"}
         DiscardP["skip<br/>(owned by vocabulary's/grammar's own consumer)"]
-        ClassifyP["PronunciationClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) with<br/>fallback to OTHER on failure"]
+        ClassifyP["PronunciationClassifier.classify(label)<br/>rule-based heuristics, or LLM (Gemini) -<br/>LlmException propagates on failure (never OTHER)"]
         UpsertP["upsert keyed on (user_id, item_id)"]
 
         Decode2L["EventCodec decode (listening.weakpoint)<br/>snake_case JSON -> LearningGapAnalyzedEvent"]
@@ -144,12 +144,15 @@ flowchart TD
         GLListRefreshed["findItemsByUserId(userId) -> refreshed practice-set list"]
     end
 
-    subgraph ListeningLearnFlow["Listening learn (package listening, brand-new domain)"]
+    subgraph ListeningLearnFlow["Listening learn (package listening) - one generate = a whole 5-10 passage session, audio synthesized lazily"]
         LLGenReq["POST /api/v1/learn/listening/{userId}/generate<br/>{level?, examType?, translationLang?, focusItems?}"]
-        LLResolveKw["resolveTargetKeywords: focusItems, else the learner's own past<br/>wrong KEYWORD answers (own attempt history - no weak-point table)"]
-        LLGenerate["ListeningPracticeGenerator.generate(keywords, level, examType, translationLang)<br/>LLM (Gemini) -> transcript + MCQ/KEYWORD/OPEN questions + optional translation"]
-        LLSynthesize["DialogueAudioSynthesizer.synthesize(lines, ttsLang)<br/>Supertonic TTS per line, merged, transcoded to Opus (AudioTranscodeClient) -> {transcriptText, translationText, audioBytes}"]
-        LLInsertItem["insertItem + StorageClient.write(audio, .opus) -> storageKey"]
+        LLResolveKw["resolveTargetKeywords: focusItems, else the learner's own past<br/>wrong KEYWORD answers (own attempt history - no weak-point table),<br/>SHUFFLED then capped at 8 (unshuffled = same prompt every call)"]
+        LLAvoidTopics["avoidTopics: distinct topic of the 12 newest items<br/>+ passageCount = random 5..10 per call"]
+        LLGenerate["ListeningPracticeGenerator.generate(ListeningSessionRequest{keywords, level, examType,<br/>translationLang, avoidTopics, passageCount})<br/>ONE LLM (Gemini) call, temp 0.9, 600 + 1300 x passageCount output tokens<br/>-> passages[{topic, lines[], MCQ/KEYWORD/OPEN questions[], optional per-line translation}]<br/>prompt forbids reusing avoidTopics + repeating a scenario within the batch<br/>(2 x passageCount random scenario hints drawn from a 24-entry pool)"]
+        LLRenderText["DialogueTextRenderer.render(lines) per passage (pure, no TTS)<br/>-> {transcriptText, translationText?}"]
+        LLInsertItem["insertItem per passage {transcript, translation, passage_lines(JSON lines), questions}<br/>storage_key stays NULL - no audio yet"]
+        LLAudioReq["GET /api/v1/learn/listening/items/{itemId}/audio"]
+        LLLazySynth["storage_key NULL? DialogueAudioSynthesizer.synthesize(passage_lines, ttsLang)<br/>Supertonic TTS per line, merged, transcoded to Opus (AudioTranscodeClient)<br/>-> StorageClient.write(.opus) -> updateItemStorageKey (cached, runs once per item)<br/>pre-V28 row with neither audio nor passage_lines -> 404"]
         LLSubmitReq["POST /api/v1/learn/listening/attempts<br/>{userId, practiceItemId, answers[]}"]
         LLScoreClosed["ListeningQuestionScoring.scoreClosed<br/>MCQ exact-match, or KEYWORD WER (like DictationScorer)"]
         LLScoreOpen["OpenAnswerGrader.grade(transcript, prompt, modelAnswer, submitted)<br/>LLM (Gemini) -> {score 0..1, feedback}"]
@@ -159,7 +162,7 @@ flowchart TD
         LLHistoryAttemptReq["POST /api/v1/learn/listening/history/{userId}/{attemptId}/ai-practice"]
         LLReadAttempt["findAttemptDetailByIdAndUserId(attemptId, userId)<br/>404 if not found / not owned by userId"]
         LLAnalyzeMissed["ListeningMistakeAnalyzer.extractMissedTopics(resultsJson, attempt.topic)<br/>-> distinct retry-target text[] of every wrong question<br/>(correctAnswer for KEYWORD/MCQ; attempt's topic name for OPEN,<br/>since an OPEN correctAnswer is a full model-answer sentence, too<br/>diffuse a target keyword - product decision)"]
-        LLListRefreshed["findItemsByUserId(userId) -> refreshed practice-set list"]
+        LLListRefreshed["findPendingItemsByUserId(userId) -> the learner's not-yet-attempted passages<br/>(NOT EXISTS against listening_attempts) = the \"Bài đã tạo, chưa làm xong\" list"]
     end
 
     subgraph SpeakingLearnFlow["Speaking learn (package speaking, brand-new domain)"]
@@ -182,7 +185,7 @@ flowchart TD
     subgraph VocabularyLibraryFlow["Vocabulary library (package vocabulary.library) - extends VocabLearnFlow"]
         LibStartReq["POST /.../library/{userId}/topics/{topicId}/sections<br/>{sectionSize?}"]
         LibCountCheck{"library word count for topic &lt; sectionSize?"}
-        LibGenerate["LlmLibraryWordGenerator.generate(topic, existingWords, 15)<br/>LLM (Gemini) -> GeneratedLibraryWord[]{word, wordType, meaningVi, exampleEn}<br/>(empty list, not a template, on call/parse failure)"]
+        LibGenerate["LlmLibraryWordGenerator.generate(topic, existingWords, 15)<br/>LLM (Gemini) -> GeneratedLibraryWord[]{word, wordType, meaningVi, exampleEn}<br/>(AiContentException propagates on call/parse failure - no template, no silent empty list)"]
         LibInsertWord["insert per generated word"]
         LibTts["TtsClient.synthesize(word, lang=en) -> wav bytes -> AudioTranscodeClient.toOpus<br/>(once per new word, never at Section-runtime)"]
         LibStorageWrite["StorageClient.write(vocab-library/{topicId}/{wordId}.opus)<br/>-> updateAudioStorageKey(storageKey)"]
@@ -202,7 +205,7 @@ flowchart TD
     subgraph GrammarLibraryFlow["Grammar library (package grammar.library) - 60-topic catalog + AI theory page/pool, generated once"]
         GLibContentReq["GET /.../library/topics/{topicId}"]
         GLibContentCheck{"grammar_library_contents row exists for topic?"}
-        GLibGenerate["LlmGrammarLibraryContentGenerator.generateTopicContent(topic.name, topic.level)<br/>LLM (Gemini) -> {explanationEn, explanationVi, illustrationText, examples[], questions[8-10]}<br/>(static-template fallback, not empty, on call/parse failure)"]
+        GLibGenerate["LlmGrammarLibraryContentGenerator.generateTopicContent(topic.name, topic.level)<br/>LLM (Gemini) -> {explanationEn, explanationVi, illustrationText, examples[], questions[8-10]}<br/>(AiContentException propagates on call/parse failure - no static template)"]
         GLibInsertContent["insert grammar_library_contents row"]
         GLibInsertQuestions["insert grammar_library_questions row per generated question"]
 
@@ -242,7 +245,7 @@ flowchart TD
         LLibResumeExisting["reuse that not-yet-passed Section (resume)"]
         LLibChainFullCheck{"existing.size() >= targetSectionCount(topicId)?<br/>(deterministic 5-10, from topicId mod, no DB column)"}
         LLibReviewFallback["fall back to the last existing Section (chain fully passed - review only)"]
-        LLibGenerate["LlmListeningLibraryGenerator.generateSection(topic)<br/>questionCount = random int in [10,15]<br/>LLM (Gemini) -> {passage, questions[questionCount]}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
+        LLibGenerate["LlmListeningLibraryGenerator.generateSection(topic)<br/>questionCount = random int in [10,15]<br/>prompt carries a random passage angle (12-entry pool) + the opening 160 chars of<br/>every Section the topic already has, with \"do NOT retell these\", temp 0.9<br/>LLM (Gemini) -> {passage, questions[questionCount]}<br/>(no static-template fallback - AiContentException propagates, no Section persisted, on call/parse failure)"]
         LLibSynthesize["DialogueAudioSynthesizer.synthesize([Narrator: passage], ttsLang)<br/>Supertonic -> merged WAV -> AudioTranscodeClient.toOpus -> audio bytes"]
         LLibStorageWrite["StorageClient.write(listening-library/{topicId}/{uuid}.opus, audioBytes)"]
         LLibInsertSection["insert listening_library_sections row {topicId, passageText, audioStorageKey}"]
@@ -266,7 +269,7 @@ flowchart TD
         LLibHasMistakes{"any question missed?"}
         LLibNoRegen["return empty list (nothing to regenerate)"]
         LLibTopicLookup["ListeningLibraryTopicMapper.findById(topicId) -> topic.name, topic.level"]
-        LLibDelegate["ListeningLearnService.generatePracticeForKeywords(userId, [topic.name], topic.level, examType=null)<br/>delegates to listening.learn's own generate-and-persist pipeline (LLGenerate/LLSynthesize/LLInsertItem/LLListRefreshed)<br/>so both flows feed the same listening_practice_items bank"]
+        LLibDelegate["ListeningLearnService.generatePracticeForKeywords(userId, [topic.name], topic.level, examType=null)<br/>delegates to listening.learn's own generate-and-persist pipeline (LLGenerate/LLRenderText/LLInsertItem/LLListRefreshed)<br/>so both flows feed the same listening_practice_items bank"]
     end
 
     subgraph SpeakingLibraryFlow["Speaking library (package speaking.library) - fixed topic catalog + AI Section (sample sentences + per-sentence audio), generated once"]
@@ -469,7 +472,8 @@ flowchart TD
     GLFeed -.PracticeService.redo(...) in-process, same pipeline as RedoReq.-> LogAttempt
     GLFeed -.same.-> LockPrior
 
-    LLGenReq --> LLResolveKw --> LLGenerate --> LLSynthesize --> LLInsertItem --> T18
+    LLGenReq --> LLResolveKw --> LLAvoidTopics --> LLGenerate --> LLRenderText --> LLInsertItem --> T18
+    LLAudioReq --> LLLazySynth --> T18
     LLSubmitReq --> LLScoreClosed
     LLSubmitReq --> LLScoreOpen
     LLScoreClosed --> LLInsertAttempt --> T19
@@ -638,7 +642,7 @@ flowchart TD
         WTopVocab["VocabularyWeakPointService.getTopWeakPoints(userId, 8)"]
         WMergeLabels["concat + distinct + limit 8<br/>(writing exercises BOTH domains at once)"]
         WGen["LlmWritingPracticeGenerator.generate(taskType, labels, level, examType)"]
-        WGenFallback["fallback template per taskType<br/>(still has its Vietnamese instruction line)"]
+        WGenFail["AiContentException (502) - no template task, nothing persisted"]
         WInsertItem[("writing_practice_items<br/>+ reference_answer, target_labels")]
         WItemDto["WritingPracticeItemDto<br/>(NO referenceAnswer field)"]
     end
@@ -656,7 +660,7 @@ flowchart TD
         WGrader["LlmWritingGrader.grade(taskType, promptText, referenceAnswer, submittedText)"]
         WClamp["clamp criteria to [0,1]; missing -> 0<br/>keep only the 4th criterion for this taskType"]
         WDropErr["drop errors with blank label<br/>or category outside grammar/vocabulary"]
-        WNeutral["LLM failure -> neutral 0.5, empty errors"]
+        WGradeFail["LLM failure -> AiContentException (502), no neutral 0.5 grade recorded"]
         WAvg["WritingErrorPipeline.averageCriteria()<br/>= overallScore (Java-computed, LLM's own figure ignored)"]
         WInsertAttempt[("writing_attempts<br/>criteria JSON + errors JSON + corrected_text")]
         WFeed["WritingErrorPipeline.feedWeakPoints()"]
@@ -704,7 +708,7 @@ flowchart TD
     WFocusCheck -->|no| WTopGrammar --> WMergeLabels
     WFocusCheck -->|no| WTopVocab --> WMergeLabels
     WMergeLabels --> WGen
-    WGen -->|LLM/parse failure| WGenFallback --> WInsertItem
+    WGen -->|LLM/parse failure| WGenFail
     WGen --> WInsertItem --> WItemDto
 
     WSuggestReq --> WSuggestPromptPick
@@ -715,7 +719,7 @@ flowchart TD
     WSubmitReq --> WGrader
     WInsertItem -->|promptText + reference_answer| WGrader
     WGrader --> WClamp --> WDropErr --> WAvg
-    WGrader -->|failure| WNeutral --> WAvg
+    WGrader -->|failure| WGradeFail
     WAvg --> WInsertAttempt --> WFeed --> WPrefix --> WAnyErr
     WAnyErr -->|no| WNoop
     WAnyErr -->|yes| WRedo
@@ -755,7 +759,7 @@ flowchart TD
 | `GenerateWritingPracticeRequest` | `{taskType, level?, examType?, focusItems?}` | only `taskType` required; empty `focusItems` ⇒ top weak points of **both** grammar and vocabulary, merged and capped at 8; `examType` normalized via `ExamTypes.normalize` before being stored/used |
 | `WritingExamProfile` (in-memory) | enum `TOEIC, IELTS, TOEFL, VSTEP, GENERAL` → `{minSentences, maxSentences, topics[], registerHint, composeFormats[]}` | resolved from `examType` (unknown/blank ⇒ `GENERAL`). The **sentence count is drawn randomly from the range on every generation**, so repeated tasks differ in length instead of all coming out the same shape; TOEIC 2-4 workplace sentences vs IELTS 4-6 academic ones. Chosen in Java and handed to the model as instructions - passing only the label produced near-identical passages for every exam |
 | `WritingTaskType` | enum `COMPOSE, TRANSLATE_VI_EN, TRANSLATE_EN_VI` | carries its own `sourceLang`/`targetLang`, so those are derived server-side rather than sent by the client |
-| `GeneratedWritingPractice` (in-memory) | `{topic, promptText, referenceAnswer}` | `promptText` = Vietnamese brief (COMPOSE) or source passage (TRANSLATE_*), always prefixed with a Vietnamese instruction line — including in the offline fallback |
+| `GeneratedWritingPractice` (in-memory) | `{topic, promptText, referenceAnswer}` | `promptText` = Vietnamese brief (COMPOSE) or source passage (TRANSLATE_*), always prefixed with a Vietnamese instruction line. The TRANSLATE_* passage must be **one continuous text about a single scene** (same narrator/place/time frame, sentences chained with pronouns + connectives), and `topic` names that scene, not the grammar practised — a target label that can't fit the scene is dropped instead of derailing the passage |
 | `writing_practice_items` row | `{id, user_id, task_type, level, exam_type, topic, prompt_text, source_lang, target_lang, reference_answer, target_labels, created_at}` | `reference_answer` never leaves the service before a submission — `WritingPracticeItemDto` has no field for it |
 | `WritingPracticeItemDto` | `{practiceItemId, taskType, level, examType, topic, promptText, sourceLang, targetLang, targetLabels[], createdAt}` | deliberately missing `referenceAnswer` |
 | `SuggestNextSentenceRequest` | `{practiceItemId, draftText?}` | blank `draftText` = help me start |
@@ -850,7 +854,7 @@ flowchart TD
 | `GrammarMistakeAnalyzer.hasAnyMissedQuestion` output (in-memory) | `boolean` | pure function over a Grammar Library session's `questionsJson` + its answers; library questions carry no explicit rule tag of their own and a session is already scoped to one topic, so there is no per-question rule to diff out - this only answers whether the session had any mistake. When `true`, the call site (`GrammarLibraryServiceImpl.generatePracticeFromSession`) builds the target-rules list itself as `List.of(topic.getName())` (the session's single topic name) and feeds that into `GrammarPracticeGenerator.generate(...)` via `GrammarLearnService.generatePracticeForRules`; when `false`, generation is skipped entirely and an empty list is returned |
 | `grammar_practice_items` row from a "generate from attempt/session" call | same shape as the `generate`-produced row above | both `POST /learn/grammar/history/{userId}/{attemptId}/ai-practice` and `POST /learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` insert into this same table via `GrammarLearnServiceImpl.generatePracticeForRules` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library session) the mistake came from; the library flow's `target_rules` is always the single-element `[topic.name]`, not per-question text |
 | `GenerateListeningPracticeRequest` | `{level?, examType?, translationLang?, focusItems?}` | REST request body |
-| `listening_practice_items` row | `{id, user_id, level?, exam_type?, topic, transcript, translation?, questions (JSON `ListeningQuestionItem[]`), storage_key?, created_at}` | one row per generated passage; audio synthesized synchronously in the same call, `storage_key` set before the row is returned |
+| `listening_practice_items` row | `{id, user_id, level?, exam_type?, topic, transcript, translation?, passage_lines (JSON `DialogueLine[]`, V28), questions (JSON `ListeningQuestionItem[]`), storage_key?, created_at}` | **5-10 rows per generate call** (one whole session from one LLM call), each a different topic. `storage_key` is NULL on insert - audio is synthesized on that passage's first `/audio` request and cached then, which is why `passage_lines` keeps the speaker-tagged lines the flattened `transcript` can't reproduce. Pre-V28 rows have `passage_lines` NULL and `storage_key` already set |
 | `ListeningQuestionItem` | `{type: MCQ\|KEYWORD\|OPEN, skill, prompt, options?, answer, explanation}` | `skill` (e.g. "main-idea"/"detail"/"attitude"/"keyword") doubles as the weak-point label for non-`KEYWORD` questions; `options` only for `MCQ`; `answer` is the correct option (`MCQ`), expected phrase (`KEYWORD`, scored by WER), or model answer (`OPEN`, used as the LLM grading reference) |
 | `ListeningQuestionDto` (REST) | `{index, prompt, type, options?, answer, explanation}` | generate/`getItem`/`listItems` response - now **includes** `answer` + `explanation` for client-side grading of `MCQ`/`KEYWORD`; `answer` is **null** for `OPEN` (those are LLM-graded server-side by `OpenAnswerGrader` and must not leak). transcript/translation still withheld until the attempt is submitted; authoritative score still from the submit endpoint |
 | `SubmitListeningAttemptRequest` | `{userId, practiceItemId, answers: string[]}` | REST request body |
@@ -861,7 +865,7 @@ flowchart TD
 | `ListeningMistakeAnalyzer.extractMissedTopics` output (in-memory) | `List<String>` distinct `correctAnswer` values | pure function over an attempt's persisted `resultsJson` (`ListeningAttemptQuestionResultDto[]`, already graded - not re-scored); `resultsJson` carries no per-question topic/skill tag of its own (only `prompt`/`correctAnswer`/`explanation`), so each wrong question's own `correctAnswer` is used as the retry target text (the missed keyword itself for `KEYWORD`, the correct option/model answer for `MCQ`/`OPEN`); feeds straight into `ListeningPracticeGenerator.generate(missedTopics, level, examType, translationLang=null)` for `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` |
 | `listening_library_attempt_answers` row | `{id, attempt_id, question_id, selected_option, correct_option, is_correct, created_at}` | one row per submitted answer within a `listening_library_attempts` row (Task 1), so a later feature can regenerate AI practice targeting only the questions actually missed - mirrors dictation's mistake-history pattern |
 | `ListeningMistakeAnalyzer.hasAnyMissedQuestion` output (in-memory) | `boolean` | pure function over a Listening Library section's most recent attempt's `listening_library_attempt_answers` rows; library questions carry no explicit topic tag of their own and a Section is already scoped to one topic, so there is no per-question topic to diff out - this only answers whether the attempt had any mistake. When `true`, the call site (`ListeningLibraryServiceImpl.generatePracticeFromSection`) builds the target-keywords list itself as `List.of(topic.getName())` (the section's owning topic name) and feeds that into `ListeningPracticeGenerator.generate(...)` via `ListeningLearnService.generatePracticeForKeywords`; when `false` (or no completed attempt exists), generation is skipped entirely and an empty list is returned |
-| `listening_practice_items` row from a "generate from attempt/section" call | same shape as the `generate`-produced row above (including synthesized audio) | both `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` and `POST /learn/listening/library/{userId}/sections/{sectionId}/ai-practice` insert into this same table via `ListeningLearnServiceImpl.generatePracticeForKeywords` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library section) the mistake came from; the library flow's target keywords is always the single-element `[topic.name]`, not per-question text |
+| `listening_practice_items` rows from a "generate from attempt/section" call | same shape as the `generate`-produced rows above (also a whole 5-10 passage session, also with `storage_key` NULL until first playback) | both `POST /learn/listening/history/{userId}/{attemptId}/ai-practice` and `POST /learn/listening/library/{userId}/sections/{sectionId}/ai-practice` insert into this same table via `ListeningLearnServiceImpl.generatePracticeForKeywords` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library section) the mistake came from; the library flow's target keywords is always the single-element `[topic.name]`, not per-question text |
 | `GenerateSpeakingPracticeRequest` | `{level?, examType?, focusItems?}` | REST request body |
 | `speaking_practice_items` row | `{id, user_id, level?, exam_type?, topic, target_text, translation?, storage_key?, created_at}` | one row per generated sentence/passage; `storage_key` is the Supertonic **sample** (model) recording, synthesized with one fixed voice (unlike listening's multi-speaker dialogue) |
 | `SpeakingAttemptRequest` (multipart) | `{userId (path), practiceItemId, audio (multipart file)}` | REST request; audio persisted to `StorageClient` before scoring, so a scoring failure still leaves the recording retrievable |
@@ -872,7 +876,7 @@ flowchart TD
 | `SpeakingMistakeAnalyzer.extractWeakPhonemes` output (in-memory) | `List<String>` distinct IPA symbols | pure function over one attempt's persisted `weakPhonemesJson` (both `speaking_attempts.weak_phonemes_json` for learn and `speaking_library_attempts.weak_phonemes_json` for library - Task 2 deliberately reused the same shape); unlike `ListeningMistakeAnalyzer.extractMissedTopics`, no per-question OPEN-vs-KEYWORD diffing/fallback is needed - ai-service's GOP scorer already reduced each mistake to a short, crisp IPA symbol, always a good-enough generator target on its own; feeds straight into `SpeakingPracticeGenerator.generate(weakPhonemes, level, examType)` for `POST /learn/speaking/history/{userId}/{attemptId}/ai-practice` |
 | `speaking_practice_items` row from a "generate from attempt/section" call | same shape as the `generate`-produced row above (including the synthesized sample audio) | both `POST /learn/speaking/history/{userId}/{attemptId}/ai-practice` and `POST /learn/speaking/library/{userId}/sections/{sectionId}/ai-practice` insert into this same table via `SpeakingLearnServiceImpl.generatePracticeForKeywords` - there is only one AI-practice bank per domain regardless of which flow (learn attempt vs. library section) the mistake came from |
 | `vocabulary_topics` row | `{id, name, description?, created_at}` | fixed topic list (Du lịch, Công việc, Đời sống hàng ngày, Ẩm thực, Công nghệ, Sức khỏe, Giáo dục, Môi trường), seeded once, not learner-specific |
-| `GeneratedLibraryWord` | `{word, wordType, meaningVi, exampleEn}` | LLM JSON, one per new word `LlmLibraryWordGenerator` asks Gemini for when a topic is under-stocked; empty list (not a template) on any call/parse failure |
+| `GeneratedLibraryWord` | `{word, wordType, meaningVi, exampleEn}` | LLM JSON, one per new word `LlmLibraryWordGenerator` asks Gemini for when a topic is under-stocked; `AiContentException` on any call/parse failure (neither a template nor an empty list) |
 | `vocabulary_library_words` row | `{id, topic_id, word, word_type, meaning_vi, example_en, audio_storage_key?, created_at}` | one row per generated word; `audio_storage_key` set right after synthesis, so a TTS failure still leaves the word itself usable (just no audio) |
 | `SectionStartRequest` | `{sectionSize?}` | REST request body; defaults to 10 words |
 | `SectionQueueEntry` (JSON in `queue_state`) | `{wordId, streak, introShown, pendingExerciseType?}` | one entry per word still in play; `SectionQueue.initial` builds the starting list (shuffled, `streak=0`, `introShown=false`) |
@@ -1057,6 +1061,14 @@ flowchart TD
   is present and not `"en"` (the content's own language); for the library this is lazy-filled via
   `ensureSentencesTranslated` (mirroring `ensureSentencesAligned`'s shape), for AI-practice it's
   generated inline as part of the same Gemini call that writes the passage.
+- **Revert: `synthesizeDialoguePracticeItem`'s "audio/answer-key fix" from Rev 7 above was itself
+  wrong.** The FE's `stripSpeakerLabel` (`useSentenceRunner.ts`) always treated the `"Speaker: "`
+  prefix as transcript/grading metadata never actually spoken in the audio - Rev 7 made TTS speak
+  the prefix too, so the AI voice literally read out speaker names ("Alex:", "Sam:") during
+  playback. TTS now synthesizes only each line's bare text again; `sentence_text`/`translation_text`
+  still persist the `"Speaker: "`-prefixed form for display/grading, unchanged. Same underlying
+  fix applied to `DialogueAudioSynthesizer` (shared by listening/speaking), which had the identical
+  bug.
 - **New: four "Học & Luyện tập với AI" learn skills (`VocabLearnFlow`/`GrammarLearnFlow`/
   `ListeningLearnFlow`/`SpeakingLearnFlow` above), reusing `PracticeService.redo(...)` instead of a
   new pipeline.** `vocabulary/learn` and `grammar/learn` are structural clones of each other

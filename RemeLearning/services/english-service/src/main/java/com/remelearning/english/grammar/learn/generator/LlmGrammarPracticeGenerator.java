@@ -6,9 +6,9 @@ import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.grammar.learn.domain.GrammarQuestionItem;
 import com.remelearning.english.grammar.learn.domain.GrammarQuestionType;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,12 +16,12 @@ import java.util.List;
 
 /**
  * The only {@link GrammarPracticeGenerator}: this skill is AI-only (Phần 2 of the "Học &amp;
- * Luyện tập với AI" plan) - there's no switchable rule-based mode, only a static-template fallback
- * for when the LLM call/parse fails, so generating a practice set never breaks.
+ * Luyện tập với AI" plan) - there's no switchable rule-based mode and no static-template fallback:
+ * any LLM call/parse failure propagates as {@link AiContentException} so the caller sees a real
+ * error instead of templated filler content.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmGrammarPracticeGenerator implements GrammarPracticeGenerator {
 
 	private static final String SYSTEM_PROMPT = """
@@ -54,24 +54,29 @@ public class LlmGrammarPracticeGenerator implements GrammarPracticeGenerator {
 			- Keep sentences natural, 6-16 words, appropriate for the requested level/exam style.""";
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokens;
 
+	public LlmGrammarPracticeGenerator(
+			AiContentClient aiContentClient,
+			@Value("${grammar.practice.max-output-tokens:1200}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// One LLM call, no fallback: a failed/empty generation surfaces as AiContentException.
 	@Override
 	public GeneratedGrammarPractice generate(List<String> targetRules, String level, String examType) {
-		try {
-			String userPrompt = "Target grammar rules: %s\nLevel: %s\nExam style: %s".formatted(
-					targetRules.isEmpty() ? "(none - please choose suitable rules yourself)" : targetRules,
-					level == null ? "(unspecified)" : level,
-					examType == null ? "(unspecified)" : examType);
-			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1200, LlmPayload.class);
-			GeneratedGrammarPractice result = toResult(payload);
-			if (result.items().isEmpty()) {
-				throw new AiContentException("LLM returned no grammar items");
-			}
-			return result;
-		} catch (AiContentException ex) {
-			log.warn("LLM grammar practice generation failed, falling back to templates", ex);
-			return fallback(targetRules, level);
+		String userPrompt = "Target grammar rules: %s\nLevel: %s\nExam style: %s".formatted(
+				targetRules.isEmpty() ? "(none - please choose suitable rules yourself)" : targetRules,
+				level == null ? "(unspecified)" : level,
+				examType == null ? "(unspecified)" : examType);
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokens, LlmPayload.class);
+		GeneratedGrammarPractice result = toResult(payload);
+		if (result.items().isEmpty()) {
+			log.warn("LLM returned no grammar items for rules={} level={}", targetRules, level);
+			throw new AiContentException("LLM returned no grammar items");
 		}
+		return result;
 	}
 
 	private GeneratedGrammarPractice toResult(LlmPayload payload) {
@@ -100,22 +105,6 @@ public class LlmGrammarPracticeGenerator implements GrammarPracticeGenerator {
 			log.warn("Unrecognized grammar question type '{}', defaulting to MCQ", raw);
 			return GrammarQuestionType.MCQ;
 		}
-	}
-
-	// One templated MCQ-shaped item per target rule (or one generic "practice" item if none were
-	// given), so generating a set never fails even with the LLM unreachable.
-	private GeneratedGrammarPractice fallback(List<String> targetRules, String level) {
-		List<String> rules = targetRules.isEmpty() ? List.of("present simple") : targetRules;
-		List<GrammarQuestionItem> items = rules.stream()
-				.map(rule -> GrammarQuestionItem.builder()
-						.targetRule(rule)
-						.type(GrammarQuestionType.ERROR_CORRECTION)
-						.prompt("Write one correct sentence practicing: " + rule + ".")
-						.answer(rule)
-						.translation(null)
-						.build())
-				.toList();
-		return new GeneratedGrammarPractice(level == null ? "Grammar practice" : level + " grammar practice", items);
 	}
 
 	private static <T> List<T> nullToEmpty(List<T> list) {

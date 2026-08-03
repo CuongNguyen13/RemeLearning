@@ -133,7 +133,7 @@ sequenceDiagram
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmLibraryWordGenerator` via `AiContentClient`; degrades to no new words on failure (not a templated fallback - a library word needs a real dictionary meaning) |
+| 1 | HTTPS | english-service -> Gemini API | `LlmLibraryWordGenerator` via `AiContentClient`; `AiContentException` propagates on failure (neither a template nor a silent empty list - an empty list would read as "this topic has nothing left to learn") |
 | 2 | HTTPS/gRPC | english-service -> Supertonic TTS | `TtsClient.synthesize`, once per newly-generated word (never at Section-runtime) |
 | 3 | S3/MinIO or local disk | english-service -> `StorageClient` | one `.wav` per library word, key `vocab-library/{topicId}/{wordId}.wav` |
 | 4 | In-process | english-service -> `PracticeService#redo` | same mechanism as `vocabulary-learn.md` §2, but attempts are NOT deduped by word (see note above) |

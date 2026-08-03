@@ -4,10 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
-import lombok.RequiredArgsConstructor;
+import com.remelearning.english.learn.common.AiContentException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 
@@ -17,13 +19,12 @@ import java.util.List;
 /**
  * {@link DictationDialogueGenerator} backed by whichever {@link LlmClient} is configured (Gemini
  * today) - always active, unlike {@link DictationAnalyzer}'s rule-based/llm toggle, since a
- * templated one-word-per-line fallback would defeat the point of this feature. Falls back to that
- * template anyway if the LLM call or its JSON parsing fails, honoring the interface's never-throw
- * contract.
+ * templated one-word-per-line fallback would defeat the point of this feature. A failed LLM call or
+ * unparsable response therefore propagates as {@link AiContentException} instead of producing that
+ * template.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmDictationDialogueGenerator implements DictationDialogueGenerator {
 
 	private static final String BASE_INSTRUCTIONS = """
@@ -46,10 +47,20 @@ public class LlmDictationDialogueGenerator implements DictationDialogueGenerator
 	private static final String DEFAULT_LEVEL = "B2";
 
 	private final LlmClient llmClient;
+	private final int maxOutputTokens;
+	private final int maxOutputTokensWithTranslation;
+
+	public LlmDictationDialogueGenerator(
+			LlmClient llmClient,
+			@Value("${dictation.dialogue.max-output-tokens:400}") int maxOutputTokens,
+			@Value("${dictation.dialogue.max-output-tokens-with-translation:700}") int maxOutputTokensWithTranslation) {
+		this.llmClient = llmClient;
+		this.maxOutputTokens = maxOutputTokens;
+		this.maxOutputTokensWithTranslation = maxOutputTokensWithTranslation;
+	}
 
 	// Asks the LLM for the passage as a JSON object {topic, lines: [{speaker, text, translation?}]};
-	// any failure or empty parse falls back to one templated line per target phrase (with a null
-	// topic) so generation never breaks.
+	// any failure or empty parse propagates as AiContentException - no templated substitute.
 	@Override
 	public DialogueGenerationResult generateDialogue(
 			List<String> targetPhrases, String level, String examType, String translationLang) {
@@ -60,18 +71,18 @@ public class LlmDictationDialogueGenerator implements DictationDialogueGenerator
 				.userPrompt("Words/phrases to practice: "
 						+ (phrases.isEmpty() ? "(none - pick any everyday topic)" : String.join(", ", phrases)))
 				.temperature(0.7)
-				.maxOutputTokens(wantsTranslation ? 700 : 400)
+				.maxOutputTokens(wantsTranslation ? maxOutputTokensWithTranslation : maxOutputTokens)
 				.build();
 		try {
 			LlmResponse response = llmClient.complete(request);
 			DialogueGenerationResult result = readDialogueObject(MAPPER.readTree(stripCodeFences(response.getContent())));
 			if (result.lines().isEmpty()) {
-				throw new IllegalStateException("LLM returned no dialogue lines");
+				throw new AiContentException("LLM returned no dialogue lines");
 			}
 			return result;
-		} catch (JsonProcessingException | IllegalStateException | RestClientException ex) {
-			log.warn("LLM dialogue generation failed for {} target phrases, falling back to templates", phrases.size(), ex);
-			return new DialogueGenerationResult(null, fallbackDialogue(phrases));
+		} catch (JsonProcessingException | LlmException | RestClientException ex) {
+			log.warn("LLM dialogue generation failed for {} target phrases", phrases.size(), ex);
+			throw new AiContentException("LLM dialogue generation failed", ex);
 		}
 	}
 
@@ -108,13 +119,6 @@ public class LlmDictationDialogueGenerator implements DictationDialogueGenerator
 			}
 		}
 		return new DialogueGenerationResult(topic.isBlank() ? null : topic, lines);
-	}
-
-	// Degrades to one single-speaker templated line per target phrase, mirroring DictationAnalysisTemplates.
-	private List<DictationDialogueLine> fallbackDialogue(List<String> targetPhrases) {
-		return DictationAnalysisTemplates.practiceSentencesFor(targetPhrases).stream()
-				.map(sentence -> new DictationDialogueLine(DEFAULT_SPEAKER, sentence, null))
-				.toList();
 	}
 
 	// Gemini occasionally wraps JSON in a ```json ... ``` fence despite being asked not to; strip it.

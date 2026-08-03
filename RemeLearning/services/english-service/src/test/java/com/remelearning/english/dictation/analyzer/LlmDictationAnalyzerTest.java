@@ -4,12 +4,14 @@ import com.remelearning.common.ai.LlmClient;
 import com.remelearning.common.ai.LlmResponse;
 import com.remelearning.english.dictation.dto.WordDiffDto;
 import com.remelearning.english.dictation.dto.WordDiffTag;
+import com.remelearning.english.learn.common.AiContentException;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -17,7 +19,7 @@ import static org.mockito.Mockito.when;
 class LlmDictationAnalyzerTest {
 
 	private final LlmClient llmClient = mock(LlmClient.class);
-	private final LlmDictationAnalyzer analyzer = new LlmDictationAnalyzer(llmClient);
+	private final LlmDictationAnalyzer analyzer = new LlmDictationAnalyzer(llmClient, 700, 400);
 
 	private static final List<WordDiffDto> DIFF = List.of(
 			WordDiffDto.builder().tag(WordDiffTag.MISSING).expectedWord("reluctant").actualWord(null).build());
@@ -62,22 +64,28 @@ class LlmDictationAnalyzerTest {
 	}
 
 	@Test
-	void fallsBackToRuleBasedHeuristicWhenLlmCallFails() {
+	void throwsRatherThanFallingBackToTheRuleBasedHeuristicWhenLlmCallFails() {
 		when(llmClient.complete(any())).thenThrow(new RestClientException("ai-service unreachable"));
 
-		DictationAnalysis analysis = analyzer.analyzeAttempt("She was reluctant to admit it.", "She was to admit it.", DIFF);
-
-		assertThat(analysis.getErrorTable()).hasSize(1);
-		assertThat(analysis.getActionAdvice()).isNotEmpty();
+		assertThatThrownBy(() -> analyzer.analyzeAttempt("She was reluctant to admit it.", "She was to admit it.", DIFF))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	@Test
-	void fallsBackToRuleBasedHeuristicWhenJsonIsUnparseable() {
+	void throwsWhenJsonIsUnparseable() {
 		when(llmClient.complete(any())).thenReturn(LlmResponse.builder().content("not json").build());
 
-		DictationAnalysis analysis = analyzer.analyzeAttempt("She was reluctant to admit it.", "She was to admit it.", DIFF);
+		assertThatThrownBy(() -> analyzer.analyzeAttempt("She was reluctant to admit it.", "She was to admit it.", DIFF))
+				.isInstanceOf(AiContentException.class);
+	}
 
-		assertThat(analysis.getErrorTable()).hasSize(1);
+	@Test
+	void throwsWhenTheAnalysisComesBackEmpty() {
+		when(llmClient.complete(any())).thenReturn(LlmResponse.builder().content(
+				"{\"errorTable\":[],\"rootCauses\":[],\"actionAdvice\":[],\"practiceSentences\":[]}").build());
+
+		assertThatThrownBy(() -> analyzer.analyzeAttempt("ref", "typed", DIFF))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	@Test
@@ -91,11 +99,10 @@ class LlmDictationAnalyzerTest {
 	}
 
 	@Test
-	void generatePracticeSentencesFallsBackToTemplatesOnFailure() {
+	void generatePracticeSentencesThrowsRatherThanFallingBackToTemplates() {
 		when(llmClient.complete(any())).thenThrow(new RestClientException("ai-service unreachable"));
 
-		List<String> sentences = analyzer.generatePracticeSentences(List.of("reluctant"));
-
-		assertThat(sentences).hasSize(1);
+		assertThatThrownBy(() -> analyzer.generatePracticeSentences(List.of("reluctant")))
+				.isInstanceOf(AiContentException.class);
 	}
 }

@@ -6,9 +6,9 @@ import com.remelearning.english.grammar.library.domain.GrammarLibraryExample;
 import com.remelearning.english.learn.common.AiContentClient;
 import com.remelearning.english.learn.common.AiContentException;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,13 +17,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The only {@link GrammarLibraryContentGenerator}: same "AI-only, static-template fallback on
- * failure" shape as {@code LlmGrammarPracticeGenerator} (grammar.learn), so a topic's theory page
- * or a retry question always gets produced even with the LLM unreachable.
+ * The only {@link GrammarLibraryContentGenerator}: same AI-only shape as
+ * {@code LlmGrammarPracticeGenerator} (grammar.learn) - no static-template fallback, any LLM
+ * call/parse failure propagates as {@link AiContentException} rather than handing the learner a
+ * placeholder theory page or question.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmGrammarLibraryContentGenerator implements GrammarLibraryContentGenerator {
 
 	private static final String TOPIC_CONTENT_SYSTEM_PROMPT = """
@@ -108,44 +108,48 @@ public class LlmGrammarLibraryContentGenerator implements GrammarLibraryContentG
 			Pattern.compile("\\[(?!\")([^\\[\\]\"]*[()/+][^\\[\\]\"]*)]");
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokensTopicContent;
+	private final int maxOutputTokensRetryQuestion;
 
-	// Generates the full theory page + question pool in one LLM call; falls back to a minimal
-	// static page (still usable, just less rich) so a topic never fails to load.
-	@Override
-	public GeneratedGrammarTopicContent generateTopicContent(String topicName, String level) {
-		try {
-			String userPrompt = "Grammar topic: %s\nLevel: %s".formatted(topicName, level == null ? "(unspecified)" : level);
-			// Bumped to 5200: the explanation is now VERY detailed (25-40 sentences per language, with
-			// bullet lists + inline examples + bold markdown) on top of the 3-form illustration diagram,
-			// the examples list and the 8-10 question pool JSON — it needs the extra headroom or the
-			// JSON gets truncated mid-object and fails to parse.
-			TopicContentPayload payload = aiContentClient.completeJson(
-					TOPIC_CONTENT_SYSTEM_PROMPT, userPrompt, 0.6, 5200, TopicContentPayload.class);
-			GeneratedGrammarTopicContent result = toResult(payload);
-			if (result.questions().isEmpty()) {
-				throw new AiContentException("LLM returned no grammar library questions");
-			}
-			return result;
-		} catch (AiContentException ex) {
-			log.warn("LLM grammar library content generation failed for topic '{}', falling back to a minimal template", topicName, ex);
-			return fallbackContent(topicName, level);
-		}
+	public LlmGrammarLibraryContentGenerator(
+			AiContentClient aiContentClient,
+			@Value("${grammar.library.max-output-tokens-topic-content:5200}") int maxOutputTokensTopicContent,
+			@Value("${grammar.library.max-output-tokens-retry-question:400}") int maxOutputTokensRetryQuestion) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokensTopicContent = maxOutputTokensTopicContent;
+		this.maxOutputTokensRetryQuestion = maxOutputTokensRetryQuestion;
 	}
 
-	// Generates one fresh question for a RETRY session; falls back to a templated question of the
-	// same type so finishing a session with wrong answers never fails outright.
+	// Generates the full theory page + question pool in one LLM call; no fallback - a failed or
+	// question-less generation surfaces as AiContentException so the topic reports an error instead
+	// of opening with placeholder theory.
+	@Override
+	public GeneratedGrammarTopicContent generateTopicContent(String topicName, String level) {
+		String userPrompt = "Grammar topic: %s\nLevel: %s".formatted(topicName, level == null ? "(unspecified)" : level);
+		// Default 5200: the explanation is VERY detailed (25-40 sentences per language, with
+		// bullet lists + inline examples + bold markdown) on top of the 3-form illustration diagram,
+		// the examples list and the 8-10 question pool JSON — it needs the extra headroom or the
+		// JSON gets truncated mid-object and fails to parse.
+		TopicContentPayload payload = aiContentClient.completeJson(
+				TOPIC_CONTENT_SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokensTopicContent, TopicContentPayload.class);
+		GeneratedGrammarTopicContent result = toResult(payload);
+		if (result.questions().isEmpty()) {
+			log.warn("LLM returned no grammar library questions for topic '{}'", topicName);
+			throw new AiContentException("LLM returned no grammar library questions");
+		}
+		return result;
+	}
+
+	// Generates one fresh question for a RETRY session; no fallback - the failure propagates so the
+	// learner is told the question could not be generated rather than being given a stub one.
 	@Override
 	public GrammarLibraryQuestionSeed generateRetryQuestion(String topicName, String level, GrammarQuestionType questionType, String avoidPrompt) {
-		try {
-			String userPrompt = "Grammar topic: %s\nLevel: %s\nQuestion type: %s\nDo not repeat this sentence: %s".formatted(
-					topicName, level == null ? "(unspecified)" : level, questionType, avoidPrompt == null ? "(none)" : avoidPrompt);
-			QuestionPayload payload = aiContentClient.completeJson(RETRY_QUESTION_SYSTEM_PROMPT, userPrompt, 0.7, 400, QuestionPayload.class);
-			return new GrammarLibraryQuestionSeed(
-					questionType, payload.prompt, payload.options, payload.answer, payload.explanationVi, payload.translationVi);
-		} catch (AiContentException ex) {
-			log.warn("LLM retry-question generation failed for topic '{}', falling back to a template", topicName, ex);
-			return fallbackQuestion(topicName, questionType);
-		}
+		String userPrompt = "Grammar topic: %s\nLevel: %s\nQuestion type: %s\nDo not repeat this sentence: %s".formatted(
+				topicName, level == null ? "(unspecified)" : level, questionType, avoidPrompt == null ? "(none)" : avoidPrompt);
+		QuestionPayload payload = aiContentClient.completeJson(
+				RETRY_QUESTION_SYSTEM_PROMPT, userPrompt, 0.7, maxOutputTokensRetryQuestion, QuestionPayload.class);
+		return new GrammarLibraryQuestionSeed(
+				questionType, payload.prompt, payload.options, payload.answer, payload.explanationVi, payload.translationVi);
 	}
 
 	private GeneratedGrammarTopicContent toResult(TopicContentPayload payload) {
@@ -184,24 +188,6 @@ public class LlmGrammarLibraryContentGenerator implements GrammarLibraryContentG
 			log.warn("Unrecognized grammar library question type '{}', defaulting to MCQ", raw);
 			return GrammarQuestionType.MCQ;
 		}
-	}
-
-	// A minimal but usable fallback page: one templated ERROR_CORRECTION question, table-style
-	// illustration, so the topic still opens even with the LLM unreachable.
-	private GeneratedGrammarTopicContent fallbackContent(String topicName, String level) {
-		String explanation = "Study the '%s' rule (level: %s). Practice applying it in the questions below.".formatted(
-				topicName, level == null ? "unspecified" : level);
-		List<GrammarLibraryExample> examples = List.of(
-				GrammarLibraryExample.builder().en("This is an example sentence about " + topicName + ".")
-						.vi("Đây là câu ví dụ về " + topicName + ".").build());
-		List<GrammarLibraryQuestionSeed> questions = List.of(
-				fallbackQuestion(topicName, GrammarQuestionType.ERROR_CORRECTION));
-		return new GeneratedGrammarTopicContent(explanation, explanation, "S + V + O", examples, questions);
-	}
-
-	private GrammarLibraryQuestionSeed fallbackQuestion(String topicName, GrammarQuestionType type) {
-		return new GrammarLibraryQuestionSeed(type, "Write one correct sentence practicing: " + topicName + ".",
-				null, topicName, null, null);
 	}
 
 	private static <T> List<T> nullToEmpty(List<T> list) {

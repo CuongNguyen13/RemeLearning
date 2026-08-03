@@ -1,6 +1,7 @@
 package com.remelearning.common.ai.openaizen;
 
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import org.springframework.http.HttpHeaders;
@@ -25,11 +26,13 @@ public class OpenAiZenLlmClient implements LlmClient {
 	private final RestClient restClient;
 	private final String apiKey;
 	private final String model;
+	private final boolean reasoningEnabled;
 
-	public OpenAiZenLlmClient(RestClient restClient, String apiKey, String model) {
+	public OpenAiZenLlmClient(RestClient restClient, String apiKey, String model, boolean reasoningEnabled) {
 		this.restClient = restClient;
 		this.apiKey = apiKey;
 		this.model = model;
+		this.reasoningEnabled = reasoningEnabled;
 	}
 
 	// Builds the OpenAI-shaped chat request from the vendor-neutral LlmRequest, POSTs it to
@@ -51,7 +54,10 @@ public class OpenAiZenLlmClient implements LlmClient {
 
 	// Maps systemPrompt/history/userPrompt onto OpenAI's messages[] array: an optional leading
 	// "system" message, then history turns in order, then the current userPrompt as the final
-	// "user" turn.
+	// "user" turn. reasoningEnabled defaults to false (see OpenAiZenLlmClientConfig) since a routed
+	// reasoning model can otherwise burn the whole max_tokens budget on chain-of-thought (see
+	// toLlmResponse below) - configurable via reme.llm.zen.reasoning-enabled / ZEN_REASONING_ENABLED
+	// for callers that actually want visible reasoning.
 	private OpenAiZenChatRequest toChatRequest(LlmRequest request) {
 		List<OpenAiZenChatRequest.Message> messages = new ArrayList<>();
 
@@ -67,7 +73,7 @@ public class OpenAiZenLlmClient implements LlmClient {
 		messages.add(new OpenAiZenChatRequest.Message("user", request.getUserPrompt()));
 
 		return new OpenAiZenChatRequest(model, messages, request.getTemperature(), request.getMaxOutputTokens(),
-				new OpenAiZenChatRequest.Reasoning(false));
+				new OpenAiZenChatRequest.Reasoning(reasoningEnabled));
 	}
 
 	// Extracts the first choice's message content and token-usage counters into the
@@ -76,15 +82,16 @@ public class OpenAiZenLlmClient implements LlmClient {
 	// burn the entire max_tokens budget on their internal "reasoning" field and finish with
 	// finish_reason=length before ever writing the final answer, leaving content null with no error.
 	// Throwing here (like Gemini's "no candidates" and Ollama's "empty response" checks) lets every
-	// existing caller's catch(IllegalStateException ...) fall back to templates instead of NPEing.
+	// existing caller's catch(IllegalStateException | LlmException ...) fall back to templates
+	// instead of NPEing.
 	private LlmResponse toLlmResponse(OpenAiZenChatResponse response) {
 		if (response == null || response.choices() == null || response.choices().isEmpty()) {
-			throw new IllegalStateException("OpenAI Zen returned no choices");
+			throw new LlmException("OpenAI Zen returned no choices");
 		}
 
 		String content = response.choices().get(0).message().content();
 		if (content == null || content.isBlank()) {
-			throw new IllegalStateException(
+			throw new LlmException(
 					"OpenAI Zen returned no content (model may have exhausted max_tokens on reasoning)");
 		}
 		OpenAiZenChatResponse.Usage usage = response.usage();

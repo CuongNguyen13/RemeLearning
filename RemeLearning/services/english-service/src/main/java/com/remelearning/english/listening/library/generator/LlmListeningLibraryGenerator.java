@@ -49,10 +49,14 @@ public class LlmListeningLibraryGenerator {
 
 	private static final String SYSTEM_PROMPT = """
 			You are an English-listening content writer building a reusable library passage for
-			learners. Given a topic name, a CEFR level, and a target question count N, write ONE
-			listening passage (a monologue, 10-16 sentences, natural spoken English, with enough
-			distinct facts/details to support N non-redundant comprehension questions) about the topic,
-			then write exactly N multiple-choice comprehension questions, each with 4 options (A-D).
+			learners. Given a topic name, a CEFR level, a target question count N, an angle to take,
+			and the openings of the passages already written for this same topic, write ONE listening
+			passage (a monologue, 10-16 sentences, natural spoken English, with enough distinct
+			facts/details to support N non-redundant comprehension questions) about the topic, then
+			write exactly N multiple-choice comprehension questions, each with 4 options (A-D).
+			This passage is one of several for the same topic, so it must NOT retell any of the
+			already-written ones: take the requested angle, use a different speaker, situation and set
+			of concrete details (names, places, numbers), and do not reuse their opening sentence.
 			Respond with STRICTLY a raw JSON object (no markdown fences, no commentary) of the shape:
 			{"passage": "...",
 			 "questions": [{"question": "...", "options": ["...","...","...","..."], "correctOption": "A"|"B"|"C"|"D", "explanation": "..."}]}
@@ -67,9 +71,23 @@ public class LlmListeningLibraryGenerator {
 	private static final String GENERATED_KEY = "listening-library/%d/%s.opus";
 	private static final int MIN_QUESTIONS = 10;
 	private static final int MAX_QUESTIONS = 15;
-	// Wider than the old fixed-4-question budget (1200) to cover a longer passage plus up to 15
-	// questions, each with 4 options and a Vietnamese explanation.
-	private static final int MAX_OUTPUT_TOKENS = 3500;
+	/**
+	 * Angles drawn from at random per generation, so a topic's 5-10 Sections aren't 5-10 retellings of
+	 * the same passage - with only "topic + level + question count" in the prompt, every Section of a
+	 * topic was built from a byte-for-byte identical request and came back near-identical.
+	 */
+	private static final List<String> PASSAGE_ANGLES = List.of(
+			"a first-person personal experience", "an expert explaining how it works",
+			"a news-style report on a recent event", "a comparison of two options",
+			"a step-by-step walkthrough of a process", "a common problem and how it was solved",
+			"a set of practical tips for a beginner", "a short history of how it changed over time",
+			"a surprising fact and the story behind it", "a day in the life of someone involved",
+			"an interview-style answer to a listener's question", "advantages weighed against drawbacks");
+	/** How many characters of each already-written passage go into the prompt as "don't retell this". */
+	private static final int EXISTING_PASSAGE_PREVIEW_CHARS = 160;
+	// Higher than the other generators' 0.6, for the same reason the angle pool exists: repeated
+	// Sections of one topic must not converge.
+	private static final double TEMPERATURE = 0.9;
 
 	private final AiContentClient aiContentClient;
 	private final DialogueAudioSynthesizer audioSynthesizer;
@@ -78,6 +96,7 @@ public class LlmListeningLibraryGenerator {
 	private final ListeningLibraryQuestionMapper questionMapper;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 	private final String ttsLang;
+	private final int maxOutputTokens;
 
 	public LlmListeningLibraryGenerator(
 			AiContentClient aiContentClient,
@@ -85,13 +104,15 @@ public class LlmListeningLibraryGenerator {
 			StorageClient storageClient,
 			ListeningLibrarySectionMapper sectionMapper,
 			ListeningLibraryQuestionMapper questionMapper,
-			@Value("${listening.tts.lang:en}") String ttsLang) {
+			@Value("${listening.tts.lang:en}") String ttsLang,
+			@Value("${listening.library.max-output-tokens:3500}") int maxOutputTokens) {
 		this.aiContentClient = aiContentClient;
 		this.audioSynthesizer = audioSynthesizer;
 		this.storageClient = storageClient;
 		this.sectionMapper = sectionMapper;
 		this.questionMapper = questionMapper;
 		this.ttsLang = ttsLang;
+		this.maxOutputTokens = maxOutputTokens;
 	}
 
 	/**
@@ -105,10 +126,18 @@ public class LlmListeningLibraryGenerator {
 		// converge on the same question count - see ListeningLibraryServiceImpl.targetSectionCount
 		// for the separate, per-topic-stable count of Sections themselves.
 		int questionCount = ThreadLocalRandom.current().nextInt(MIN_QUESTIONS, MAX_QUESTIONS + 1);
-		String userPrompt = "Topic: %s\nLevel: %s\nQuestion count: %d".formatted(
-				topic.getName(), topic.getLevel() == null || topic.getLevel().isBlank() ? "(unspecified)" : topic.getLevel(),
-				questionCount);
-		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, MAX_OUTPUT_TOKENS, LlmPayload.class);
+		String userPrompt = """
+				Topic: %s
+				Level: %s
+				Question count: %d
+				Angle for this passage: %s
+				Passages already written for this topic (do NOT retell any of these): %s""".formatted(
+				topic.getName(),
+				topic.getLevel() == null || topic.getLevel().isBlank() ? "(unspecified)" : topic.getLevel(),
+				questionCount,
+				PASSAGE_ANGLES.get(ThreadLocalRandom.current().nextInt(PASSAGE_ANGLES.size())),
+				existingPassagePreviews(topic.getId()));
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, TEMPERATURE, maxOutputTokens, LlmPayload.class);
 
 		String passage = payload.passage == null ? "" : payload.passage.trim();
 		if (passage.isBlank()) {
@@ -138,6 +167,19 @@ public class LlmListeningLibraryGenerator {
 		}
 
 		return section;
+	}
+
+	// The opening of every Section already written for this topic, so the prompt can forbid retelling
+	// them. Only a preview of each (not the full text): the point is to pin down which storylines are
+	// taken, and a topic near its 5-10 Section target would otherwise crowd out the instructions.
+	private String existingPassagePreviews(Long topicId) {
+		List<String> previews = sectionMapper.findByTopicId(topicId).stream()
+				.map(ListeningLibrarySection::getPassageText)
+				.filter(text -> text != null && !text.isBlank())
+				.map(text -> text.length() <= EXISTING_PASSAGE_PREVIEW_CHARS
+						? text : text.substring(0, EXISTING_PASSAGE_PREVIEW_CHARS) + "...")
+				.toList();
+		return previews.isEmpty() ? "(none yet - this is the topic's first passage)" : previews.toString();
 	}
 
 	// Synthesizes the passage as a single-speaker monologue and writes it to storage under a key

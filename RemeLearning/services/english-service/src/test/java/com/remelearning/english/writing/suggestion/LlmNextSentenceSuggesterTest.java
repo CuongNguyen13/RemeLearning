@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -21,7 +22,7 @@ import static org.mockito.Mockito.when;
 class LlmNextSentenceSuggesterTest {
 
 	private final AiContentClient aiContentClient = mock(AiContentClient.class);
-	private final LlmNextSentenceSuggester suggester = new LlmNextSentenceSuggester(aiContentClient);
+	private final LlmNextSentenceSuggester suggester = new LlmNextSentenceSuggester(aiContentClient, 900);
 
 	@Test
 	void parsesTheSuggestedIdeasStructuresAndPhrases() {
@@ -125,14 +126,15 @@ class LlmNextSentenceSuggesterTest {
 	}
 
 	@Test
-	void returnsNoSuggestionsWhenTheLlmCallFails() {
+	void throwsRatherThanReturningNoSuggestionsWhenTheLlmCallFails() {
 		when(aiContentClient.completeJson(
 				anyString(), anyString(), anyDouble(), anyInt(),
 				org.mockito.ArgumentMatchers.eq(LlmNextSentenceSuggester.LlmSuggestion[].class)))
 				.thenThrow(new AiContentException("boom"));
 
-		// A failed hint must never break the learner's writing session.
-		assertThat(suggester.suggest(WritingTaskType.COMPOSE, "Brief", "draft", "B1")).isEmpty();
+		// An empty list would read as "the AI has no hints", not as "the hint could not be generated".
+		assertThatThrownBy(() -> suggester.suggest(WritingTaskType.COMPOSE, "Brief", "draft", "B1"))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	private void stubLlm(String json) {

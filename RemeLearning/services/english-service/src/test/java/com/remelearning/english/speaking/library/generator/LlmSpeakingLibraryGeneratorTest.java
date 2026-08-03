@@ -39,7 +39,7 @@ class LlmSpeakingLibraryGeneratorTest {
 	private final SpeakingLibrarySentenceMapper sentenceMapper = mock(SpeakingLibrarySentenceMapper.class);
 
 	private final LlmSpeakingLibraryGenerator generator = new LlmSpeakingLibraryGenerator(
-			aiContentClient, audioSynthesizer, storageClient, sectionMapper, sentenceMapper, "en");
+			aiContentClient, audioSynthesizer, storageClient, sectionMapper, sentenceMapper, "en", 1200);
 
 	@Test
 	void generateSectionPersistsSentencesAndSynthesizedAudioPerSentence() throws Exception {

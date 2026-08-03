@@ -15,7 +15,7 @@ class LlmGrammarLibraryContentGeneratorTest {
 
 	private final LlmClient llmClient = mock(LlmClient.class);
 	private final LlmGrammarLibraryContentGenerator generator =
-			new LlmGrammarLibraryContentGenerator(new AiContentClient(llmClient));
+			new LlmGrammarLibraryContentGenerator(new AiContentClient(llmClient), 5200, 400);
 
 	// Mermaid rejects a node label like A[V(s/es)] outright (unquoted parentheses break its
 	// flowchart grammar) - the LLM is asked to quote such labels itself, but generateTopicContent

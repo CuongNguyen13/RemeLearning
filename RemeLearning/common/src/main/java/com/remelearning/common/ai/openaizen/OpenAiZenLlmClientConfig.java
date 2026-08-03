@@ -22,6 +22,9 @@ public class OpenAiZenLlmClientConfig {
 
 	private String apiKey;
 	private String model = "big-pickle";
+	// false by default: a routed reasoning model (e.g. big-pickle) can otherwise burn the whole
+	// max_tokens budget on chain-of-thought and return no content (see OpenAiZenLlmClient).
+	private boolean reasoningEnabled = false;
 
 	// Only registered when reme.llm.provider=zen, so exactly one LlmClient bean exists at a time;
 	// reuses Spring Boot's auto-configured RestClient.Builder so shared HTTP config
@@ -30,7 +33,7 @@ public class OpenAiZenLlmClientConfig {
 	@ConditionalOnProperty(prefix = "reme.llm", name = "provider", havingValue = "zen")
 	public LlmClient openAiZenLlmClient(RestClient.Builder restClientBuilder) {
 		RestClient restClient = restClientBuilder.baseUrl(ZEN_API_BASE_URL).build();
-		return new OpenAiZenLlmClient(restClient, apiKey, model);
+		return new OpenAiZenLlmClient(restClient, apiKey, model, reasoningEnabled);
 	}
 
 	public void setApiKey(String apiKey) {
@@ -39,5 +42,9 @@ public class OpenAiZenLlmClientConfig {
 
 	public void setModel(String model) {
 		this.model = model;
+	}
+
+	public void setReasoningEnabled(boolean reasoningEnabled) {
+		this.reasoningEnabled = reasoningEnabled;
 	}
 }

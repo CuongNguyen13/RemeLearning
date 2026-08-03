@@ -5,9 +5,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Static, no-cost fallback error classification/advice/practice sentences used by
- * {@link RuleBasedDictationAnalyzer} and whenever {@link LlmDictationAnalyzer} can't reach or parse
- * the LLM.
+ * Static, no-cost error classification/advice/practice sentences backing
+ * {@link RuleBasedDictationAnalyzer}, the analyzer selected when {@code dictation.analyzer.mode} is
+ * left at {@code rule-based}. Not a failure fallback: {@link LlmDictationAnalyzer} propagates its
+ * own failures instead of borrowing these.
  */
 final class DictationAnalysisTemplates {
 

@@ -14,7 +14,8 @@ import java.util.List;
  * some routed models (e.g. {@code big-pickle} -> a reasoning model) spend the entire
  * {@code max_tokens} budget on their internal chain-of-thought and finish with
  * {@code finish_reason=length} before ever writing the final answer, leaving {@code content}
- * null. Always disabling reasoning keeps responses deterministic and budget-bounded for this
+ * null. Disabled by default ({@code reme.llm.zen.reasoning-enabled} / {@code ZEN_REASONING_ENABLED},
+ * see {@link OpenAiZenLlmClientConfig}) to keep responses deterministic and budget-bounded for this
  * app's short classification/analysis prompts, which don't need visible chain-of-thought.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)

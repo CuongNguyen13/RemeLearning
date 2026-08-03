@@ -160,12 +160,12 @@ sequenceDiagram
     Svc->>Svc: resolveExamType(request.examType) - "RANDOM" picks from the library's<br/>own distinct exam types (fallback TOEIC/IELTS/TOEFL/General if none), unset stays null
     Svc->>Gen: generateDialogue(targetPhrases, resolvedLevel, resolvedExamType, request.translationLang)
     Gen->>Gemini: complete(prompt) -> JSON [{speaker, text, translation?}, ...] + topic<br/>(translation only requested when translationLang != "en")
-    Gemini-->>Gen: one monologue or multi-speaker dialogue (falls back to templated lines on failure)
+    Gemini-->>Gen: one monologue or multi-speaker dialogue<br/>(AiContentException propagates on failure - no templated lines)
     Gen-->>Svc: DialogueGenerationResult{lines[], topic}
     Svc->>Svc: assignVoicesToSpeakers - one random Supertonic voice per distinct speaker
     loop each dialogue line
-        Note over Svc: lineText = "Speaker: text" for multi-speaker, else just text -<br/>the SAME string is synthesized AND persisted (bug fix: previously TTS<br/>spoke only the bare line while the graded text carried the "Speaker: " prefix)
-        Svc->>Tts: synthesize({text: lineText, lang, voice=speaker's assigned voice})
+        Note over Svc: lineText = "Speaker: text" for multi-speaker, else just text - persisted as-is,<br/>but only the bare line.text() is synthesized (the "Speaker: " prefix is<br/>display/grading metadata, never spoken aloud; reverted a prior "fix"<br/>that had TTS speak the prefix too)
+        Svc->>Tts: synthesize({text: line.text(), lang, voice=speaker's assigned voice})
         Tts->>Ai: POST /api/v1/tts/synthesize
         Ai-->>Tts: {audio_base64, mime_type, sample_rate}
         Tts-->>Svc: TtsAudio (WAV bytes)

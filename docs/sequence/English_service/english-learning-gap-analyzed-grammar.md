@@ -37,7 +37,7 @@ sequenceDiagram
             opt grammar.classifier.mode = llm
                 Cls->>Gemini: generateContent(prompt with label)
                 Gemini-->>Cls: classification response
-                Note right of Cls: parse/call failure -> fallback to GrammarType.OTHER
+                Note right of Cls: parse/call failure -> LlmException propagates (never recorded as OTHER)
             end
             Cls-->>Svc: GrammarType (TENSE/SUBJECT_VERB_AGREEMENT/.../OTHER)
             Svc->>Mapper: upsert(userId, itemId, recordingId, label,<br/>grammarType, forgettingScore, recommendation)

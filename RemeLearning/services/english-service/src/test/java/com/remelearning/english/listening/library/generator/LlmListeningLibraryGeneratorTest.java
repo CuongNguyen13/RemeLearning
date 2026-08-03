@@ -38,7 +38,7 @@ class LlmListeningLibraryGeneratorTest {
 	private final ListeningLibraryQuestionMapper questionMapper = mock(ListeningLibraryQuestionMapper.class);
 
 	private final LlmListeningLibraryGenerator generator = new LlmListeningLibraryGenerator(
-			aiContentClient, audioSynthesizer, storageClient, sectionMapper, questionMapper, "en");
+			aiContentClient, audioSynthesizer, storageClient, sectionMapper, questionMapper, "en", 3500);
 
 	@Test
 	void generateSectionPersistsPassageQuestionsAndSynthesizedAudio() throws Exception {
@@ -77,6 +77,29 @@ class LlmListeningLibraryGeneratorTest {
 		List<String> persistedOptions = new ObjectMapper().readValue(
 				persistedQuestion.getOptionsJson(), new TypeReference<List<String>>() {});
 		assertThat(persistedOptions).containsExactly("Paris", "Rome", "Tokyo", "Cairo");
+	}
+
+	// A topic is a chain of 5-10 Sections, so the prompt must tell the model which storylines the
+	// topic already used - without this every Section of a topic came back near-identical.
+	@Test
+	void generateSectionTellsTheModelNotToRetellTheTopicsExistingPassages() {
+		when(aiContentClient.completeJson(anyString(), anyString(), anyDouble(), anyInt(), eq(LlmListeningLibraryGenerator.LlmPayload.class)))
+				.thenAnswer(invocation -> new ObjectMapper().readValue("""
+						{"passage": "A different passage about travel.", "questions": []}
+						""", LlmListeningLibraryGenerator.LlmPayload.class));
+		when(audioSynthesizer.synthesize(any(), eq("en")))
+				.thenReturn(new SynthesizedDialogue("fake-audio-bytes".getBytes(), "A different passage about travel.", null));
+		when(sectionMapper.findByTopicId(1L)).thenReturn(List.of(
+				ListeningLibrarySection.builder().id(10L).topicId(1L).passageText("Last year I flew to Rome for a conference.").build()));
+
+		generator.generateSection(ListeningLibraryTopic.builder().id(1L).name("Travel").level("A2").build());
+
+		ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(anyString(), userPrompt.capture(), anyDouble(), anyInt(),
+				eq(LlmListeningLibraryGenerator.LlmPayload.class));
+		assertThat(userPrompt.getValue())
+				.contains("Last year I flew to Rome for a conference.")
+				.contains("Angle for this passage:");
 	}
 
 	@Test

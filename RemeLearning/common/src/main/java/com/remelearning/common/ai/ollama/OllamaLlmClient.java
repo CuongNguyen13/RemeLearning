@@ -1,6 +1,7 @@
 package com.remelearning.common.ai.ollama;
 
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import org.springframework.http.MediaType;
@@ -63,7 +64,7 @@ public class OllamaLlmClient implements LlmClient {
 	// Ollama /api/generate returns a flat JSON with "response", "prompt_eval_count", "eval_count".
 	private LlmResponse toLlmResponse(OllamaGenerateResponse response) {
 		if (response == null || response.response() == null) {
-			throw new IllegalStateException("Ollama returned an empty response");
+			throw new LlmException("Ollama returned an empty response");
 		}
 		return LlmResponse.builder()
 				.content(response.response())

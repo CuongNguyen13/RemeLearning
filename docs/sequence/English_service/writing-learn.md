@@ -55,7 +55,7 @@ sequenceDiagram
     Gemini-->>Ai: raw text (code-fence stripped)
     Ai-->>Gen: parsed JSON {topic, promptText, referenceAnswer}
     alt LLM call fails, parse fails, or promptText blank
-        Gen->>Gen: fallback(taskType) - fixed template per task type,<br/>still carrying its Vietnamese instruction line
+        Gen-->>Svc: AiContentException - no template task, nothing persisted
     end
     Gen-->>Svc: GeneratedWritingPractice{topic, promptText, referenceAnswer}
     Svc->>WMapper: insertItem(WritingPracticeItem{taskType, sourceLang, targetLang, referenceAnswer, targetLabelsJson})
@@ -65,9 +65,8 @@ sequenceDiagram
 ```
 
 `sourceLang`/`targetLang` are derived from the task type (`WritingTaskType.sourceLang()/targetLang()`),
-not sent by the client. `promptText` always begins with a Vietnamese instruction line — including in
-the offline fallback — per the project rule that every practice item states its requirement in
-Vietnamese.
+not sent by the client. `promptText` always begins with a Vietnamese instruction line, per the
+project rule that every practice item states its requirement in Vietnamese.
 
 ### What the exam style actually decides
 
@@ -83,8 +82,17 @@ Java before the prompt is built:
 | General (also: absent/unknown) | 3–5 | everyday | natural everyday | narrative, description, opinion paragraph |
 
 The sentence count is **drawn fresh per generation** from that range, so ten TOEIC translations produce
-ten different lengths rather than ten identically-shaped passages. When `targetLabels` are present they
-win and the profile's subject pool is only a backdrop; the sentence count and register always apply.
+ten different lengths rather than ten identically-shaped passages. The situation always comes from the
+profile's subject pool — `targetLabels` only decide which structures/words must appear *inside* it, and
+a label that doesn't fit is dropped rather than allowed to derail the passage; the sentence count and
+register always apply.
+
+**Một tình huống duy nhất từ đầu đến cuối.** The system prompt requires the source passage to be one
+continuous text about a single scene (same narrator, place and time frame, sentences chained with
+pronouns and connectives, a closing sentence). Without that constraint, N sentences + N target labels
+came back as N unrelated example sentences — the passage changed subject on every line — so the
+generator now tells the model to fix the scene first and drop a target structure that can't be used
+naturally inside it.
 
 An unrecognised exam label is passed through to the model verbatim (so a style the frontend adds first
 still reaches it) while length/register fall back to the GENERAL profile — never a failed request.
@@ -121,7 +129,7 @@ sequenceDiagram
     Gemini-->>Ai: raw JSON array
     Ai-->>Sug: LlmSuggestion[]
     alt LLM/parse failure
-        Sug->>Sug: return empty list (never throws - a flaky hint<br/>must not interrupt the writing session)
+        Sug-->>Svc: AiContentException (502) - an empty list would read as<br/>"the AI has no hints" rather than "the hint call failed"
     end
     Sug-->>Svc: List<WritingSuggestion>{ideaVi, structureHint, usefulPhrases[]}
     Svc-->>Ctrl: same list (suggestions are never recorded as a mistake)
@@ -159,7 +167,7 @@ sequenceDiagram
     Grader->>Grader: keep only the 4th criterion matching the task type<br/>(accuracy for TRANSLATE_*, taskResponse for COMPOSE)
     Grader->>Grader: drop errors with a blank label or a category<br/>outside grammar/vocabulary (nothing owns them)
     alt LLM/parse failure
-        Grader->>Grader: neutral 0.5 across the board, empty error list,<br/>Vietnamese explanation - nothing bogus reaches weak points
+        Grader-->>Svc: AiContentException - no neutral 0.5 grade is ever recorded
     end
     Grader-->>Svc: WritingGrade{criteria, correctedText, errors[], feedbackVi}
     Svc->>Pipe: averageCriteria(criteria)

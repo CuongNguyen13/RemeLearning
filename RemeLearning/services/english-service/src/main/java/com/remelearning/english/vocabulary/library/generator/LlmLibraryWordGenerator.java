@@ -4,9 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.remelearning.english.learn.common.AiContentClient;
 import com.remelearning.english.learn.common.AiContentException;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -22,7 +22,6 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmLibraryWordGenerator implements LibraryWordGenerator {
 
 	private static final String SYSTEM_PROMPT = """
@@ -42,22 +41,28 @@ public class LlmLibraryWordGenerator implements LibraryWordGenerator {
 			- Never repeat any word already in the bank.""";
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokens;
 
+	public LlmLibraryWordGenerator(
+			AiContentClient aiContentClient,
+			@Value("${vocabulary.library.max-output-tokens:1500}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// No empty-list fallback: a failed or empty generation surfaces as AiContentException, since
+	// silently returning no words looks to the caller like "this topic has nothing left to learn".
 	@Override
 	public List<GeneratedLibraryWord> generate(String topicName, List<String> existingWords, int count) {
-		try {
-			String userPrompt = "Topic: %s\nWords already in the bank: %s\nGenerate %d new words.".formatted(
-					topicName, existingWords.isEmpty() ? "(none)" : existingWords, count);
-			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1500, LlmPayload.class);
-			List<GeneratedLibraryWord> result = toResult(payload);
-			if (result.isEmpty()) {
-				throw new AiContentException("LLM returned no library words");
-			}
-			return result;
-		} catch (AiContentException ex) {
-			log.warn("LLM library word generation failed for topic '{}', returning no new words", topicName, ex);
-			return List.of();
+		String userPrompt = "Topic: %s\nWords already in the bank: %s\nGenerate %d new words.".formatted(
+				topicName, existingWords.isEmpty() ? "(none)" : existingWords, count);
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokens, LlmPayload.class);
+		List<GeneratedLibraryWord> result = toResult(payload);
+		if (result.isEmpty()) {
+			log.warn("LLM returned no library words for topic '{}'", topicName);
+			throw new AiContentException("LLM returned no library words");
 		}
+		return result;
 	}
 
 	private List<GeneratedLibraryWord> toResult(LlmPayload payload) {

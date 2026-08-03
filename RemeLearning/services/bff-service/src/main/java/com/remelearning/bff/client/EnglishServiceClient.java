@@ -638,14 +638,14 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to get grammar merged history for userId={}", userId, ex));
 	}
 
-	/** Generates one AI listening passage (Gemini transcript+questions, Supertonic audio), targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords. */
-	public Mono<ListeningPracticeItemDto> generateListeningPractice(String userId, GenerateListeningPracticeRequestDto request) {
+	/** Generates one AI listening session - 5 to 10 distinct passages (Gemini transcript+questions) in one call - targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords. */
+	public Mono<List<ListeningPracticeItemDto>> generateListeningPractice(String userId, GenerateListeningPracticeRequestDto request) {
 		return englishServiceClient.post()
 				.uri("/api/v1/learn/listening/{userId}/generate", userId)
 				.contentType(MediaType.APPLICATION_JSON)
 				.bodyValue(request)
 				.retrieve()
-				.bodyToMono(new ParameterizedTypeReference<ApiResponse<ListeningPracticeItemDto>>() {})
+				.bodyToMono(new ParameterizedTypeReference<ApiResponse<List<ListeningPracticeItemDto>>>() {})
 				.map(ApiResponse::getData)
 				.doOnError(ex -> log.error("Failed to generate listening practice for userId={}", userId, ex));
 	}
@@ -660,7 +660,7 @@ public class EnglishServiceClient {
 				.doOnError(ex -> log.error("Failed to fetch listening practice item for itemId={}", itemId, ex));
 	}
 
-	/** Fetches a learner's generated listening practice items, newest first. */
+	/** Fetches a learner's generated-but-not-yet-attempted listening practice items, newest first. */
 	public Mono<List<ListeningPracticeItemDto>> listListeningPracticeItems(String userId) {
 		return englishServiceClient.get()
 				.uri("/api/v1/learn/listening/{userId}/items", userId)

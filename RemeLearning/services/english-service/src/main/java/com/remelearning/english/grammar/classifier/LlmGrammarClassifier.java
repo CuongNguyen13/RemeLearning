@@ -1,11 +1,12 @@
 package com.remelearning.english.grammar.classifier;
 
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import com.remelearning.english.grammar.domain.GrammarType;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
@@ -18,7 +19,6 @@ import org.springframework.web.client.RestClientException;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "grammar.classifier", name = "mode", havingValue = "llm")
 public class LlmGrammarClassifier implements GrammarClassifier {
 
@@ -28,25 +28,33 @@ public class LlmGrammarClassifier implements GrammarClassifier {
 			TENSE, SUBJECT_VERB_AGREEMENT, ARTICLE, PREPOSITION, WORD_ORDER, PLURAL, PUNCTUATION, OTHER""";
 
 	private final LlmClient llmClient;
+	private final int maxOutputTokens;
 
-	// Asks the LLM to classify the label into one of the GrammarType names, at temperature 0
-	// for a deterministic single-word answer; any parse failure or call error falls back to OTHER
-	// rather than propagating, so a flaky LLM call can't break weak-point ingestion.
+	public LlmGrammarClassifier(
+			LlmClient llmClient,
+			@Value("${grammar.classifier.max-output-tokens:10}") int maxOutputTokens) {
+		this.llmClient = llmClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// Asks the LLM to classify the label into one of the GrammarType names, at temperature 0 for a
+	// deterministic single-word answer; a parse failure or call error propagates as LlmException
+	// instead of being silently recorded as OTHER.
 	@Override
 	public GrammarType classify(String label) {
 		LlmRequest request = LlmRequest.builder()
 				.systemPrompt(SYSTEM_PROMPT)
 				.userPrompt(label)
 				.temperature(0.0)
-				.maxOutputTokens(10)
+				.maxOutputTokens(maxOutputTokens)
 				.build();
 
 		try {
 			LlmResponse response = llmClient.complete(request);
 			return GrammarType.valueOf(response.getContent().trim().toUpperCase());
-		} catch (IllegalArgumentException | IllegalStateException | RestClientException ex) {
-			log.warn("LLM grammar classification failed for label '{}', defaulting to OTHER", label, ex);
-			return GrammarType.OTHER;
+		} catch (IllegalArgumentException | RestClientException ex) {
+			log.warn("LLM grammar classification failed for label '{}'", label, ex);
+			throw new LlmException("LLM grammar classification failed for label " + label, ex);
 		}
 	}
 }

@@ -3,13 +3,12 @@ package com.remelearning.english.writing.suggestion;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.remelearning.english.learn.common.AiContentClient;
-import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.writing.domain.WritingSuggestion;
 import com.remelearning.english.writing.domain.WritingTaskType;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -27,7 +26,6 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmNextSentenceSuggester implements NextSentenceSuggester {
 
 	private static final String COMPOSE_SYSTEM_PROMPT = """
@@ -63,33 +61,36 @@ public class LlmNextSentenceSuggester implements NextSentenceSuggester {
 			  "usefulPhrases": ["single word or collocation", "..."]}]""";
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokens;
+
+	public LlmNextSentenceSuggester(
+			AiContentClient aiContentClient,
+			@Value("${writing.suggestion.max-output-tokens:900}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
 
 	// Note the deliberately narrow signature: no reference answer is accepted by this class at all,
 	// so there is no way for the model translation to leak into a hint even by mistake.
 	@Override
 	public List<WritingSuggestion> suggest(
 			WritingTaskType taskType, String promptText, String draftText, String level) {
-		try {
-			String userPrompt = """
-					%s:
-					%s
+		String userPrompt = """
+				%s:
+				%s
 
-					Learner's draft so far:
-					%s
+				Learner's draft so far:
+				%s
 
-					Level: %s""".formatted(
-					taskType.isTranslation() ? "Source passage to translate" : "Task brief",
-					promptText,
-					draftText == null || draftText.isBlank() ? "(nothing yet - they need help starting)" : draftText,
-					level == null ? "(unspecified)" : level);
-			LlmSuggestion[] payload = aiContentClient.completeJson(
-					taskType.isTranslation() ? TRANSLATE_SYSTEM_PROMPT : COMPOSE_SYSTEM_PROMPT,
-					userPrompt, 0.7, 900, LlmSuggestion[].class);
-			return toSuggestions(payload);
-		} catch (AiContentException ex) {
-			log.warn("LLM next-sentence suggestion failed for {}, returning no suggestions", taskType, ex);
-			return List.of();
-		}
+				Level: %s""".formatted(
+				taskType.isTranslation() ? "Source passage to translate" : "Task brief",
+				promptText,
+				draftText == null || draftText.isBlank() ? "(nothing yet - they need help starting)" : draftText,
+				level == null ? "(unspecified)" : level);
+		LlmSuggestion[] payload = aiContentClient.completeJson(
+				taskType.isTranslation() ? TRANSLATE_SYSTEM_PROMPT : COMPOSE_SYSTEM_PROMPT,
+				userPrompt, 0.7, maxOutputTokens, LlmSuggestion[].class);
+		return toSuggestions(payload);
 	}
 
 	// Keeps only suggestions that actually say something (a blank ideaVi is useless to the learner).

@@ -596,11 +596,11 @@ nếu chưa có item nào thì lấy các từ sai nhiều nhất trong `missWin
   để sinh **một đoạn văn luyện tập duy nhất** (độc thoại hoặc hội thoại nhiều speaker) lồng ghép các
   từ/câu mục tiêu, kèm **nhãn chủ đề (`topic`)** do LLM tự đặt và (nếu có `translationLang` hợp lệ) bản
   dịch từng dòng; gán ngẫu nhiên một giọng Supertonic khác nhau cho mỗi speaker; tổng hợp audio từng câu
-  thoại qua Supertonic (ai-service) từ **đúng cùng văn bản** sẽ được lưu làm câu chấm điểm/hiển thị (kể
-  cả tiền tố `"Speaker: "` nếu hội thoại nhiều speaker — trước đây audio chỉ đọc phần lời thoại còn văn
-  bản chấm điểm lại có thêm tiền tố tên, khiến audio hội thoại nhiều speaker không đọc đúng tên người nói
-  học sinh được chấm theo; nay đã sửa bằng cách dùng chung một `lineText` cho cả hai), ghép các đoạn WAV
-  lại (`WavAudioMerger`) thành một file duy nhất, lưu qua `StorageClient`, rồi **thay thế** các practice
+  thoại qua Supertonic (ai-service) chỉ từ **lời thoại thuần** của dòng đó — tiền tố `"Speaker: "` (nếu
+  hội thoại nhiều speaker) chỉ là metadata hiển thị/chấm điểm trong `sentence_text`/`translation_text`,
+  KHÔNG được đọc thành tiếng (FE tự strip tiền tố này qua `stripSpeakerLabel` trước khi so khớp đáp án
+  gõ vào; một bản "fix" trước đây từng khiến TTS đọc luôn cả tên người nói — nay đã revert), ghép các
+  đoạn WAV lại (`WavAudioMerger`) thành một file duy nhất, lưu qua `StorageClient`, rồi **thay thế** các practice
   item còn thiếu audio trước đó bằng đúng một item mới này. Nếu sinh/tổng hợp audio lỗi ở bất kỳ bước
   nào, hệ thống log cảnh báo và giữ nguyên các item cũ để lần gọi sau thử lại. Chép chính tả một clip
   AI-practice cũng dùng chung `POST /attempts`.
@@ -911,6 +911,10 @@ nhưng chưa pass thì đọc lại đúng Section đó (resume); nếu mọi Se
 chưa đạt độ dài mục tiêu (random 5-10, tất định theo `topicId`) thì sinh một Section mới bằng AI (đoạn
 văn + audio + 10-15 câu hỏi random); nếu chuỗi đã pass hết thì trả lại Section cuối cùng (chỉ để xem
 lại). Luôn chuyển trạng thái chủ điểm sang `IN_PROGRESS`.
+
+Khi sinh Section mới, prompt kèm **góc tiếp cận random** (`PASSAGE_ANGLES`) và **phần đầu của mọi
+Section đã có** của chủ điểm đó, yêu cầu không kể lại — trước đây prompt chỉ có `topic + level +
+questionCount` nên 5-10 Section của cùng một chủ điểm ra gần như giống hệt nhau.
 - **Path param**: `userId` (string), `topicId` (int64)
 - **Response `data`** — `ListeningLibrarySectionDto`: `{sectionId, passageText, audioUrl?, questions:
   {questionId, questionText, options[]}[]}` — `questions` có **10-15 phần tử** (random mỗi Section).
@@ -962,23 +966,32 @@ Listening Library.
 
 ### Listening Learn — luyện nghe-hiểu với AI (package `listening`, đỉnh mới)
 
-Sinh một đoạn hội thoại/độc thoại nghe-hiểu (Gemini sinh transcript + câu hỏi, Supertonic tổng hợp
+Sinh các đoạn hội thoại/độc thoại nghe-hiểu (Gemini sinh transcript + câu hỏi, Supertonic tổng hợp
 audio qua `DialogueAudioSynthesizer` dùng chung với dictation AI-practice) kèm câu hỏi MCQ/KEYWORD/OPEN,
 chấm điểm và tiết lộ transcript/translation sau khi nộp bài.
 
 ### POST `/api/v1/learn/listening/{userId}/generate`
 
-Sinh một bài luyện nghe mới; audio được tổng hợp **đồng bộ** trong cùng request (không có job nền).
+Sinh **cả một buổi luyện**: 5-10 bài nghe khác chủ đề trong **một** lần gọi LLM (số bài random mỗi lần,
+giống chuỗi 5-10 Section/chủ đề của Thư viện). Audio **không** được tổng hợp ở đây — mỗi bài chỉ được
+Supertonic tổng hợp ở lần đầu gọi endpoint `/audio` của nó rồi cache lại, vì tổng hợp sẵn cả buổi
+(mỗi dòng thoại một lần gọi TTS + một lần transcode/bài) sẽ khiến 1 request kéo dài vài phút cho những
+bài learner có thể không mở.
 - **Request body** (tùy chọn) — `GenerateListeningPracticeRequest`: `{level?, examType?,
   translationLang?, focusItems?: string[]}`. `focusItems` rỗng → lấy các keyword `KEYWORD` bị trả lời
   sai gần đây nhất của learner trong các bài nghe cũ (không có bảng weak-point riêng cho listening, xem
-  ghi chú ở đầu mục 1); rỗng hoàn toàn → generator tự chọn topic.
-- **Response `data`** — `ListeningPracticeItemDto`: `{practiceItemId, audioUrl (null nếu Supertonic
-  chưa tổng hợp xong), level, examType, topic, questions: ListeningQuestionDto[], createdAt}` — **không**
-  có transcript/translation (chỉ tiết lộ sau khi chấm). `ListeningQuestionDto`: `{index, prompt, type,
+  ghi chú ở đầu mục 1), **đã shuffle** trước khi cắt còn 8 keyword; rỗng hoàn toàn → generator tự chọn
+  topic. Prompt còn kèm danh sách topic learner đã luyện (yêu cầu **không** dùng lại) + một nhóm
+  "scenario hint" random — nếu thiếu hai thứ này, prompt lặp lại y nguyên giữa các lần gọi và Gemini
+  trả về đúng một bài nghe mãi.
+- **Response `data`** — `ListeningPracticeItemDto[]` (cả buổi, mới nhất trước): `{practiceItemId,
+  audioUrl, level, examType, topic, questions: ListeningQuestionDto[], createdAt}` — **không**
+  có transcript/translation (chỉ tiết lộ sau khi chấm). `audioUrl` được trả về ngay dù audio chưa tồn
+  tại, vì chính việc gọi URL đó mới kích hoạt tổng hợp. `ListeningQuestionDto`: `{index, prompt, type,
   options[], answer, explanation}` (`type` — `MCQ | KEYWORD | OPEN`). `answer` **nay được trả về** để FE
   chấm câu `MCQ`/`KEYWORD` local (phản hồi tức thì); `answer` = `null` với câu `OPEN` vì loại này chấm bằng
   LLM server-side (`OpenAnswerGrader`), không tiết lộ cho client. Điểm chính thức vẫn từ endpoint submit.
+- FE mở bài đầu tiên; phần còn lại của buổi nằm ở `{userId}/items` dưới mục "Bài đã tạo, chưa làm xong".
 
 ### GET `/api/v1/learn/listening/items/{itemId}`
 
@@ -987,12 +1000,16 @@ Chi tiết một bài đã sinh (không transcript; nay kèm `answer` MCQ/KEYWOR
 
 ### GET `/api/v1/learn/listening/{userId}/items`
 
-Danh sách bài đã sinh của một learner, mới nhất trước — `ListeningPracticeItemDto[]`.
+Danh sách bài **đã sinh nhưng chưa làm** của một learner (không có attempt nào), mới nhất trước —
+`ListeningPracticeItemDto[]`. Đây là dữ liệu cho mục "Bài đã tạo, chưa làm xong" trên FE; bài đã nộp
+một lần sẽ rời danh sách này và chỉ còn ở history.
 
 ### GET `/api/v1/learn/listening/items/{itemId}/audio`
 
-Stream audio đã tổng hợp của một bài nghe (đọc từ `StorageClient`, `audio/wav`). **Lỗi**: `404` nếu
-audio chưa tổng hợp xong (`storageKey` null).
+Stream audio của một bài nghe (đọc từ `StorageClient`). Nếu bài chưa từng được nghe (`storage_key`
+null) thì **request này sẽ tổng hợp audio tại chỗ** từ `passage_lines` đã lưu, ghi vào storage rồi
+cache `storage_key` — nên lần đầu chậm hơn các lần sau. **Lỗi**: `404` nếu `itemId` không tồn tại, hoặc
+với các bản ghi cũ (trước migration `V28`) vừa không có audio vừa không có `passage_lines` để dựng lại.
 
 ### POST `/api/v1/learn/listening/attempts`
 
@@ -1295,8 +1312,8 @@ kia. Mỗi lỗi AI chấm ra đã mang sẵn `category` là `"grammar"` hoặc 
 "past perfect" mắc khi viết **cộng dồn vào cùng một dòng** với "past perfect" đã tích lũy từ
 dictation/listening, thay vì tạo một bảng thống kê song song.
 
-`prompt_text` **luôn** có dòng chỉ dẫn tiếng Việt (kể cả bản fallback khi LLM lỗi), theo quy tắc chung
-của dự án: mọi bài luyện tập phải hiển thị yêu cầu bằng tiếng Việt.
+`prompt_text` **luôn** có dòng chỉ dẫn tiếng Việt, theo quy tắc chung của dự án: mọi bài luyện tập
+phải hiển thị yêu cầu bằng tiếng Việt.
 
 #### Dạng đề (`examType`) quyết định gì
 
@@ -1350,7 +1367,9 @@ chiếu không lộ ra client trước khi nộp:
 }
 ```
 
-LLM lỗi/trả JSON sai ⇒ fallback template tĩnh riêng cho từng `taskType` (không ném lỗi).
+LLM lỗi/trả JSON sai ⇒ **ném lỗi** (`502 Bad Gateway` qua `GlobalExceptionHandler`), không có template
+tĩnh thay thế: toàn bộ nội dung AI trong hệ thống đều theo nguyên tắc "lỗi thì báo lỗi", không trả nội
+dung giả để người học tưởng là do AI sinh.
 
 ### GET `/api/v1/learn/writing/items/{itemId}` · GET `/api/v1/learn/writing/{userId}/items`
 
@@ -1379,7 +1398,8 @@ Ba điều quan trọng:
 2. **Với `TRANSLATE_*`, prompt bị giới hạn cứng**: chỉ được nêu *tên cấu trúc* cần dùng và giải nghĩa
    tối đa 2 từ khó, tuyệt đối không dịch câu tiếp theo. `referenceAnswer` **không** được truyền vào
    suggester (interface không có tham số đó), nên bản dịch mẫu không thể lọt vào gợi ý.
-3. LLM lỗi ⇒ trả **mảng rỗng**, không ném lỗi — một gợi ý hỏng không được làm gián đoạn phiên viết.
+3. LLM lỗi ⇒ **ném lỗi** (`502`), không trả mảng rỗng — mảng rỗng sẽ bị hiểu nhầm là "AI không có gợi
+   ý nào", trong khi thực tế là gọi AI thất bại.
 
 ### POST `/api/v1/learn/writing/attempts`
 
@@ -1601,7 +1621,8 @@ chung cho vocabulary/grammar/pronunciation và bất kỳ category nào thêm sa
 (`recommendation.exercise-generator.mode=rule-based`) trả về template tĩnh theo từng category
 (tương tự `recommendation` text của ai-service). Khi bật `mode=llm` (+ `GEMINI_API_KEY` thật), gọi
 Gemini qua `common`'s `LlmClient` để sinh 3-5 bài tập cụ thể bằng tiếng Việt; nếu lời gọi LLM lỗi
-hoặc trả JSON không hợp lệ, tự động fallback về template tĩnh (không làm hỏng luồng ingest).
+hoặc trả JSON không hợp lệ, `LlmException` được ném ra (consumer Kafka fail và retry) thay vì lặng lẽ
+lấy template tĩnh — template tĩnh giờ chỉ còn là nội dung của chế độ `rule-based`.
 
 ### GET `/api/v1/recommendations/{userId}`
 
@@ -1785,11 +1806,15 @@ path được gán đè lên body (`request.setUserId(userId)`) trước khi pro
 - Grammar: cùng 6 endpoint, đổi `vocabulary` → `grammar` trong path và DTO tương ứng
   (`GenerateGrammarPracticeRequestDto` → ... → `GrammarAttemptDetailDto`).
 - **POST `/api/v1/learners/{userId}/learn/listening/generate`** (body
-  `GenerateListeningPracticeRequestDto?`) → `ListeningPracticeItemDto`.
-- **GET `/api/v1/learners/{userId}/learn/listening/items`** → `ListeningPracticeItemDto[]`.
+  `GenerateListeningPracticeRequestDto?`) → `ListeningPracticeItemDto[]` — sinh **cả một buổi luyện**
+  5-10 bài nghe khác chủ đề trong 1 lần gọi LLM. FE mở bài đầu, các bài còn lại nằm ở
+  `/items` ("Bài đã tạo, chưa làm xong"). Audio **không** được sinh ở đây.
+- **GET `/api/v1/learners/{userId}/learn/listening/items`** → `ListeningPracticeItemDto[]` — chỉ các
+  bài **đã tạo nhưng chưa làm** (chưa có attempt nào).
 - **GET `/api/v1/learners/{userId}/learn/listening/items/{itemId}`** → `ListeningPracticeItemDto`.
 - **GET `/api/v1/learners/{userId}/learn/listening/items/{itemId}/audio`** → relay stream audio
-  (`WebClient.toEntityFlux(DataBuffer)`, giống dictation).
+  (`WebClient.toEntityFlux(DataBuffer)`, giống dictation). Lần gọi đầu tiên của một bài sẽ **sinh
+  audio tại chỗ** rồi cache `storage_key`, nên bài chưa từng nghe sẽ chậm hơn lần sau.
 - **POST `/api/v1/learners/{userId}/learn/listening/attempts`** (body
   `SubmitListeningAttemptRequestDto`) → `ListeningAttemptResultDto`.
 - **GET `/api/v1/learners/{userId}/learn/listening/history`** → `ListeningAttemptHistoryEntryDto[]`.
@@ -2482,9 +2507,9 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/grammar/library/sessions/{sessionId}/finish` | proxy hoàn thành session (PASSED/RETRY) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/grammar/library/topics/{topicId}/history` | proxy lịch sử session đã hoàn thành |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/generate` | proxy `POST /api/v1/learn/listening/{userId}/generate` |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/items` | proxy danh sách bài đã sinh |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/items` | proxy danh sách bài đã tạo nhưng chưa làm xong |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/items/{itemId}` | proxy chi tiết 1 bài |
-| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/items/{itemId}/audio` | relay stream audio đã tổng hợp |
+| bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/items/{itemId}/audio` | relay stream audio (lần đầu của mỗi bài sẽ tổng hợp tại chỗ rồi cache) |
 | bff-service | REST | POST | `/api/v1/learners/{userId}/learn/listening/attempts` | proxy chấm điểm (`userId` gán đè lên body) |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/history` | proxy lịch sử làm bài |
 | bff-service | REST | GET | `/api/v1/learners/{userId}/learn/listening/history/{attemptId}` | proxy chi tiết 1 lần làm bài |
@@ -2588,14 +2613,14 @@ Chỉ chạy khi `KAFKA_ENABLED=true` (mặc định `false`, xem `app/config.py
 | english-service (grammar.library) | REST | POST | `/api/v1/learn/grammar/library/{userId}/sessions/{sessionId}/ai-practice` | sinh bộ đề nhắm vào câu sai của 1 session, ủy quyền lưu cho `GrammarLearnService.generatePracticeForRules` (cùng bảng `grammar_practice_items`); `404` |
 | english-service (grammar.history) | REST | GET | `/api/v1/learn/grammar/merged-history/{userId}` | gộp lịch sử học thường + Thư viện thành 1 danh sách theo thời gian, gắn `source` |
 | english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/topics` | danh sách chủ điểm + trạng thái tiến độ (bootstrap chủ điểm đầu = UNLOCKED) |
-| english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI lần đầu: đoạn văn + audio); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
+| english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/topics/{topicId}/sections` | bắt đầu/resume 1 Section (sinh AI khi chuỗi chưa đủ: đoạn văn + audio, prompt kèm góc tiếp cận random + phần đầu các Section đã có để không lặp nội dung); `403` nếu chủ điểm LOCKED, `404` nếu topic không tồn tại |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/answers` | chấm toàn bộ câu trả lời 1 Section; `PASSED` (≥0.7) mở khóa chủ điểm kế tiếp; `404` nếu section không tồn tại |
 | english-service (listening.library) | REST | GET | `/api/v1/learn/listening/library/{userId}/sections/history` | lịch sử toàn bộ attempt đã hoàn thành của learner |
 | english-service (listening.library) | REST | POST | `/api/v1/learn/listening/library/{userId}/sections/{sectionId}/ai-practice` | sinh bộ đề nhắm vào câu sai của attempt gần nhất trên 1 section, dùng tên chủ điểm làm mục tiêu, ủy quyền lưu cho `ListeningLearnService.generatePracticeForKeywords` (cùng bảng `listening_practice_items`); `404` |
-| english-service (listening) | REST | POST | `/api/v1/learn/listening/{userId}/generate` | Gemini sinh transcript+câu hỏi, Supertonic tổng hợp audio đồng bộ |
+| english-service (listening) | REST | POST | `/api/v1/learn/listening/{userId}/generate` | 1 lần gọi Gemini sinh cả buổi 5-10 bài nghe khác chủ đề (transcript+câu hỏi); audio tổng hợp lười ở lần nghe đầu |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/items/{itemId}` | chi tiết bài (không transcript; nay kèm `answer` MCQ/KEYWORD + `explanation` cho FE chấm local, `answer` null với OPEN); `404` |
-| english-service (listening) | REST | GET | `/api/v1/learn/listening/{userId}/items` | danh sách bài đã sinh của learner |
-| english-service (listening) | REST | GET | `/api/v1/learn/listening/items/{itemId}/audio` | stream audio đã tổng hợp; `404` nếu chưa xong |
+| english-service (listening) | REST | GET | `/api/v1/learn/listening/{userId}/items` | danh sách bài đã tạo nhưng learner chưa làm (chưa có attempt) — mục "Bài đã tạo, chưa làm xong" |
+| english-service (listening) | REST | GET | `/api/v1/learn/listening/items/{itemId}/audio` | stream audio; tổng hợp tại chỗ từ `passage_lines` nếu bài chưa từng nghe rồi cache `storage_key`; `404` nếu id không tồn tại hoặc bản ghi cũ không có `passage_lines` |
 | english-service (listening) | REST | POST | `/api/v1/learn/listening/attempts` | chấm MCQ/KEYWORD (WER) + OPEN (LLM), tiết lộ transcript/translation; category `listening` không có bảng weak-point riêng |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}` | lịch sử làm bài |
 | english-service (listening) | REST | GET | `/api/v1/learn/listening/history/{userId}/{attemptId}` | chi tiết 1 lần làm bài; `404` |

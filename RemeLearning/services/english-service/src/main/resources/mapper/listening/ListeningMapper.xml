@@ -5,24 +5,40 @@
     <insert id="insertItem" parameterType="com.remelearning.english.listening.domain.ListeningPracticeItem"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO listening_practice_items
-            (user_id, level, exam_type, topic, transcript, storage_key, translation, questions, created_at)
+            (user_id, level, exam_type, topic, transcript, storage_key, translation, passage_lines,
+             questions, created_at)
         VALUES
-            (#{userId}, #{level}, #{examType}, #{topic}, #{transcript}, #{storageKey}, #{translation}, #{questionsJson}, now())
+            (#{userId}, #{level}, #{examType}, #{topic}, #{transcript}, #{storageKey}, #{translation},
+             #{linesJson}, #{questionsJson}, now())
     </insert>
 
     <select id="findItemById" resultType="com.remelearning.english.listening.domain.ListeningPracticeItem">
         SELECT id, user_id, level, exam_type, topic, transcript, storage_key, translation,
-               questions AS questions_json, created_at
+               passage_lines AS lines_json, questions AS questions_json, created_at
         FROM listening_practice_items
         WHERE id = #{itemId}
     </select>
 
     <select id="findItemsByUserId" resultType="com.remelearning.english.listening.domain.ListeningPracticeItem">
         SELECT id, user_id, level, exam_type, topic, transcript, storage_key, translation,
-               questions AS questions_json, created_at
+               passage_lines AS lines_json, questions AS questions_json, created_at
         FROM listening_practice_items
         WHERE user_id = #{userId}
         ORDER BY created_at DESC
+    </select>
+
+    <!-- Items with no attempt row yet: the learner's still-unfinished passages from the sessions they
+         generated. NOT EXISTS rather than a LEFT JOIN ... IS NULL so an item stays out of the list
+         after its very first attempt regardless of how many attempts it accumulated. -->
+    <select id="findPendingItemsByUserId" resultType="com.remelearning.english.listening.domain.ListeningPracticeItem">
+        SELECT i.id, i.user_id, i.level, i.exam_type, i.topic, i.transcript, i.storage_key, i.translation,
+               i.passage_lines AS lines_json, i.questions AS questions_json, i.created_at
+        FROM listening_practice_items i
+        WHERE i.user_id = #{userId}
+          AND NOT EXISTS (
+              SELECT 1 FROM listening_attempts a WHERE a.practice_item_id = i.id
+          )
+        ORDER BY i.created_at DESC
     </select>
 
     <update id="updateItemStorageKey">

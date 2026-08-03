@@ -14,8 +14,9 @@ import java.util.List;
 public interface DictationAnalyzer {
 
 	/**
-	 * Never returns {@code null} and never throws - implementations must degrade to a safe template
-	 * result rather than propagate a failure, since a flaky call here can't block grading an attempt.
+	 * Never returns {@code null}. An AI-backed implementation propagates its failure (an
+	 * {@code AiContentException}) instead of substituting a template result, so the learner is told
+	 * the analysis is unavailable rather than shown a fabricated one.
 	 *
 	 * @param referenceText  the clip's reference transcript
 	 * @param userTranscript what the learner actually typed
@@ -25,7 +26,8 @@ public interface DictationAnalyzer {
 
 	/**
 	 * Practice sentences targeting a learner's recurring missed words, for the "Luyện nghe với AI"
-	 * section. Never returns {@code null}/throws; degrades to templates on failure.
+	 * section. Never returns {@code null}; an AI-backed implementation propagates its failure rather
+	 * than degrading to templates.
 	 */
 	List<String> generatePracticeSentences(List<String> missedWords);
 }

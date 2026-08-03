@@ -19,6 +19,13 @@ public interface ListeningMapper {
 
 	List<ListeningPracticeItem> findItemsByUserId(@Param("userId") String userId);
 
+	/**
+	 * The learner's practice items they have not attempted yet, newest first - what backs the "Bài đã
+	 * tạo, chưa làm xong" list, since one generation call now creates a whole 5-10 passage session
+	 * the learner works through over time.
+	 */
+	List<ListeningPracticeItem> findPendingItemsByUserId(@Param("userId") String userId);
+
 	/** Sets the storage key once Supertonic has synthesized the audio for a practice item. */
 	void updateItemStorageKey(@Param("itemId") Long itemId, @Param("storageKey") String storageKey);
 

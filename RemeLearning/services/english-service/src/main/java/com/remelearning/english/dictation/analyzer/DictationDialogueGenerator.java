@@ -11,9 +11,8 @@ import java.util.List;
 public interface DictationDialogueGenerator {
 
 	/**
-	 * Never returns a result with null/empty lines and never throws - implementations must degrade to
-	 * one templated line per phrase (see {@link DictationAnalysisTemplates}) with a null topic on any
-	 * LLM/parse failure.
+	 * Never returns a result with null/empty lines. An AI-backed implementation propagates any
+	 * LLM/parse failure as an {@code AiContentException} rather than substituting templated lines.
 	 *
 	 * @param targetPhrases the words/phrases to practice; may be empty for a generic passage
 	 * @param level CEFR target (e.g. "B1"); null lets the implementation pick a sensible default

@@ -11,12 +11,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -64,6 +66,17 @@ public class GoogleDriveClientImpl implements GoogleDriveClient {
 		}
 	}
 
+	// Fetches just the file's size metadata field, without downloading its content.
+	@Override
+	public long fileSize(String fileId) {
+		try {
+			Long size = drive().files().get(fileId).setFields("size").execute().getSize();
+			return size == null ? 0L : size;
+		} catch (IOException ex) {
+			throw new UncheckedIOException("Failed to read Google Drive file size: " + fileId, ex);
+		}
+	}
+
 	// Escapes a single quote so a folder/file id can never break out of the Drive query's 'x' literal.
 	private static String escapeQueryValue(String value) {
 		return value.replace("'", "\\'");
@@ -86,11 +99,7 @@ public class GoogleDriveClientImpl implements GoogleDriveClient {
 	}
 
 	private Drive buildDrive() {
-		String credentialsFile = properties.getCredentialsFile();
-		if (credentialsFile == null || credentialsFile.isBlank()) {
-			throw new IllegalStateException("Google Drive credentials file is not configured (reme.drive.credentials-file)");
-		}
-		try (InputStream credentialsStream = Files.newInputStream(Path.of(credentialsFile))) {
+		try (InputStream credentialsStream = openCredentialsStream()) {
 			GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream)
 					.createScoped(List.of(DriveScopes.DRIVE_READONLY));
 			return new Drive.Builder(GoogleNetHttpTransport.newTrustedTransport(), GsonFactory.getDefaultInstance(),
@@ -100,5 +109,20 @@ public class GoogleDriveClientImpl implements GoogleDriveClient {
 		} catch (IOException | GeneralSecurityException ex) {
 			throw new IllegalStateException("Failed to initialize Google Drive client", ex);
 		}
+	}
+
+	// Prefers the base64-encoded key (deploy-friendly - no file to write to disk) over the file path,
+	// so both properties can stay set across environments without one silently overriding the other.
+	private InputStream openCredentialsStream() throws IOException {
+		String credentialsBase64 = properties.getCredentialsBase64();
+		if (credentialsBase64 != null && !credentialsBase64.isBlank()) {
+			return new ByteArrayInputStream(Base64.getDecoder().decode(credentialsBase64));
+		}
+		String credentialsFile = properties.getCredentialsFile();
+		if (credentialsFile == null || credentialsFile.isBlank()) {
+			throw new IllegalStateException(
+					"Google Drive credentials are not configured (reme.drive.credentials-base64 or reme.drive.credentials-file)");
+		}
+		return Files.newInputStream(Path.of(credentialsFile));
 	}
 }

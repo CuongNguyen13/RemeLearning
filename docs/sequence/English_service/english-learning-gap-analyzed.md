@@ -44,7 +44,7 @@ sequenceDiagram
             opt vocabulary.classifier.mode = llm
                 Cls->>Gemini: generateContent(prompt with label)
                 Gemini-->>Cls: classification response
-                Note right of Cls: parse/call failure -> fallback to VocabularyType.OTHER
+                Note right of Cls: parse/call failure -> LlmException propagates (never recorded as OTHER)
             end
             Cls-->>Svc: VocabularyType (NOUN/VERB/.../OTHER)
             Svc->>Mapper: upsert(userId, itemId, recordingId, label,<br/>vocabularyType, forgettingScore, recommendation)

@@ -297,8 +297,9 @@ requested` mechanism section 3 documents, not a bespoke publisher per skill.
 | `speaking` | `LlmSpeakingPracticeGenerator` | Supertonic TTS via `TtsClient` (single voice) | ai-service wav2vec2 GOP via `PronunciationScoringClient` (multipart upload) | `pronunciation` (existing table, reused) |
 | `writing` | `LlmWritingPracticeGenerator` | — (optional `LlmNextSentenceSuggester` call, only when the learner presses "Gợi ý") | `LlmWritingGrader` — per-criterion scores + labelled errors (1 LLM call) | **both** `grammar` and `vocabulary` (existing tables) — routed per error, no table of its own |
 
-All five generators are Gemini-only (no rule-based mode) with a static-template fallback on any LLM
-call/parse failure, so `generate` never hard-fails. None of the five packages has its own Kafka
+All five generators are Gemini-only (no rule-based mode) and have **no** static-template fallback:
+any LLM call/parse failure propagates (`AiContentException`, surfaced as 502), so a failed
+generation is reported as an error rather than answered with placeholder content. None of the five packages has its own Kafka
 consumer/producer — they only reach Kafka indirectly through `PracticeService#redo`.
 
 `writing` is the only one of the five whose weak-point category is decided **per mistake** rather

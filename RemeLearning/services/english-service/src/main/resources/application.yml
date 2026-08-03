@@ -43,17 +43,32 @@ reme:
     expiration-minutes: 60
   storage:
     # local (default) reads the dictation audio library from disk and stores generated TTS there;
-    # switch to s3 later without code changes (see common's storage/README.md).
+    # switch to s3/drive later without code changes (see common's storage/README.md).
     provider: ${STORAGE_PROVIDER:local}
     local:
       root: ${STORAGE_LOCAL_ROOT:D:/Personal Project/Audio}
     s3:
       bucket: ${STORAGE_S3_BUCKET:reme-dictation-audio}
+    drive:
+      root-folder-id: ${STORAGE_DRIVE_ROOT_FOLDER_ID:}
   s3:
     region: ${S3_REGION:ap-southeast-1}
     endpoint: ${S3_ENDPOINT:}
     access-key: ${S3_ACCESS_KEY:}
     secret-key: ${S3_SECRET_KEY:}
+  drive:
+    credentials-base64: ${DRIVE_CREDENTIALS_JSON_B64:}
+    credentials-file: ${DRIVE_CREDENTIALS_FILE:}
+    application-name: RemeLearning
+  # Dictation content library (topics/lessons), tried in order S3 -> Drive -> local per
+  # FallbackFileReader/FallbackDirectoryLister; any blank source is skipped.
+  dictation:
+    s3:
+      bucket: ${STORAGE_S3_BUCKET:reme-dictation-audio}
+    drive:
+      root-folder-id: ${DICTATION_DRIVE_ROOT_FOLDER_ID:}
+    local:
+      root-path: ${STORAGE_LOCAL_ROOT:D:/Personal Project/Audio}
   llm:
     provider: ${LLM_PROVIDER:zen} #  gemini | ollama | zen
     gemini:
@@ -65,6 +80,7 @@ reme:
     zen:
       api-key: ${ZEN_API_KEY:}
       model: ${ZEN_MODEL:big-pickle}
+      reasoning-enabled: ${ZEN_REASONING_ENABLED:false}
   tts:
     # supertonic (default) calls ai-service's on-device Supertonic model; google is the alternative.
     provider: ${TTS_PROVIDER:supertonic}
@@ -82,19 +98,33 @@ reme:
 vocabulary:
   classifier:
     mode: ${VOCABULARY_CLASSIFIER_MODE:rule-based} # rule-based | llm
+    max-output-tokens: ${VOCABULARY_CLASSIFIER_MAX_TOKENS:10}
+  library:
+    max-output-tokens: ${VOCABULARY_LIBRARY_MAX_TOKENS:1500}
+  practice:
+    max-output-tokens: ${VOCABULARY_PRACTICE_MAX_TOKENS:1200}
 
 grammar:
   classifier:
     mode: ${GRAMMAR_CLASSIFIER_MODE:rule-based} # rule-based | llm
+    max-output-tokens: ${GRAMMAR_CLASSIFIER_MAX_TOKENS:10}
+  library:
+    max-output-tokens-topic-content: ${GRAMMAR_LIBRARY_MAX_TOKENS_TOPIC_CONTENT:5200}
+    max-output-tokens-retry-question: ${GRAMMAR_LIBRARY_MAX_TOKENS_RETRY_QUESTION:400}
+  practice:
+    max-output-tokens: ${GRAMMAR_PRACTICE_MAX_TOKENS:1200}
 
 pronunciation:
   classifier:
     mode: ${PRONUNCIATION_CLASSIFIER_MODE:rule-based} # rule-based | llm
+    max-output-tokens: ${PRONUNCIATION_CLASSIFIER_MAX_TOKENS:10}
 
 dictation:
   # rule-based (default, no LLM cost) or llm (Gemini) for the miss analysis + practice sentences.
   analyzer:
     mode: ${DICTATION_ANALYZER_MODE:llm} # rule-based | llm
+    max-output-tokens-analyze: ${DICTATION_ANALYZER_MAX_TOKENS_ANALYZE:700}
+    max-output-tokens-practice: ${DICTATION_ANALYZER_MAX_TOKENS_PRACTICE:400}
   # The fixed audio library (rooted at reme.storage.local.root) is imported into dictation_clips on
   # startup via common's StorageClient. Turn off to skip the scan (e.g. once already imported).
   library:
@@ -106,3 +136,33 @@ dictation:
   ai-practice:
     # How many of the learner's most-missed words feed a fresh AI-practice batch.
     miss-window: ${DICTATION_MISS_WINDOW:8}
+  dialogue:
+    max-output-tokens: ${DICTATION_DIALOGUE_MAX_TOKENS:400}
+    max-output-tokens-with-translation: ${DICTATION_DIALOGUE_MAX_TOKENS_WITH_TRANSLATION:700}
+  translator:
+    max-output-tokens: ${DICTATION_TRANSLATOR_MAX_TOKENS:600}
+
+listening:
+  practice:
+    max-output-tokens-per-passage: ${LISTENING_PRACTICE_MAX_TOKENS_PER_PASSAGE:1300}
+    max-output-tokens-overhead: ${LISTENING_PRACTICE_MAX_TOKENS_OVERHEAD:600}
+  library:
+    max-output-tokens: ${LISTENING_LIBRARY_MAX_TOKENS:3500}
+  scoring:
+    max-output-tokens: ${LISTENING_SCORING_MAX_TOKENS:300}
+
+speaking:
+  practice:
+    max-output-tokens: ${SPEAKING_PRACTICE_MAX_TOKENS:400}
+  library:
+    max-output-tokens: ${SPEAKING_LIBRARY_MAX_TOKENS:1200}
+
+writing:
+  grading:
+    max-output-tokens: ${WRITING_GRADING_MAX_TOKENS:16000}
+  practice:
+    max-output-tokens: ${WRITING_PRACTICE_MAX_TOKENS:8000}
+  library:
+    max-output-tokens: ${WRITING_LIBRARY_MAX_TOKENS:1400}
+  suggestion:
+    max-output-tokens: ${WRITING_SUGGESTION_MAX_TOKENS:900}

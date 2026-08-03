@@ -13,22 +13,31 @@ Set `reme.storage.provider` in the service's `application.yml`:
 |-------------------|---------------------------------------|--------------------------------------------------------------|
 | `local` (default) | `local.LocalStorageClient`            | Plain filesystem rooted at `reme.storage.local.root`.        |
 | `s3`              | `s3.S3StorageAdapter`                  | S3/MinIO, all keys under `reme.storage.s3.bucket`.           |
+| `drive`           | `drive.DriveStorageClient`             | Read-only, Google Drive folder tree rooted at `reme.storage.drive.root-folder-id` (see `storage/drive/README.md`). |
 
 Exactly one bean is registered at a time: `LocalStorageClient` uses
-`@ConditionalOnProperty(havingValue = "local", matchIfMissing = true)` and `S3StorageAdapter` uses
-`havingValue = "s3"` with **no** `matchIfMissing`, so setting `provider=s3` deactivates the local
-bean and vice-versa (this deliberately avoids the double-registration bug the `CacheClient` beans
-have).
+`@ConditionalOnProperty(havingValue = "local", matchIfMissing = true)`, `S3StorageAdapter` uses
+`havingValue = "s3"`, and `DriveStorageClient` uses `havingValue = "drive"` - none with
+`matchIfMissing` except the local default, so exactly one bean wins for any given `provider` value
+(this deliberately avoids the double-registration bug the `CacheClient` beans have).
 
 ```yaml
 reme:
   storage:
-    provider: ${STORAGE_PROVIDER:local}   # local | s3
+    provider: ${STORAGE_PROVIDER:local}   # local | s3 | drive
     local:
       root: ${STORAGE_LOCAL_ROOT:./data}
     s3:
       bucket: ${STORAGE_S3_BUCKET:}
+    drive:
+      root-folder-id: ${STORAGE_DRIVE_ROOT_FOLDER_ID:}
 ```
+
+`DriveStorageClient` is read-only (`write` throws `UnsupportedOperationException`) and walks the
+whole folder tree under `root-folder-id` once, lazily, caching it in memory - a change made in Drive
+after the first call won't be seen until the owning service restarts. Fine for the fixed content
+libraries this targets; not a fit for anything that needs to observe Drive changes live or that
+needs to write back to Drive.
 
 ## Notes
 
@@ -57,6 +66,7 @@ Any parameter can be blank/null to skip that source entirely (e.g. no `s3Bucket`
 every non-blank source fails, both throw `BusinessException` (`EXTERNAL_SERVICE_ERROR`).
 
 Google Drive access goes through `storage.drive.GoogleDriveClient`, authenticated via a
-service-account JSON key at `reme.drive.credentials-file` (see that package for details). Unlike
+service-account JSON key at `reme.drive.credentials-base64` or `reme.drive.credentials-file` (see
+that package for details). Unlike
 `S3ClientConfig`'s eager `S3Client` bean, the Drive client connects lazily on first use, so a service
 that never actually reaches Drive can start without the credentials file configured.

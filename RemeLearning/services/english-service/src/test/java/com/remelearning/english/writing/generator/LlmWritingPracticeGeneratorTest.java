@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -22,7 +23,7 @@ import static org.mockito.Mockito.when;
 class LlmWritingPracticeGeneratorTest {
 
 	private final AiContentClient aiContentClient = mock(AiContentClient.class);
-	private final LlmWritingPracticeGenerator generator = new LlmWritingPracticeGenerator(aiContentClient);
+	private final LlmWritingPracticeGenerator generator = new LlmWritingPracticeGenerator(aiContentClient, 8000);
 
 	@Test
 	void parsesTheGeneratedPromptAndReferenceAnswer() {
@@ -55,58 +56,58 @@ class LlmWritingPracticeGeneratorTest {
 	}
 
 	@Test
+	void requiresTheGeneratedPassageToStayOnOneSingleSituation() {
+		stubLlm("""
+				{"topic": "t", "promptText": "p", "referenceAnswer": "r"}""");
+
+		generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of("past perfect", "past continuous"), "B1", null);
+
+		ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+		verify(aiContentClient).completeJson(
+				systemPrompt.capture(), anyString(), anyDouble(), anyInt(),
+				eq(LlmWritingPracticeGenerator.LlmPayload.class));
+		// Without these instructions the model treats N sentences + N target labels as N unrelated
+		// example sentences, producing a passage that changes subject on every line.
+		assertThat(systemPrompt.getValue())
+				.contains("ONE CONTINUOUS TEXT ABOUT ONE SINGLE SITUATION")
+				.contains("SAME people, place and time frame")
+				.contains("drop that structure");
+	}
+
+	@Test
 	void acceptsSnakeCaseKeysIfTheModelIgnoresTheCamelCaseContract() {
 		stubLlm("""
 				{"topic": "t", "prompt_text": "Dịch đoạn sau...", "reference_answer": "Reference."}""");
 
 		GeneratedWritingPractice generated = generator.generate(WritingTaskType.TRANSLATE_EN_VI, List.of(), null, null);
 
-		// Without the aliases this would parse to a null promptText and silently fall back to the
-		// template, losing a perfectly good generated task.
+		// Without the aliases this would parse to a null promptText and be rejected as an empty
+		// generation, losing a perfectly good generated task.
 		assertThat(generated.promptText()).isEqualTo("Dịch đoạn sau...");
 		assertThat(generated.referenceAnswer()).isEqualTo("Reference.");
 	}
 
 	@Test
-	void fallsBackToATemplateWhenTheLlmCallFails() {
+	void throwsRatherThanFallingBackToATemplateWhenTheLlmCallFails() {
 		when(aiContentClient.completeJson(
 				anyString(), anyString(), anyDouble(), anyInt(), eq(LlmWritingPracticeGenerator.LlmPayload.class)))
 				.thenThrow(new AiContentException("boom"));
 
-		GeneratedWritingPractice generated = generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), "B1", null);
-
-		assertThat(generated.promptText()).isNotBlank();
-		assertThat(generated.referenceAnswer()).isNotBlank();
+		assertThatThrownBy(() -> generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), "B1", null))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	@Test
-	void fallsBackWhenTheLlmReturnsNoPromptText() {
+	void throwsWhenTheLlmReturnsNoPromptText() {
 		stubLlm("""
 				{"topic": "t", "promptText": "   ", "referenceAnswer": "r"}""");
 
-		GeneratedWritingPractice generated = generator.generate(WritingTaskType.COMPOSE, List.of(), null, null);
-
-		assertThat(generated.promptText()).contains("Viết một đoạn văn tiếng Anh");
+		assertThatThrownBy(() -> generator.generate(WritingTaskType.COMPOSE, List.of(), null, null))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	@Test
-	void everyFallbackTaskStillCarriesAVietnameseInstruction() {
-		when(aiContentClient.completeJson(
-				anyString(), anyString(), anyDouble(), anyInt(), eq(LlmWritingPracticeGenerator.LlmPayload.class)))
-				.thenThrow(new AiContentException("boom"));
-
-		// Project rule: every practice item must show the learner its requirement in Vietnamese, so
-		// the offline fallback must not degrade into an English-only prompt.
-		assertThat(generator.generate(WritingTaskType.COMPOSE, List.of(), null, null).promptText())
-				.contains("Viết");
-		assertThat(generator.generate(WritingTaskType.TRANSLATE_VI_EN, List.of(), null, null).promptText())
-				.startsWith("Dịch đoạn văn sau sang tiếng Anh:");
-		assertThat(generator.generate(WritingTaskType.TRANSLATE_EN_VI, List.of(), null, null).promptText())
-				.startsWith("Dịch đoạn văn sau sang tiếng Việt:");
-	}
-
-	@Test
-	void fallsBackToADefaultTopicWhenTheModelOmitsOne() {
+	void usesADefaultTopicWhenTheModelOmitsOne() {
 		stubLlm("""
 				{"promptText": "Viết ...", "referenceAnswer": "r"}""");
 

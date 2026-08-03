@@ -7,6 +7,7 @@ import com.remelearning.english.writing.domain.WritingTaskType;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,7 +20,7 @@ import static org.mockito.Mockito.when;
 class LlmWritingGraderTest {
 
 	private final AiContentClient aiContentClient = mock(AiContentClient.class);
-	private final LlmWritingGrader grader = new LlmWritingGrader(aiContentClient);
+	private final LlmWritingGrader grader = new LlmWritingGrader(aiContentClient, 16000);
 
 	@Test
 	void parsesCriteriaCorrectionAndLabelledErrors() {
@@ -121,19 +122,14 @@ class LlmWritingGraderTest {
 	}
 
 	@Test
-	void returnsANeutralGradeWithNoErrorsWhenTheLlmCallFails() {
+	void throwsRatherThanReturningANeutralGradeWhenTheLlmCallFails() {
 		when(aiContentClient.completeJson(
 				anyString(), anyString(), anyDouble(), anyInt(), eq(LlmWritingGrader.LlmPayload.class)))
 				.thenThrow(new AiContentException("boom"));
 
-		WritingGrade grade = grader.grade(WritingTaskType.TRANSLATE_EN_VI, "Passage", "Ref", "Attempt");
-
-		assertThat(grade.criteria().getGrammar()).isEqualTo(0.5);
-		assertThat(grade.criteria().getAccuracy()).isEqualTo(0.5);
-		assertThat(grade.criteria().getTaskResponse()).isNull();
-		// Nothing bogus may reach the learner's weak points just because grading was unavailable.
-		assertThat(grade.errors()).isEmpty();
-		assertThat(grade.feedbackVi()).contains("chưa chấm được");
+		// A fabricated 0.5-across-the-board grade would be stored as if the text had really been marked.
+		assertThatThrownBy(() -> grader.grade(WritingTaskType.TRANSLATE_EN_VI, "Passage", "Ref", "Attempt"))
+				.isInstanceOf(AiContentException.class);
 	}
 
 	@Test

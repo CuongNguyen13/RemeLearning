@@ -4,26 +4,25 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
-import lombok.RequiredArgsConstructor;
+import com.remelearning.english.learn.common.AiContentException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
  * {@link DictationSentenceTranslator} backed by whichever {@link LlmClient} is configured. One
  * batched call per clip (not one call per sentence) to keep this cheap; any failure or count
- * mismatch degrades to an all-null result the same size as the input, honoring the interface's
- * never-throw contract.
+ * mismatch propagates as {@link AiContentException} rather than degrading to an all-null result.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmDictationSentenceTranslator implements DictationSentenceTranslator {
 
 	private static final String SYSTEM_PROMPT = """
@@ -36,6 +35,14 @@ public class LlmDictationSentenceTranslator implements DictationSentenceTranslat
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 
 	private final LlmClient llmClient;
+	private final int maxOutputTokens;
+
+	public LlmDictationSentenceTranslator(
+			LlmClient llmClient,
+			@Value("${dictation.translator.max-output-tokens:600}") int maxOutputTokens) {
+		this.llmClient = llmClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
 
 	@Override
 	public List<String> translate(List<String> sentences, String targetLang) {
@@ -49,7 +56,7 @@ public class LlmDictationSentenceTranslator implements DictationSentenceTranslat
 				.systemPrompt(SYSTEM_PROMPT.formatted(languageName(targetLang)))
 				.userPrompt(String.join("\n", sentences))
 				.temperature(0.2)
-				.maxOutputTokens(600)
+				.maxOutputTokens(maxOutputTokens)
 				.build();
 
 		try {
@@ -57,17 +64,17 @@ public class LlmDictationSentenceTranslator implements DictationSentenceTranslat
 			LlmResponse response = llmClient.complete(request);
 			List<String> translations = readStringArray(MAPPER.readTree(stripCodeFences(response.getContent())));
 
-			// Validate response count matches input count; if mismatch, return all nulls.
+			// A count mismatch means the translations can no longer be paired with their sentences -
+			// reported as an error rather than degraded to nulls.
 			if (translations.size() != sentences.size()) {
-				throw new IllegalStateException(
+				throw new AiContentException(
 						"Translation count %d did not match sentence count %d".formatted(translations.size(), sentences.size()));
 			}
 
 			return translations;
-		} catch (JsonProcessingException | IllegalStateException | RestClientException ex) {
-			// Any failure degrades gracefully to all nulls, honoring the never-throw contract.
-			log.warn("Sentence translation to {} failed for {} sentences, returning no translations", targetLang, sentences.size(), ex);
-			return Collections.nCopies(sentences.size(), null);
+		} catch (JsonProcessingException | LlmException | RestClientException ex) {
+			log.warn("Sentence translation to {} failed for {} sentences", targetLang, sentences.size(), ex);
+			throw new AiContentException("Sentence translation to %s failed".formatted(targetLang), ex);
 		}
 	}
 

@@ -41,32 +41,23 @@ public class DialogueAudioSynthesizer {
 	 */
 	public SynthesizedDialogue synthesize(List<DialogueLine> lines, String ttsLang) {
 		Map<String, String> speakerVoices = assignVoicesToSpeakers(lines);
-		boolean multiSpeaker = speakerVoices.size() > 1;
 		List<byte[]> clips = new ArrayList<>();
-		StringBuilder transcriptText = new StringBuilder();
-		StringBuilder translationText = new StringBuilder();
-		boolean anyTranslation = false;
 
 		for (DialogueLine line : lines) {
-			String lineText = multiSpeaker ? line.speaker() + ": " + line.text() : line.text();
+			// Speaker labels are shown in the transcript (see DialogueTextRenderer) but must never be
+			// spoken by TTS - only the line's own text is synthesized.
 			TtsAudio audio = ttsClient.synthesize(TtsRequest.builder()
-					.text(lineText).languageCode(ttsLang).voice(speakerVoices.get(line.speaker())).build());
+					.text(line.text()).languageCode(ttsLang).voice(speakerVoices.get(line.speaker())).build());
 			clips.add(audio.getAudioBytes());
-
-			if (!transcriptText.isEmpty()) {
-				transcriptText.append('\n');
-				translationText.append('\n');
-			}
-			transcriptText.append(lineText);
-			if (line.translation() != null) {
-				anyTranslation = true;
-				translationText.append(multiSpeaker ? line.speaker() + ": " + line.translation() : line.translation());
-			}
 		}
 
+		// Same transcript/translation rendering a caller gets from DialogueTextRenderer without
+		// synthesizing (listening practice persists the text at generation time, the audio only on
+		// first play) - kept in one place so the two paths can never drift apart.
+		DialogueText text = DialogueTextRenderer.render(lines);
 		byte[] mergedAudio = WavAudioMerger.merge(clips);
 		byte[] opusAudio = audioTranscodeClient.toOpus(new ByteArrayInputStream(mergedAudio), "dialogue.wav");
-		return new SynthesizedDialogue(opusAudio, transcriptText.toString(), anyTranslation ? translationText.toString() : null);
+		return new SynthesizedDialogue(opusAudio, text.transcriptText(), text.translationText());
 	}
 
 	// Picks one random Supertonic voice preset per distinct speaker, without repeats until the

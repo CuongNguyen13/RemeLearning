@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import lombok.RequiredArgsConstructor;
@@ -14,8 +15,9 @@ import org.springframework.web.client.RestClientException;
  * Thin wrapper around {@link LlmClient} shared by every "Học &amp; Luyện tập với AI" skill
  * generator/scorer (vocabulary/grammar/listening/speaking) - previously each generator (see
  * dictation's {@code LlmDictationAnalyzer}/{@code LlmDictationDialogueGenerator}) duplicated its
- * own code-fence stripping and JSON parsing. Callers still own their own fallback-on-failure
- * template, this only collapses the call+parse plumbing into one place and one exception type.
+ * own code-fence stripping and JSON parsing. Failures are not recovered from anywhere: this only
+ * collapses the call+parse plumbing into one place and one exception type, which callers let
+ * propagate.
  */
 @Component
 @RequiredArgsConstructor
@@ -35,7 +37,7 @@ public class AiContentClient {
 					.maxOutputTokens(maxOutputTokens)
 					.build());
 			return stripCodeFences(response.getContent());
-		} catch (RestClientException ex) {
+		} catch (RestClientException | LlmException ex) {
 			throw new AiContentException("LLM call failed", ex);
 		}
 	}

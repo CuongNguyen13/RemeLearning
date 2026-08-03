@@ -10,9 +10,9 @@ import java.util.List;
 public interface DictationSentenceTranslator {
 
 	/**
-	 * Never throws - on any failure (LLM error, unparsable/mismatched response), returns a list the
-	 * same size as {@code sentences} filled with nulls, so callers can always zip the result 1:1
-	 * against their input and simply skip whichever entries came back null.
+	 * Returns a list the same size as {@code sentences}, in the same order, so callers can zip the
+	 * result 1:1 against their input. Any failure (LLM error, unparsable or count-mismatched
+	 * response) propagates as an {@code AiContentException} instead of returning null entries.
 	 */
 	List<String> translate(List<String> sentences, String targetLang);
 }

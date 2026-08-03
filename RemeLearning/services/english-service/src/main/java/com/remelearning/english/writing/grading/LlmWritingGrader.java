@@ -4,14 +4,13 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.remelearning.common.constants.LearningCategories;
 import com.remelearning.english.learn.common.AiContentClient;
-import com.remelearning.english.learn.common.AiContentException;
 import com.remelearning.english.writing.domain.WritingCriteriaScores;
 import com.remelearning.english.writing.domain.WritingErrorItem;
 import com.remelearning.english.writing.domain.WritingTaskType;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -25,7 +24,6 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmWritingGrader implements WritingGrader {
 
 	private static final String SYSTEM_PROMPT = """
@@ -61,38 +59,43 @@ public class LlmWritingGrader implements WritingGrader {
 			An empty "errors" array is correct when the submission genuinely has no mistakes.""";
 
 	private final AiContentClient aiContentClient;
+	private final int maxOutputTokens;
 
-	// One LLM call per submission. Any failure degrades to a neutral 0.5 across the board with no
-	// errors: the learner still gets their attempt recorded and sees why grading was unavailable,
-	// and an empty error list means nothing bogus is written into their weak points.
+	public LlmWritingGrader(
+			AiContentClient aiContentClient,
+			@Value("${writing.grading.max-output-tokens:16000}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// One LLM call per submission, no fallback grade: a failed call propagates as
+	// AiContentException, since a fabricated neutral 0.5 would be recorded as if it were a real
+	// assessment of the learner's text.
 	@Override
 	public WritingGrade grade(
 			WritingTaskType taskType, String promptText, String referenceAnswer, String submittedText) {
-		try {
-			String userPrompt = """
-					Task type: %s
-					Prompt the learner answered:
-					%s
+		String userPrompt = """
+				Task type: %s
+				Prompt the learner answered:
+				%s
 
-					Reference answer:
-					%s
+				Reference answer:
+				%s
 
-					Learner's submission:
-					%s""".formatted(
-					taskType.name(),
-					promptText,
-					referenceAnswer == null || referenceAnswer.isBlank() ? "(none provided)" : referenceAnswer,
-					submittedText);
-			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.2, 2400, LlmPayload.class);
-			return new WritingGrade(
-					toCriteria(taskType, payload.criteria),
-					payload.correctedText,
-					toErrors(payload.errors),
-					payload.feedbackVi);
-		} catch (AiContentException ex) {
-			log.warn("LLM writing grading failed for {}, returning a neutral grade", taskType, ex);
-			return neutralGrade(taskType);
-		}
+				Learner's submission:
+				%s""".formatted(
+				taskType.name(),
+				promptText,
+				referenceAnswer == null || referenceAnswer.isBlank() ? "(none provided)" : referenceAnswer,
+				submittedText);
+		// part of the budget on hidden chain-of-thought even with reasoning disabled - see
+		// OpenAiZenLlmClient's javadoc - leaving too little would starve the actual JSON content.
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.2, maxOutputTokens, LlmPayload.class);
+		return new WritingGrade(
+				toCriteria(taskType, payload.criteria),
+				payload.correctedText,
+				toErrors(payload.errors),
+				payload.feedbackVi);
 	}
 
 	// Clamps every score to [0, 1] and keeps only the fourth criterion that applies to this task
@@ -149,18 +152,6 @@ public class LlmWritingGrader implements WritingGrader {
 					.build());
 		}
 		return errors;
-	}
-
-	private WritingGrade neutralGrade(WritingTaskType taskType) {
-		WritingCriteriaScores.WritingCriteriaScoresBuilder builder = WritingCriteriaScores.builder()
-				.grammar(0.5).vocabulary(0.5).coherence(0.5);
-		if (taskType.isTranslation()) {
-			builder.accuracy(0.5);
-		} else {
-			builder.taskResponse(0.5);
-		}
-		return new WritingGrade(builder.build(), null, List.of(),
-				"Hiện chưa chấm được bài của bạn do lỗi kết nối tới AI. Bài làm đã được lưu, bạn hãy thử nộp lại sau.");
 	}
 
 	@Getter

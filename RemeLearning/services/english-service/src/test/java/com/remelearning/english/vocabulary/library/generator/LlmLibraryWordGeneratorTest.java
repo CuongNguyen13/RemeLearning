@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -18,7 +19,7 @@ import static org.mockito.Mockito.when;
 class LlmLibraryWordGeneratorTest {
 
 	private final AiContentClient aiContentClient = mock(AiContentClient.class);
-	private final LlmLibraryWordGenerator generator = new LlmLibraryWordGenerator(aiContentClient);
+	private final LlmLibraryWordGenerator generator = new LlmLibraryWordGenerator(aiContentClient, 1500);
 
 	@Test
 	void generateParsesLlmWordsIntoGeneratedLibraryWords() {
@@ -40,12 +41,10 @@ class LlmLibraryWordGeneratorTest {
 	}
 
 	@Test
-	void generateReturnsEmptyListRatherThanThrowingWhenTheLlmCallFails() {
+	void generateThrowsRatherThanReturningAnEmptyListWhenTheLlmCallFails() {
 		when(aiContentClient.completeJson(anyString(), anyString(), anyDouble(), anyInt(), any(Class.class)))
 				.thenThrow(new AiContentException("LLM call failed", new RuntimeException("boom")));
 
-		List<GeneratedLibraryWord> result = generator.generate("Travel", List.of(), 5);
-
-		assertThat(result).isEmpty();
+		assertThatThrownBy(() -> generator.generate("Travel", List.of(), 5)).isInstanceOf(AiContentException.class);
 	}
 }

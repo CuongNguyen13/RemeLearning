@@ -9,12 +9,11 @@ import com.remelearning.english.writing.domain.WritingTaskType;
 import com.remelearning.english.writing.generator.WritingExamProfile;
 import com.remelearning.english.writing.library.domain.WritingLibraryPrompt;
 import com.remelearning.english.writing.library.domain.WritingLibraryTopic;
-import com.remelearning.english.writing.library.domain.WritingTaxonomy;
 import com.remelearning.english.writing.library.mapper.WritingLibraryPromptMapper;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -29,7 +28,6 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmWritingLibraryContentGenerator implements WritingLibraryContentGenerator {
 
 	private static final int DEFAULT_MIN_WORDS = 80;
@@ -67,6 +65,16 @@ public class LlmWritingLibraryContentGenerator implements WritingLibraryContentG
 
 	private final AiContentClient aiContentClient;
 	private final WritingLibraryPromptMapper promptMapper;
+	private final int maxOutputTokens;
+
+	public LlmWritingLibraryContentGenerator(
+			AiContentClient aiContentClient,
+			WritingLibraryPromptMapper promptMapper,
+			@Value("${writing.library.max-output-tokens:1400}") int maxOutputTokens) {
+		this.aiContentClient = aiContentClient;
+		this.promptMapper = promptMapper;
+		this.maxOutputTokens = maxOutputTokens;
+	}
 
 	// Generates, then immediately persists, so the prompt becomes a stable part of the topic's chain
 	// (the learner can leave and come back to the same task, and it can be re-graded/reviewed later).
@@ -86,87 +94,38 @@ public class LlmWritingLibraryContentGenerator implements WritingLibraryContentG
 		return prompt;
 	}
 
-	// One LLM call; any failure degrades to a template built from the topic's own name/description,
-	// which is always enough to pose a usable task.
+	// One LLM call, no fallback: a failed or prompt-less generation propagates as
+	// AiContentException so the caller reports the error instead of persisting a canned task.
 	//
 	// The exam style resolves to a WritingExamProfile whose sentence count is drawn fresh per call, so
 	// two learners on the same library topic - or the same learner coming back to it - get passages of
 	// different lengths in the register their exam actually calls for.
 	private LlmPayload callLlm(WritingLibraryTopic topic, WritingTaskType taskType, String examType) {
 		WritingExamProfile profile = WritingExamProfile.fromExamType(examType);
-		try {
-			String userPrompt = """
-					Axis: %s
-					Topic name: %s
-					Topic description: %s
-					Level: %s
-					Task type: %s
-					Exam style: %s
-					Sentences the passage must have: %d
-					Register: %s""".formatted(
-					topic.getTaxonomy(),
-					topic.getName(),
-					topic.getDescription() == null ? "(none)" : topic.getDescription(),
-					topic.getLevel(),
-					taskType.name(),
-					ExamTypes.normalize(examType) == null ? "General (no exam in mind)" : ExamTypes.normalize(examType),
-					profile.randomSentenceCount(),
-					profile.registerHint());
-			LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, 1400, LlmPayload.class);
-			if (payload.promptText == null || payload.promptText.isBlank()) {
-				throw new AiContentException("LLM returned a library writing prompt with no prompt text");
-			}
-			payload.promptText = payload.promptText.trim();
-			return payload;
-		} catch (AiContentException ex) {
-			log.warn("LLM writing library prompt generation failed for topic {} ({}), falling back to a template",
-					topic.getId(), taskType, ex);
-			return fallback(topic, taskType);
+		String userPrompt = """
+				Axis: %s
+				Topic name: %s
+				Topic description: %s
+				Level: %s
+				Task type: %s
+				Exam style: %s
+				Sentences the passage must have: %d
+				Register: %s""".formatted(
+				topic.getTaxonomy(),
+				topic.getName(),
+				topic.getDescription() == null ? "(none)" : topic.getDescription(),
+				topic.getLevel(),
+				taskType.name(),
+				ExamTypes.normalize(examType) == null ? "General (no exam in mind)" : ExamTypes.normalize(examType),
+				profile.randomSentenceCount(),
+				profile.registerHint());
+		LlmPayload payload = aiContentClient.completeJson(SYSTEM_PROMPT, userPrompt, 0.6, maxOutputTokens, LlmPayload.class);
+		if (payload.promptText == null || payload.promptText.isBlank()) {
+			log.warn("LLM returned a library writing prompt with no prompt text for topic {} ({})", topic.getId(), taskType);
+			throw new AiContentException("LLM returned a library writing prompt with no prompt text");
 		}
-	}
-
-	// Template built from the topic itself, so even offline the learner gets a task that still points
-	// at the right axis and still states its requirement in Vietnamese.
-	private LlmPayload fallback(WritingLibraryTopic topic, WritingTaskType taskType) {
-		LlmPayload payload = new LlmPayload();
-		payload.minWords = DEFAULT_MIN_WORDS;
-		payload.explanation = "Hãy bám sát chủ đề \"%s\" và đọc lại bài sau khi viết.".formatted(topic.getName());
-		payload.promptText = switch (taskType) {
-			case COMPOSE -> """
-					Viết một đoạn văn tiếng Anh (tối thiểu %d từ) về chủ đề "%s".
-
-					Yêu cầu: %s""".formatted(DEFAULT_MIN_WORDS, topic.getName(), fallbackRequirement(topic));
-			case TRANSLATE_VI_EN -> """
-					Dịch đoạn văn sau sang tiếng Anh:
-
-					Chủ đề "%s" là một phần quan trọng trong việc học tiếng Anh. Tôi đã dành nhiều thời \
-					gian để luyện tập nó. Bây giờ tôi thấy mình tiến bộ hơn trước.""".formatted(topic.getName());
-			case TRANSLATE_EN_VI -> """
-					Dịch đoạn văn sau sang tiếng Việt:
-
-					Learning about "%s" takes regular practice. I have spent a lot of time on it, and I \
-					have made steady progress since I started.""".formatted(topic.getName());
-		};
-		payload.referenceAnswer = null;
+		payload.promptText = payload.promptText.trim();
 		return payload;
-	}
-
-	// What the fallback brief asks the learner to do, phrased per axis so an offline COMPOSE task
-	// still reflects why this topic exists.
-	private String fallbackRequirement(WritingLibraryTopic topic) {
-		WritingTaxonomy taxonomy;
-		try {
-			taxonomy = WritingTaxonomy.fromCode(topic.getTaxonomy());
-		} catch (IllegalArgumentException ex) {
-			log.warn("Unknown writing library taxonomy '{}' on topic {}, using a generic requirement",
-					topic.getTaxonomy(), topic.getId());
-			return "viết mạch lạc, đúng ngữ pháp.";
-		}
-		return switch (taxonomy) {
-			case GRAMMAR -> "dùng cấu trúc \"%s\" ít nhất ba lần trong bài.".formatted(topic.getName());
-			case GENRE -> "viết đúng thể loại \"%s\", đúng văn phong và đối tượng người đọc.".formatted(topic.getName());
-			case VOCAB_THEME -> "dùng ít nhất năm từ/cụm từ thuộc chủ đề \"%s\".".formatted(topic.getName());
-		};
 	}
 
 	@Getter

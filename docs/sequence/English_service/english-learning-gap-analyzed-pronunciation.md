@@ -39,7 +39,7 @@ sequenceDiagram
             opt pronunciation.classifier.mode = llm
                 Cls->>Gemini: generateContent(prompt with label)
                 Gemini-->>Cls: classification response
-                Note right of Cls: parse/call failure -> fallback to PronunciationType.OTHER
+                Note right of Cls: parse/call failure -> LlmException propagates (never recorded as OTHER)
             end
             Cls-->>Svc: PronunciationType (VOWEL/CONSONANT/.../OTHER)
             Svc->>Mapper: upsert(userId, itemId, recordingId, label,<br/>pronunciationType, forgettingScore, recommendation)

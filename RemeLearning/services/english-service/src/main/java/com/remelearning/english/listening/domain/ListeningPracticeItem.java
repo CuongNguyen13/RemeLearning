@@ -19,9 +19,15 @@ public class ListeningPracticeItem {
 	private String examType;
 	private String topic;
 	private String transcript;
-	/** Null until Supertonic has synthesized the audio. */
+	/** Null until Supertonic has synthesized the audio - which happens on first play, not at generation. */
 	private String storageKey;
 	private String translation;
+	/**
+	 * JSON array of {@code DialogueLine}, kept so the audio can be synthesized lazily (the flattened
+	 * {@link #transcript} can't be split back into speaker-tagged lines). Null for rows generated
+	 * before lazy synthesis existed - those already have a {@link #storageKey}.
+	 */
+	private String linesJson;
 	/** JSON array of {@link ListeningQuestionItem}. */
 	private String questionsJson;
 	private Instant createdAt;

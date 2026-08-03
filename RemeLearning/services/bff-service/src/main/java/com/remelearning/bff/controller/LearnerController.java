@@ -481,15 +481,15 @@ public class LearnerController {
 		return englishServiceClient.getGrammarMergedHistory(userId).map(ApiResponse::ok);
 	}
 
-	@Operation(summary = "Generate one AI listening passage, targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; thin proxy to english-service")
+	@Operation(summary = "Generate one AI listening session - 5 to 10 distinct passages in one call - targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; thin proxy to english-service")
 	@PostMapping("/{userId}/learn/listening/generate")
-	public Mono<ApiResponse<ListeningPracticeItemDto>> generateListeningPractice(
+	public Mono<ApiResponse<List<ListeningPracticeItemDto>>> generateListeningPractice(
 			@PathVariable String userId, @RequestBody(required = false) GenerateListeningPracticeRequestDto request) {
 		return englishServiceClient.generateListeningPractice(userId, request == null ? new GenerateListeningPracticeRequestDto() : request)
 				.map(ApiResponse::ok);
 	}
 
-	@Operation(summary = "A learner's generated listening practice items, newest first; thin proxy to english-service")
+	@Operation(summary = "A learner's generated-but-not-yet-attempted listening practice items, newest first (the \"Bài đã tạo, chưa làm xong\" list); thin proxy to english-service")
 	@GetMapping("/{userId}/learn/listening/items")
 	public Mono<ApiResponse<List<ListeningPracticeItemDto>>> listListeningPracticeItems(@PathVariable String userId) {
 		return englishServiceClient.listListeningPracticeItems(userId).map(ApiResponse::ok);

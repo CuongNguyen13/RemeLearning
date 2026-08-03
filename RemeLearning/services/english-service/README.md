@@ -61,10 +61,12 @@ endpoints accept an optional JSON body / query params — `GenerateAiPracticeReq
 from-attempt one — and both hand off to `LlmDictationDialogueGenerator` (always active, not gated by
 `dictation.analyzer.mode`), which writes **one** monologue-or-dialogue passage covering the target
 words, tags it with a short **topic label** it assigns itself, and (when `translationLang` isn't
-`"en"`) a per-line translation; a random Supertonic voice is assigned per speaker, each line is
-synthesized from the *exact* text that gets persisted/graded (a prior bug had multi-speaker audio
-speak only the bare line while the graded/displayed text carried a `"Speaker: "` prefix, so the audio
-never said the name it was graded against — now fixed) and the clips merged (`WavAudioMerger`) into
+`"en"`) a per-line translation; a random Supertonic voice is assigned per speaker, each line's TTS
+audio is synthesized from its bare text only — the `"Speaker: "` prefix that the persisted/graded
+transcript carries in a multi-speaker dialogue is display/grading metadata (the FE's
+`stripSpeakerLabel` strips it back off before comparing the typed answer) and must never be spoken
+aloud (a prior "fix" had TTS speak the prefix too, making the AI voice literally read out the speaker
+name — now reverted) — and the clips merged (`WavAudioMerger`) into
 one audio file, replacing whatever was previously pending. `level`/`examType` may be a concrete value,
 the literal `"RANDOM"` (server-resolved — level from a fixed CEFR pool `A1,A2,B1,B2,C1`; examType from
 the library's own distinct exam types, falling back to `TOEIC,IELTS,TOEFL,General`), or omitted (no
@@ -90,8 +92,9 @@ learner made along the way — scored the same way as the main transcript and fo
 
 ## Learn skills ("Học & Luyện tập với AI")
 
-Five skills — vocabulary, grammar, listening, speaking, writing — generate one AI practice item on
-demand and grade the learner's attempt against it. `vocabulary`/`grammar` live inside their existing domain
+Five skills — vocabulary, grammar, listening, speaking, writing — generate AI practice content on
+demand and grade the learner's attempt against it. Four of them generate exactly one item per call;
+**listening generates a whole session of 5-10 passages per call** (see its own bullet below). `vocabulary`/`grammar` live inside their existing domain
 package as a `learn` sub-package; `listening`/`speaking` are brand-new top-level domain packages
 (`com.remelearning.english.listening`, `com.remelearning.english.speaking`), following the same
 controller/service/mapper/domain/dto/generator/scoring layout as the analysis domains. All four reuse
@@ -102,7 +105,7 @@ existing pipeline — there is no separate "weak-point feeder" per skill.
 |---|---|---|---|---|
 | Vocabulary | `english.vocabulary.learn` | `V12__vocab_practice.sql` (`vocab_practice_items`, `vocab_practice_attempts`) | `VocabLearnController` | `/api/v1/learn/vocabulary` |
 | Grammar | `english.grammar.learn` | `V13__grammar_practice.sql` (`grammar_practice_items`, `grammar_practice_attempts`) | `GrammarLearnController` | `/api/v1/learn/grammar` |
-| Listening | `english.listening` (new domain) | `V14__listening_practice.sql` (`listening_practice_items`, `listening_attempts`) | `ListeningLearnController` | `/api/v1/learn/listening` |
+| Listening | `english.listening` (new domain) | `V14__listening_practice.sql` (`listening_practice_items`, `listening_attempts`) + `V28__listening_practice_passage_lines.sql` (`passage_lines`, for lazy audio) | `ListeningLearnController` | `/api/v1/learn/listening` |
 | Speaking | `english.speaking` (new domain) | `V15__speaking_practice.sql` (`speaking_practice_items`, `speaking_attempts`) | `SpeakingLearnController` | `/api/v1/learn/speaking` |
 | Writing | `english.writing` (new domain) | `V26__writing_practice.sql` (`writing_practice_items`, `writing_attempts`) + `V27__writing_library.sql` | `WritingLearnController`, `WritingLibraryController` | `/api/v1/learn/writing` |
 
@@ -117,6 +120,10 @@ Shared backbone, in the new `english.learn.common` package (used by all four gen
   existing `WavAudioMerger`) for any learn skill that needs voiced audio; currently used by
   `listening`. Dictation deliberately keeps its own already-tested, separate TTS/dialogue code path
   rather than being migrated onto this shared version.
+- `DialogueTextRenderer` (+ `DialogueText`) — the pure transcript/translation rendering that used to
+  be inlined in `DialogueAudioSynthesizer.synthesize`. Extracted because listening now persists a
+  passage's text at generation time but its audio only on first playback, so the two steps can't share
+  one method that does both; `DialogueAudioSynthesizer` delegates to it so the two can't drift.
 
 ### Writing & translation (`english.writing`) — the one skill with no weak-point table of its own
 
@@ -128,14 +135,21 @@ One domain covers three task types, chosen per request via `taskType`:
 | `TRANSLATE_VI_EN` | a Vietnamese source passage | English | `accuracy` |
 | `TRANSLATE_EN_VI` | an English source passage | Vietnamese | `accuracy` |
 
-Three LLM-backed components, all with the "never throws" contract the other skills use:
+Three LLM-backed components, all following the same "AI failures are reported, never papered over"
+rule as the other skills: no static-template/neutral-grade fallback anywhere, an `AiContentException`
+from any of them surfaces to the caller (502):
 
 - `generator.LlmWritingPracticeGenerator` — one Gemini call producing the prompt + its reference
-  answer, built around the learner's weakest labels. Falls back to a per-task-type static template.
-  Driven by `generator.WritingExamProfile` (see below).
+  answer, built around the learner's weakest labels; a failed call throws instead of emitting a
+  per-task-type template.
+  Driven by `generator.WritingExamProfile` (see below). Its system prompt is mostly **coherence
+  instructions**: the source passage must be one continuous text about a single scene (same narrator,
+  place and time frame; sentences chained with pronouns/connectives; a closing sentence), and a target
+  structure that doesn't fit that scene is dropped rather than forced in — asked only for "N sentences
+  using these N labels", the model returned N unrelated sentences that changed subject on every line.
 - `grading.LlmWritingGrader` — one Gemini call returning per-criterion scores plus a list of
-  **labelled** errors. Falls back to a neutral 0.5 with an empty error list, so a grading outage never
-  writes anything bogus into the learner's weak points.
+  **labelled** errors. A failed call throws rather than recording a neutral 0.5 grade, so nothing
+  bogus is stored as if the learner's text had really been marked.
 - `suggestion.LlmNextSentenceSuggester` — the "Gợi ý câu tiếp theo" button. One call per press: no
   debounce, no ghost-text, no background polling, so a learner who never asks costs nothing. It uses a
   **separate, hard-restricted prompt** for the two translation modes (may only name the required
@@ -236,10 +250,24 @@ Per-skill notes:
   existing service — `GrammarLibraryServiceImpl` already depends on `GrammarLearnService` (for
   `generatePracticeFromSession`), so the reverse dependency would create a circular bean.
 - **Listening** — a new domain, no pre-existing table to fall back to. Generation
-  (`POST /api/v1/learn/listening/{userId}/generate`) produces a Gemini transcript + questions, then
-  synthesizes multi-speaker audio via `DialogueAudioSynthesizer`; the transcript/translation and audio
-  (`GET /items/{itemId}/audio`) stay hidden from the practice-item response until the attempt is
-  submitted. Three question shapes (`ListeningQuestionType`): `MCQ` (main idea/detail/attitude, 4
+  (`POST /api/v1/learn/listening/{userId}/generate`) produces **a whole practice session: 5-10 distinct
+  passages (transcript + questions) from one Gemini call**, each on a different topic. Audio is **not**
+  synthesized there — each passage's multi-speaker audio is built via `DialogueAudioSynthesizer` on the
+  first `GET /items/{itemId}/audio` for it and cached under `storage_key`, which is what
+  `V28`'s `passage_lines` column exists for (the flattened `transcript` can't be split back into
+  speaker-tagged lines). Synthesizing a whole session eagerly would put one TTS call per line plus one
+  transcode per passage into a single request — minutes of work, mostly for passages never opened.
+  Rows created before `V28` already have their audio and never take the lazy path.
+  Variety is enforced in the prompt, not left to sampling: it carries the learner's 12 newest passage
+  topics as "do not reuse", a random draw of scenario hints from a 24-entry pool, a "no two passages may
+  share a scenario" rule, and `temperature = 0.9`; `resolveTargetKeywords` also shuffles before capping
+  at 8. Without those, the prompt was byte-for-byte identical on every call for an unchanged keyword set
+  and Gemini kept returning the same passage.
+  The transcript/translation stay hidden from the practice-item response until the attempt is
+  submitted. `GET /{userId}/items` returns only the passages with **no attempt row yet**
+  (`findPendingItemsByUserId`) — the "Bài đã tạo, chưa làm xong" list the FE shows under the idle empty
+  state, cloned from writing's `WritingTaskList`; so the rest of a generated session is what the learner
+  picks up from there. Three question shapes (`ListeningQuestionType`): `MCQ` (main idea/detail/attitude, 4
   options), `KEYWORD` (fill the missed word/phrase, scored by WER like dictation), `OPEN` (free-text,
   LLM-graded 0..1 against a model answer). A submitted attempt's `PracticeService.redo(...)` call now
   persists into `listening_weak_points` (`sourceType = COMPREHENSION`) via `WeakPointDispatcherImpl`'s
@@ -251,10 +279,10 @@ Per-skill notes:
   row) diffs one past attempt's persisted `resultsJson` via the pure
   `ListeningMistakeAnalyzer.extractMissedTopics` (already-graded, not re-scored — `resultsJson` carries
   no per-question topic/skill tag of its own, so each wrong question's own `correctAnswer` stands in as
-  the retry target text), generates a new passage+questions (with fresh audio) targeting only those
-  topics via the same `LlmListeningPracticeGenerator`, persists it into the same
-  `listening_practice_items` bank, and returns the learner's refreshed practice-set list; `404` if the
-  attempt doesn't exist or belongs to someone else. The persist-and-synthesize-and-refresh step
+  the retry target text), generates a new session of passages+questions targeting only those
+  topics via the same `LlmListeningPracticeGenerator`, persists them into the same
+  `listening_practice_items` bank, and returns the learner's refreshed pending practice-set list; `404`
+  if the attempt doesn't exist or belongs to someone else. The generate-and-persist-and-refresh step
   (`generatePracticeForKeywords`) is also reused by Listening Library's own "generate from section"
   endpoint below — one shared AI-practice bank per domain, regardless of which flow the mistake came
   from. `GET /merged-history/{userId}` combines this skill's own attempt history with Listening
@@ -366,7 +394,10 @@ topic). Four endpoints under `ListeningLibraryController` (`/api/v1/learn/listen
 - `POST /{userId}/topics/{topicId}/sections` — returns the next Section in the chain the learner
   hasn't passed yet: resumes an existing not-yet-passed Section, or AI-generates the next one (passage
   + audio + 10-15 questions) if the chain hasn't reached its target length; once the whole chain is
-  passed, falls back to the last Section for review. Marks the topic `IN_PROGRESS` (`403` if the topic
+  passed, falls back to the last Section for review. Generation prompts with a randomly-drawn passage
+  angle (12-entry pool) plus the opening 160 characters of every Section the topic already has, and
+  `temperature = 0.9`, so a topic's 5-10 Sections aren't retellings of one another — with only
+  `topic + level + questionCount` in the prompt, every Section of a topic came out near-identical. Marks the topic `IN_PROGRESS` (`403` if the topic
   is `LOCKED`, `404` if the topic doesn't exist).
 - `POST /{userId}/sections/{sectionId}/answers` — scores a submitted answer set for that one Section
   (`404` if the section doesn't exist); a score ≥ 0.7 only marks the topic `PASSED` and unlocks the
@@ -490,6 +521,27 @@ set `LLM_PROVIDER` (`gemini` default, or `ollama`/`zen`) plus that provider's ow
 `GEMINI_API_KEY` (gemini), `OLLAMA_MODEL` (ollama, calls `http://localhost:11434` — no key needed),
 or `ZEN_API_KEY`/`ZEN_MODEL` (zen, opencode.ai's OpenAI-compatible endpoint, default model
 `big-pickle`). Never commit a real key to `application.yml`.
+
+The **fixed dictation library** actually served to learners (`dictation_clips`/`dictation_sentences`,
+populated on startup by `dictation.importer.DictationLibraryImporter` when
+`DICTATION_IMPORT_ON_STARTUP=true`) is read through `common`'s generic `StorageClient` abstraction,
+selected via `STORAGE_PROVIDER` (`local` default, `s3`, or `drive` — see `common`'s `storage/README.md`).
+To serve it from Google Drive: set `STORAGE_PROVIDER=drive` and `STORAGE_DRIVE_ROOT_FOLDER_ID` to the
+id of the Drive folder holding the `<examType>/<level>/<skill>/<topic>/<code>.mp3` (+ sibling
+`scripts/<code>.txt`) layout the importer expects, share that folder with the service-account email
+(Viewer), and provide its key via `DRIVE_CREDENTIALS_JSON_B64` (base64, preferred for deploy) or
+`DRIVE_CREDENTIALS_FILE` (path to the key file, simpler for local dev) — see `common`'s
+`storage/drive/README.md`. Since the importer only runs once at startup and upserts by clip `code`,
+switching the source requires re-running it against an empty `dictation_clips`/`dictation_sentences`
+(they cascade-clear together — see the FK).
+
+A **separate**, not-yet-wired system also exists for a browsable dictation content library keyed by
+topic/lesson name instead of a fixed imported table:
+`content.dictation.DictationContentService`, reading via `storage.fallback.FallbackFileReader`/
+`FallbackDirectoryLister` (tried in order S3 → Google Drive → local per
+`reme.dictation.s3`/`reme.dictation.drive`/`reme.dictation.local`) — it has no REST controller yet, so
+it's unused by the FE today; don't confuse its `reme.dictation.drive.root-folder-id` with the
+`reme.storage.drive.root-folder-id` above, they're independent settings for independent code paths.
 
 ## Notes
 

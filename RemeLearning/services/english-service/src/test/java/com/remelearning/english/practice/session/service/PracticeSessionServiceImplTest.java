@@ -65,8 +65,11 @@ class PracticeSessionServiceImplTest {
 				.thenReturn(VocabPracticeItemDto.builder().practiceItemId(10L).topic("Vocab topic").build());
 		when(grammarLearnService.generate(any(), any()))
 				.thenReturn(GrammarPracticeItemDto.builder().practiceItemId(20L).topic("Grammar topic").build());
+		// Listening generates a whole session per call; the slot takes its first passage.
 		when(listeningLearnService.generate(any(), any()))
-				.thenReturn(ListeningPracticeItemDto.builder().practiceItemId(30L).topic("Listening topic").build());
+				.thenReturn(List.of(
+						ListeningPracticeItemDto.builder().practiceItemId(30L).topic("Listening topic").build(),
+						ListeningPracticeItemDto.builder().practiceItemId(31L).topic("Another listening topic").build()));
 		when(speakingLearnService.generate(any(), any()))
 				.thenReturn(SpeakingPracticeItemDto.builder().practiceItemId(40L).topic("Speaking topic").build());
 		when(writingLearnService.generate(any(), any()))

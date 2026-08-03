@@ -37,9 +37,9 @@ public class ListeningLearnController {
 	private final ListeningLearnService listeningLearnService;
 	private final ListeningHistoryService listeningHistoryService;
 
-	@Operation(summary = "Generate one AI listening passage (Gemini transcript+questions, Supertonic audio), targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords")
+	@Operation(summary = "Generate one AI listening session - 5 to 10 distinct passages (Gemini transcript+questions) in one call, targeting the given focus keywords or (if omitted) the learner's own recently-missed keywords; each passage's audio is synthesized on its first playback")
 	@PostMapping("/{userId}/generate")
-	public ApiResponse<ListeningPracticeItemDto> generate(
+	public ApiResponse<List<ListeningPracticeItemDto>> generate(
 			@PathVariable String userId, @RequestBody(required = false) GenerateListeningPracticeRequest request) {
 		return ApiResponse.ok(listeningLearnService.generate(userId, request == null ? new GenerateListeningPracticeRequest() : request));
 	}
@@ -50,7 +50,7 @@ public class ListeningLearnController {
 		return ApiResponse.ok(listeningLearnService.getItem(itemId));
 	}
 
-	@Operation(summary = "A learner's generated practice items, newest first")
+	@Operation(summary = "A learner's generated-but-not-yet-attempted practice items, newest first (the \"Bài đã tạo, chưa làm xong\" list)")
 	@GetMapping("/{userId}/items")
 	public ApiResponse<List<ListeningPracticeItemDto>> listItems(@PathVariable String userId) {
 		return ApiResponse.ok(listeningLearnService.listItems(userId));

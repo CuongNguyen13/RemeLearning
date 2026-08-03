@@ -97,7 +97,7 @@ sequenceDiagram
         Ai->>Gemini: LlmClient.complete(...)
         Gemini-->>Ai: {promptText, referenceAnswer, minWords, explanation}
         alt LLM/parse failure, or blank promptText
-            Gen->>Gen: fallback built from the topic itself, with an axis-specific<br/>requirement (use this structure / write this genre / use this theme's words)<br/>and its Vietnamese instruction line
+            Gen-->>Svc: AiContentException - no topic-derived template, no row inserted
         end
         Gen->>PMapper: insert(WritingLibraryPrompt)
         PMapper->>DB: INSERT writing_library_prompts
@@ -175,7 +175,7 @@ task's length/register, same as on the learn tab.
 
 | Target | Call | Failure handling |
 |---|---|---|
-| Gemini (via `AiContentClient`) | 1 completion per newly generated prompt; 1 per submission (grading) | Generation falls back to a topic-derived template; grading falls back to a neutral score with no errors |
+| Gemini (via `AiContentClient`) | 1 completion per newly generated prompt; 1 per submission (grading) | Neither has a fallback: `AiContentException` propagates (502) and nothing is persisted |
 | `reme_english` DB | topics/prompts/progress/attempts | `@Transactional` on every mutating method |
 | `practice` package (in-process) | `PracticeService#redo` via `WritingErrorPipeline` | See [practice-redo.md](practice-redo.md) |
-| `writing` package (in-process) | `WritingLearnService#generatePracticeForLabels` for the retry action | Propagates the learn tab's own fallbacks |
+| `writing` package (in-process) | `WritingLearnService#generatePracticeForLabels` for the retry action | Propagates the learn tab's own AI failures |

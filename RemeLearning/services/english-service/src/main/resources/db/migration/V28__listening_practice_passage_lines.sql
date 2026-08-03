@@ -1,0 +1,14 @@
+-- Keeps an AI listening passage's speaker-tagged lines alongside the flattened transcript, so its
+-- audio can be synthesized later instead of at generation time.
+--
+-- Why: one "Tạo bài luyện" now creates a whole session of 5-10 passages in a single LLM call, and
+-- synthesizing every passage's audio up front (one TTS call per line + one transcode per passage)
+-- would turn that single request into minutes of work - for passages the learner may never open.
+-- Audio is therefore synthesized on first play and cached under storage_key. Re-deriving the lines
+-- from the existing `transcript` column is not reliable (it is already flattened: speaker labels
+-- are only prefixed for multi-speaker passages, and translations live in a separate column), hence
+-- a dedicated column holding the generator's JSON line array verbatim.
+--
+-- Nullable, with no backfill: rows created before this migration already have their audio
+-- synthesized (storage_key set), so they never need lazy synthesis.
+ALTER TABLE listening_practice_items ADD COLUMN IF NOT EXISTS passage_lines TEXT;

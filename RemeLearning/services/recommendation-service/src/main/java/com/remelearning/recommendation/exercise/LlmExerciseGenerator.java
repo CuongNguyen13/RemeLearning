@@ -6,11 +6,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
@@ -26,7 +27,6 @@ import org.springframework.web.client.RestClientException;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "recommendation.exercise-generator", name = "mode", havingValue = "llm")
 public class LlmExerciseGenerator implements ExerciseGenerator {
 
@@ -43,10 +43,18 @@ public class LlmExerciseGenerator implements ExerciseGenerator {
 	};
 
 	private final LlmClient llmClient;
+	private final int maxOutputTokens;
 
-	// Asks the LLM for 3-5 concrete exercises as a JSON array; any call failure or malformed/empty
-	// response falls back to the static per-category templates rather than propagating, so a flaky
-	// LLM call can't break weak-point ingestion.
+	public LlmExerciseGenerator(
+			LlmClient llmClient,
+			@Value("${recommendation.exercise-generator.max-output-tokens:400}") int maxOutputTokens) {
+		this.llmClient = llmClient;
+		this.maxOutputTokens = maxOutputTokens;
+	}
+
+	// Asks the LLM for 3-5 concrete exercises as a JSON array; no template fallback - any call
+	// failure or malformed/empty response propagates as LlmException so the failure is visible
+	// instead of the learner being given generic per-category filler.
 	@Override
 	public List<String> generate(String category, String label, double forgettingScore) {
 		LlmRequest request = LlmRequest.builder()
@@ -54,20 +62,19 @@ public class LlmExerciseGenerator implements ExerciseGenerator {
 				.userPrompt("Category: %s\nWeak point: %s\nForgetting score: %.4f (higher = more urgent)"
 						.formatted(category, label, forgettingScore))
 				.temperature(0.4)
-				.maxOutputTokens(400)
+				.maxOutputTokens(maxOutputTokens)
 				.build();
 
 		try {
 			LlmResponse response = llmClient.complete(request);
 			List<String> exercises = MAPPER.readValue(stripCodeFences(response.getContent()), STRING_LIST);
 			if (exercises == null || exercises.isEmpty()) {
-				throw new IllegalStateException("LLM returned an empty exercise list");
+				throw new LlmException("LLM returned an empty exercise list");
 			}
 			return exercises;
-		} catch (JsonProcessingException | IllegalStateException | RestClientException ex) {
-			log.warn("LLM exercise generation failed for category '{}', label '{}', falling back to templates",
-					category, label, ex);
-			return ExerciseTemplates.defaultsFor(category, label);
+		} catch (JsonProcessingException | RestClientException ex) {
+			log.warn("LLM exercise generation failed for category '{}', label '{}'", category, label, ex);
+			throw new LlmException("LLM exercise generation failed for category " + category, ex);
 		}
 	}
 

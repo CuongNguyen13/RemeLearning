@@ -338,7 +338,7 @@ class DictationServiceImplTest {
 	}
 
 	@Test
-	void getClipDetailDegradesGracefullyWhenAlignmentFails() {
+	void getClipDetailPropagatesTheFailureWhenAlignmentFails() {
 		when(dictationMapper.findClipById(5L)).thenReturn(
 				DictationClip.builder().id(5L).code("c-1").storageKey("c-1.mp3").build());
 		when(dictationMapper.findSentencesByClipId(5L)).thenReturn(List.of(
@@ -347,9 +347,7 @@ class DictationServiceImplTest {
 		when(sentenceAlignmentClient.align(any(), anyString(), anyList()))
 				.thenThrow(new IllegalStateException("ai-service unreachable"));
 
-		DictationClipDetailDto detail = service.getClipDetail(5L, null);
-
-		assertThat(detail.getSentences().get(0).getStartMs()).isNull();
+		assertThatThrownBy(() -> service.getClipDetail(5L, null)).isInstanceOf(IllegalStateException.class);
 	}
 
 	@Test
@@ -531,7 +529,7 @@ class DictationServiceImplTest {
 	}
 
 	@Test
-	void generateAiPracticeAssignsDistinctVoicesPerSpeakerAndMergesAudioWithSpeakerNameSpoken() throws java.io.IOException {
+	void generateAiPracticeAssignsDistinctVoicesPerSpeakerAndMergesAudioWithoutSpeakerNameSpoken() throws java.io.IOException {
 		when(dictationMapper.findPracticeItemsWithoutAudio("user-1")).thenReturn(List.of());
 		when(dictationMapper.findTopMissedWords("user-1", 8)).thenReturn(List.of());
 		when(dialogueGenerator.generateDialogue(eq(List.of()), isNull(), isNull(), isNull())).thenReturn(
@@ -551,10 +549,10 @@ class DictationServiceImplTest {
 		List<String> voicesUsed = requestCaptor.getAllValues().stream().map(TtsRequest::getVoice).distinct().toList();
 		assertThat(voicesUsed).hasSize(2);
 		assertThat(voicesUsed).allMatch(voice -> VOICE_POOL.contains(voice));
-		// Bug fix: the TTS audio must speak the exact same "Speaker: text" the learner is graded
-		// against, not just the bare line - otherwise the audio never says the name the answer key expects.
+		// The "Speaker: " prefix is transcript metadata for display/grading only - it must never be
+		// spoken by TTS (the FE's stripSpeakerLabel strips it back off the typed answer, not the audio).
 		List<String> spokenTexts = requestCaptor.getAllValues().stream().map(TtsRequest::getText).toList();
-		assertThat(spokenTexts).containsExactly("Alex: Did you see that?", "Sam: Yes, I did.");
+		assertThat(spokenTexts).containsExactly("Did you see that?", "Yes, I did.");
 
 		ArgumentCaptor<InputStream> audioCaptor = ArgumentCaptor.forClass(InputStream.class);
 		verify(storageClient).write(eq("generated/user-1/40.opus"), audioCaptor.capture(), eq(49L));

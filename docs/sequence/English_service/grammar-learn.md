@@ -8,7 +8,8 @@ FE calls go through `bff-service`'s `LearnerController` (`/api/v1/learners/{user
 hop, same convention as `dictation-practice.md`'s generic `Caller`.
 
 This skill is AI-only: `LlmGrammarPracticeGenerator` is the only `GrammarPracticeGenerator`, with a
-static-template fallback on any LLM call/parse failure. No Kafka consumer/producer of its own -
+no static-template fallback: any LLM call/parse failure propagates as `AiContentException`. No
+Kafka consumer/producer of its own -
 grading reuses `practice.service.PracticeService#redo`, which publishes
 `learning.gap.analysis.requested` (see `overview.md` section 3 / `practice-redo.md`).
 
@@ -40,8 +41,8 @@ sequenceDiagram
     Ai->>Gemini: LlmClient.complete(...) -> generateContent REST call
     Gemini-->>Ai: raw text (code-fence stripped)
     Ai-->>Gen: parsed JSON {topic, items[{targetRule,type,prompt,options?,answer,translation}]}
-    alt LLM call/parse fails
-        Gen->>Gen: fallback() - templated item(s) per target rule
+    alt LLM call/parse fails or returns no items
+        Gen-->>Svc: AiContentException - nothing persisted
     end
     Gen-->>Svc: GeneratedGrammarPractice{topic, items[]}
     Svc->>GMapper: insertItem({userId, level, examType, topic, targetRulesJson, itemsJson})
@@ -162,7 +163,7 @@ dependency. `GrammarHistoryServiceImpl` depends on both interfaces one level up 
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmGrammarPracticeGenerator` via `AiContentClient`/`LlmClient`; falls back to a template on any failure |
+| 1 | HTTPS | english-service -> Gemini API | `LlmGrammarPracticeGenerator` via `AiContentClient`/`LlmClient`; no template fallback - `AiContentException` propagates on any failure |
 | 2 | Kafka produce | english-service -> `learning.gap.analysis.requested` | via `PracticeService#redo` -> `AnalysisRequestedProducer`, same mechanism as the practice/redo flow (`practice-redo.md`) |
 | 3 | Postgres | english-service -> `reme_english` | `grammar_practice_items`, `grammar_practice_attempts`, plus `grammar_weak_points` (upserted by `WeakPointScoringOrchestrator`) |
 

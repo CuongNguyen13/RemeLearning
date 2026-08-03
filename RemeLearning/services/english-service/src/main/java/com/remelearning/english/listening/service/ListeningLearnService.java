@@ -12,10 +12,15 @@ import java.util.List;
 
 public interface ListeningLearnService {
 
-	ListeningPracticeItemDto generate(String userId, GenerateListeningPracticeRequest request);
+	/**
+	 * Generates one practice session - 5 to 10 distinct passages in a single LLM call, newest first.
+	 * The caller opens the first one; the rest wait in {@link #listItems}.
+	 */
+	List<ListeningPracticeItemDto> generate(String userId, GenerateListeningPracticeRequest request);
 
 	ListeningPracticeItemDto getItem(Long itemId);
 
+	/** The learner's generated-but-not-yet-attempted passages, newest first. */
 	List<ListeningPracticeItemDto> listItems(String userId);
 
 	ListeningAudioResource loadAudio(Long itemId);
@@ -27,9 +32,9 @@ public interface ListeningLearnService {
 	ListeningAttemptDetailDto getAttemptDetail(String userId, Long attemptId);
 
 	/**
-	 * Shared generate-and-persist step: builds one {@link ListeningPracticeItemDto} targeting the
-	 * given keywords/level/exam type (same {@code listening_practice_items} bank {@link #generate}
-	 * uses) and returns the learner's refreshed practice-set list. Used both by
+	 * Shared generate-and-persist step: builds one whole session targeting the given keywords/level/
+	 * exam type (same {@code listening_practice_items} bank {@link #generate} uses) and returns the
+	 * learner's refreshed pending practice-set list. Used both by
 	 * {@link #generatePracticeFromAttempt} and by the Listening Library flow
 	 * ({@code ListeningLibraryService#generatePracticeFromSection}).
 	 */

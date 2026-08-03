@@ -80,7 +80,9 @@ sequenceDiagram
                 alt existing.size() < target (chain not yet full)
                     Svc->>Gen: generateSection(topic)
                     Gen->>Gen: questionCount = random int in [10,15]
-                    Gen->>Ai: completeJson(systemPrompt, "Topic/Level/Question count=N", temp=0.6, maxTokens=3500)
+                    Gen->>SMapper: findByTopicId(topicId) - openings of the Sections already written
+                    Gen->>Gen: pick one passage angle at random from a 12-entry pool
+                    Gen->>Ai: completeJson(systemPrompt, "Topic/Level/Question count=N/Angle/<br/>Passages already written (do NOT retell)", temp=0.9, maxTokens=3500)
                     Ai->>Gemini: LlmClient.complete(...)
                     Gemini-->>Ai: raw text (code-fence stripped)
                     Ai-->>Gen: parsed JSON {passage, questions[N]}
@@ -219,8 +221,8 @@ sequenceDiagram
                 Svc->>TMapper: findById(section.topicId)
                 TMapper-->>Svc: ListeningLibraryTopic{name, level}
                 Svc->>LearnSvc: generatePracticeForKeywords(userId, [topic.name], topic.level, examType=null)
-                Note over LearnSvc: same generate-and-persist step listening.learn's own<br/>generatePracticeFromAttempt uses - see listening-learn.md section 3<br/>(generator.generate -> synthesize audio -> insertItem into<br/>listening_practice_items -> listItems)
-                LearnSvc-->>Svc: List<ListeningPracticeItemDto> (refreshed list)
+                Note over LearnSvc: same generate-and-persist step listening.learn's own<br/>generatePracticeFromAttempt uses - see listening-learn.md section 4<br/>(one generator call for a 5-10 passage session -> insertItem each into<br/>listening_practice_items -> findPendingItemsByUserId; audio is synthesized<br/>later, on each passage's first playback)
+                LearnSvc-->>Svc: List<ListeningPracticeItemDto> (refreshed pending list)
             end
         end
         Svc-->>Ctrl: List<ListeningPracticeItemDto>
@@ -232,7 +234,7 @@ sequenceDiagram
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmListeningLibraryGenerator` via `AiContentClient`, first-read Section generation only; unlike `grammar.library`'s generator, any LLM/parse failure propagates as `AiContentException` instead of falling back to a static template, since this is content-authoring, not a learner-facing generate call - a failed generation simply produces no Section rather than persisting placeholder content |
+| 1 | HTTPS | english-service -> Gemini API | `LlmListeningLibraryGenerator` via `AiContentClient`, Section generation only (`temperature = 0.9`, prompt carries a randomly-drawn passage angle plus the opening of every Section the topic already has, so a topic's 5-10 Sections don't come back as retellings of one another); unlike `grammar.library`'s generator, any LLM/parse failure propagates as `AiContentException` instead of falling back to a static template, since this is content-authoring, not a learner-facing generate call - a failed generation simply produces no Section rather than persisting placeholder content |
 | 2 | Supertonic TTS (in-process/local call, via `DialogueAudioSynthesizer`) | english-service -> Supertonic | synthesizes the passage as a single-speaker ("Narrator") monologue, same synthesizer `listening-learn` uses |
 | 3 | `StorageClient` (S3/local, per `common.storage`) | english-service -> storage backend | writes/reads the Section's audio object; key is `listening-library/{topicId}/{uuid}.wav`, addressed by topic id since no section id exists yet at synthesis time |
 | 4 | Postgres | english-service -> `reme_english` | `listening_library_topics`, `listening_library_sections`, `listening_library_questions`, `listening_topic_progress`, `listening_library_attempts`, `listening_library_attempt_answers` |
@@ -268,7 +270,7 @@ sequenceDiagram
   not the concrete `ListeningLearnServiceImpl`) - the only cross-package collaborator this service
   has, added specifically so both the learn and library "Luyện tập với AI" actions share exactly one
   persistence path (`listening_practice_items`) instead of the library growing its own parallel bank.
-  See `listening-learn.md` section 3 for the shared step's own diagram.
+  See `listening-learn.md` section 4 for the shared step's own diagram.
 - Like Grammar Library's `generatePracticeFromSession`, the library's mistake-analysis target is the
   section's owning **topic name**, not raw question text - a Section carries no per-question topic tag
   of its own (a section is already scoped to one topic), so there is nothing more specific to target.

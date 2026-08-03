@@ -51,7 +51,9 @@ reme:
     zen:
       api-key: ${ZEN_API_KEY:}
       model: ${ZEN_MODEL:big-pickle}
+      reasoning-enabled: ${ZEN_REASONING_ENABLED:false}
 
 recommendation:
   exercise-generator:
     mode: ${EXERCISE_GENERATOR_MODE:rule-based}   # rule-based | llm
+    max-output-tokens: ${EXERCISE_GENERATOR_MAX_TOKENS:400}

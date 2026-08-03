@@ -10,8 +10,8 @@ bespoke publisher. FE calls go through `bff-service`'s `LearnerController` (`/ap
 transformation beyond stamping `userId` onto the request body) — omitted from the diagrams below as
 a separate hop, same as `dictation-practice.md`'s convention of a generic `Caller`.
 
-This skill is AI-only: there's no rule-based generator, only `LlmVocabPracticeGenerator` with a
-static-template fallback on any LLM call/parse failure, so generating a set never breaks. Unlike
+This skill is AI-only: there's no rule-based generator, only `LlmVocabPracticeGenerator`, and no
+static-template fallback - any LLM call/parse failure propagates as `AiContentException`. Unlike
 `dictation`, this skill has no Kafka consumer/producer of its own for its request flow — grading
 reuses `practice.service.PracticeService#redo`, which is what actually publishes
 `learning.gap.analysis.requested` (see `overview.md` section 3 / `practice-redo.md`).
@@ -45,7 +45,7 @@ sequenceDiagram
     Gemini-->>Ai: raw text (code-fence stripped)
     Ai-->>Gen: parsed JSON {topic, items[{targetWord,type,prompt,options?,answer,translation}]}
     alt LLM call fails, or parse fails, or items[] empty
-        Gen->>Gen: fallback() - one templated CLOZE item per target word<br/>(or one generic "practice" item if none given)
+        Gen-->>Svc: AiContentException - no templated items, nothing persisted
     end
     Gen-->>Svc: GeneratedVocabPractice{topic, items[]}
     Svc->>VMapper: insertItem({userId, level, examType, topic, targetWordsJson, itemsJson})
@@ -93,7 +93,7 @@ sequenceDiagram
 
 | # | Call | From -> To | Notes |
 |---|------|-----------|-------|
-| 1 | HTTPS | english-service -> Gemini API | `LlmVocabPracticeGenerator` via `AiContentClient`/`LlmClient`; falls back to a templated CLOZE item on any failure |
+| 1 | HTTPS | english-service -> Gemini API | `LlmVocabPracticeGenerator` via `AiContentClient`/`LlmClient`; no template fallback - `AiContentException` propagates on any failure |
 | 2 | Kafka produce | english-service -> `learning.gap.analysis.requested` | via `PracticeService#redo` -> `AnalysisRequestedProducer`, same mechanism as the practice/redo flow (`practice-redo.md`) |
 | 3 | Postgres | english-service -> `reme_english` | `vocab_practice_items`, `vocab_practice_attempts`, plus `vocabulary_weak_points` (upserted by `WeakPointScoringOrchestrator`, not this package's own mapper) |
 

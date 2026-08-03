@@ -1,6 +1,7 @@
 package com.remelearning.common.ai.gemini;
 
 import com.remelearning.common.ai.LlmClient;
+import com.remelearning.common.ai.LlmException;
 import com.remelearning.common.ai.LlmRequest;
 import com.remelearning.common.ai.LlmResponse;
 import org.springframework.http.MediaType;
@@ -72,10 +73,12 @@ public class GeminiLlmClient implements LlmClient {
 	}
 
 	// Extracts the first candidate's text and token-usage counters into the vendor-neutral LlmResponse;
-	// an empty/missing candidates list means the prompt was blocked (e.g. by a safety filter).
+	// an empty/missing candidates list means the prompt was blocked (e.g. by a safety filter). Thrown as
+	// LlmException (not a bare IllegalStateException) so every LlmClient failure mode is one checked-ish
+	// family callers can catch alongside RestClientException.
 	private LlmResponse toLlmResponse(GeminiResponse response) {
 		if (response == null || response.candidates() == null || response.candidates().isEmpty()) {
-			throw new IllegalStateException("Gemini returned no candidates (prompt may have been blocked)");
+			throw new LlmException("Gemini returned no candidates (prompt may have been blocked)");
 		}
 
 		String text = response.candidates().get(0).content().parts().stream()

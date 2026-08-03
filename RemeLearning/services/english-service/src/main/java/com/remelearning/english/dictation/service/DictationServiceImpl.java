@@ -63,6 +63,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -365,8 +366,8 @@ public class DictationServiceImpl implements DictationService {
 	// translation; (4) assigns a random Supertonic voice per distinct speaker; (5) synthesizes each
 	// line via the TTS AI service and merges the clips into one continuous audio file, replacing
 	// whatever pending items existed with this single new one. A failure anywhere in
-	// generation/synthesis is logged and swallowed, leaving prior pending items untouched so the next
-	// call can retry.
+	// generation/synthesis propagates (rolling the transaction back), so the caller is told the
+	// passage could not be generated instead of silently getting the previous list back.
 	@Override
 	@Transactional
 	public List<DictationPracticeItemDto> generateAiPractice(String userId, GenerateAiPracticeRequest request) {
@@ -378,14 +379,10 @@ public class DictationServiceImpl implements DictationService {
 		String level = resolveLevel(request.getLevel());
 		String examType = resolveExamType(request.getExamType());
 
-		try {
-			DialogueGenerationResult dialogue = dialogueGenerator.generateDialogue(targetPhrases, level, examType, request.getTranslationLang());
-			synthesizeDialoguePracticeItem(userId, dialogue, level, examType);
-			if (!pending.isEmpty()) {
-				dictationMapper.deletePracticeItemsWithoutAudio(userId);
-			}
-		} catch (RuntimeException ex) {
-			log.warn("Failed to generate AI-practice dialogue for user {}, leaving pending items untouched", userId, ex);
+		DialogueGenerationResult dialogue = dialogueGenerator.generateDialogue(targetPhrases, level, examType, request.getTranslationLang());
+		synthesizeDialoguePracticeItem(userId, dialogue, level, examType);
+		if (!pending.isEmpty()) {
+			dictationMapper.deletePracticeItemsWithoutAudio(userId);
 		}
 		return getAiPractice(userId);
 	}
@@ -447,8 +444,9 @@ public class DictationServiceImpl implements DictationService {
 	// the audio via StorageClient, sends it plus the ordered sentence texts to SentenceAlignmentClient
 	// (ai-service Whisper word-timestamps + sequential matching), persists whichever sentences came
 	// back with a timing, and updates the in-memory list so the response reflects them immediately.
-	// Skipped entirely when nothing is missing or the clip has no audio yet; any failure (ai-service
-	// unreachable, bad audio) is logged and swallowed so clip detail still loads without timestamps.
+	// Skipped entirely when nothing is missing or the clip has no audio yet; an alignment failure
+	// (ai-service unreachable, bad audio) propagates so the caller sees the real error instead of a
+	// clip that silently never gets its timestamps.
 	private void ensureSentencesAligned(DictationClip clip, List<DictationClipSentence> sentences) {
 		boolean anyMissing = sentences.stream().anyMatch(s -> s.getStartMs() == null || s.getEndMs() == null);
 		if (!anyMissing || sentences.isEmpty() || clip.getStorageKey() == null || clip.getStorageKey().isBlank()) {
@@ -469,8 +467,9 @@ public class DictationServiceImpl implements DictationService {
 				sentence.setStartMs(timing.startMs());
 				sentence.setEndMs(timing.endMs());
 			}
-		} catch (Exception ex) {
-			log.warn("Failed to AI-align sentence timestamps for clip {}, returning without them", clip.getId(), ex);
+		} catch (IOException ex) {
+			log.warn("Failed to read audio for clip {} while AI-aligning sentence timestamps", clip.getId(), ex);
+			throw new IllegalStateException("Failed to read clip audio for sentence alignment", ex);
 		}
 	}
 
@@ -636,10 +635,9 @@ public class DictationServiceImpl implements DictationService {
 	// clips into one continuous audio file, and persists the whole passage (rendered as
 	// "Speaker: line" per turn, or plain text for a single-speaker monologue) as one new practice
 	// item, along with its resolved level/examType/topic and (if generated) translation. The TTS
-	// audio is synthesized from `lineText` (including the "Speaker: " prefix in multi-speaker
-	// dialogues) so the spoken audio matches the exact text the learner is graded against; the FE
-	// strips the "Speaker: " prefix back off before comparing the learner's typed answer (see
-	// stripSpeakerLabel in useSentenceRunner.ts).
+	// audio is synthesized from the line's own text only - the "Speaker: " prefix is transcript
+	// metadata for display/grading, never spoken aloud (the FE strips it back off before comparing
+	// the learner's typed answer too, see stripSpeakerLabel in useSentenceRunner.ts).
 	// Any TTS/storage failure propagates so the caller can leave prior pending items intact.
 	private void synthesizeDialoguePracticeItem(String userId, DialogueGenerationResult dialogue, String level, String examType) {
 		List<DictationDialogueLine> lines = dialogue.lines();
@@ -652,7 +650,7 @@ public class DictationServiceImpl implements DictationService {
 		for (DictationDialogueLine line : lines) {
 			String lineText = multiSpeaker ? line.speaker() + ": " + line.text() : line.text();
 			TtsAudio audio = ttsClient.synthesize(TtsRequest.builder()
-					.text(lineText).languageCode(ttsLang).voice(speakerVoices.get(line.speaker())).build());
+					.text(line.text()).languageCode(ttsLang).voice(speakerVoices.get(line.speaker())).build());
 			clips.add(audio.getAudioBytes());
 			if (!passageText.isEmpty()) {
 				passageText.append('\n');

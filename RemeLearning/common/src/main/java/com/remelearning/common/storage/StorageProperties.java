@@ -16,11 +16,12 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "reme.storage")
 public class StorageProperties {
 
-	/** {@code local} (default) or {@code s3}; selects which StorageClient bean is registered. */
+	/** {@code local} (default), {@code s3}, or {@code drive}; selects which StorageClient bean is registered. */
 	private String provider = "local";
 
 	private final Local local = new Local();
 	private final S3 s3 = new S3();
+	private final Drive drive = new Drive();
 
 	/** Local-filesystem settings. */
 	@Getter
@@ -36,5 +37,13 @@ public class StorageProperties {
 	public static class S3 {
 		/** Bucket every key is stored under. */
 		private String bucket;
+	}
+
+	/** Google Drive settings for the storage abstraction (read-only, see {@code storage.drive.DriveStorageClient}). */
+	@Getter
+	@Setter
+	public static class Drive {
+		/** Id of the Drive folder acting as the storage root; every key is a path relative to it. */
+		private String rootFolderId;
 	}
 }
